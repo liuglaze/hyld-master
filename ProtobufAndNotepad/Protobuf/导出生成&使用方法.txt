@@ -1,0 +1,17 @@
+﻿cpp 生成
+.\protoc --cpp_out=(生成目录)  (.proto文件)
+
+csharp
+.\protoc --csharp_out=(生成目录)  (.proto文件)
+
+python
+.\protoc --python_out=(生成目录)  (.proto文件)
+
+
+VS c++使用方法
+包含库目录 ./src                #包含google的文件夹
+引用静态库 ./libprotobufd.lib
+运行库 多线程(/MTd)
+
+
+枚举类型不能同名！！！！

@@ -1,0 +1,80 @@
+# Root workspace
+/.git/
+/.vs/
+*.log
+*.tmp
+*.user
+*.suo
+*.cache
+
+# Keep local AI/ops helper data out of the repo
+/.claude/settings.local.json
+/**/.claude/settings.local.json
+
+# Ignore local diagrams / notes dump if not part of source
+/脑图和流程图/
+
+# Unity client project
+/Client/[Ll]ibrary/
+/Client/[Tt]emp/
+/Client/[Oo]bj/
+/Client/[Bb]uild/
+/Client/[Bb]uilds/
+/Client/[Ll]ogs/
+/Client/[Mm]emoryCaptures/
+/Client/[Uu]ser[Ss]ettings/
+/Client/.vs/
+/Client/.gradle/
+/Client/ExportedObj/
+/Client/.consulo/
+/Client/*.csproj
+/Client/*.unityproj
+/Client/*.sln
+/Client/*.suo
+/Client/*.tmp
+/Client/*.user
+/Client/*.userprefs
+/Client/*.pidb
+/Client/*.booproj
+/Client/*.svd
+/Client/*.pdb
+/Client/*.mdb
+/Client/*.opendb
+/Client/*.VC.db
+/Client/sysinfo.txt
+/Client/*.apk
+/Client/*.aab
+/Client/*.unitypackage
+/Client/crashlytics-build.properties
+/Client/AssetBundles/
+/Client/*.userproperties
+/Client/dabao/
+/Client/Log/
+
+# Rider / JetBrains generated plugin in Unity
+/Client/[Aa]ssets/Plugins/Editor/JetBrains*
+
+# Server (.NET / Visual Studio)
+/Server/.vs/
+/Server/bin/
+/Server/obj/
+/Server/log/
+/Server/*.user
+/Server/*.suo
+/Server/*.cache
+/Server/*.pdb
+/Server/UpgradeLog*.htm
+/Server/nul
+
+# Optional backup output
+/Server/Backup/
+
+# Protobuf toolchain build output
+/ProtobufAndNotepad/Protobuf/*.ilk
+/ProtobufAndNotepad/Protobuf/*.pdb
+
+# OpenSpec / repo helper output that should stay tracked
+!/.agents/
+!/.github/
+!/openspec/
+!/Client/Assets/Docs/

@@ -1,0 +1,137 @@
+login = {}
+local UITable = require("UI/login/Base/loginView") 
+function login.Create()
+	print("Create")
+	local ui = {}
+	setmetatable(ui, {__index=UITable})	
+	ui:Create()
+    ui.layer = 1
+    UI.LoadUI(ui) 
+	return ui
+
+end
+
+
+function UITable:Awake()    
+ 	 print("Awake")
+	self:Init() 
+	
+	 
+end
+ 
+ 
+
+
+function UITable:ButtonClickHandler(btn)  
+  
+   print(btn)
+	  
+	if btn == self.Button1 then
+	        --self:Close() 
+		 	UI.OpenUI("a_test")  
+	elseif btn == self.Button2 then
+	        --self:Close() 
+		  	UI.OpenUI("a_test2")  
+	elseif btn == self.Button3 then
+	        --self:Close() 
+		  UI.OpenUI("a_test3") 
+	end
+end
+
+ 
+local nowSerial = 1
+ function UITable:registerAccount() 
+	 if ConfigAccount.getVarByCustom("serial",tostring(nowSerial)).account == nil  then
+		Public.warning("账号注册完毕")
+		 return 
+	 end
+ 	 local warnInfo= self.namePage	
+ 	  local tween=  warnInfo:GetComponent("RectTransform"):DOAnchorPos(CS.UnityEngine.Vector2(0,0), 3):OnComplete(
+		 function ()
+			Net.SetAccount("IOS:q1:"..ConfigAccount.getVarByCustom("serial",tostring(nowSerial)).account) 
+			NetEnterGame.Create( function(rpc)
+				nowSerial = nowSerial +1
+				UITable:registerAccount() 
+			  end):Send()
+		   end
+		 )	 
+end
+ 
+function UITable:InitPreData(rpc)
+	 
+	self.isNewPlayer = rpc.data.isNewPlayer
+	local boxRpc = {}
+	
+	table.insert(boxRpc,NetClientInItData.Create()) 
+
+		-- table.insert(boxRpc,NetGetBigMapInIt.Create()) 
+		-- table.insert(boxRpc,NetGetPackageInit.Create()) 
+		-- table.insert(boxRpc,NetGetHeroInit.Create()) 
+		-- table.insert(boxRpc,NetGetHeroSoulInit.Create()) 
+		-- table.insert(boxRpc,NetGetEquipInit.Create()) 
+		-- table.insert(boxRpc,NetGetEquipSoulInit.Create()) 
+		-- table.insert(boxRpc,NetGetWuGongInit.Create()) 
+		-- table.insert(boxRpc,NetGetWuGongSoulInit.Create()) 
+		-- table.insert(boxRpc,NetGetGamePetInIt.Create()) 
+		-- table.insert(boxRpc,NetGetBattleArrayInit.Create()) 
+		-- table.insert(boxRpc,NetGetSunBattleInit.Create())   
+		-- table.insert(boxRpc,NetGetScrollInit.Create())   
+		-- table.insert(boxRpc,NetGetPublicMsgInit.Create()) 
+ 
+
+  self:DoSendRpc(boxRpc,function ()	self:LoginSuccuss() end,function ()	self:failCallback() end ) 
+end 
+
+
+function UITable.failCallback()	
+ 	 Public.warning("进入游戏失败，掌门请退出重试")
+end 
+
+function UITable:LoginSuccuss()	
+	
+  	if self.isNewPlayer or GameMainData.PlayerInfoModel:getNickName() == ""    then 
+  		self:Close() 
+
+ --	UI.OpenUI("mainui")
+		
+
+-- 		UI.OpenUI("makename")
+print("login ***************************************************1121")
+ 	-- UI.OpenUI("Beginning2")
+  else   
+ 	 --	UI.OpenUI("mainui") 
+--  	end  
+  --UI.OpenUI("JiangHu2") 
+ -- UI.OpenUI("equip2") 
+
+	self:Close() 
+	--UI.OpenUI("map")
+end 
+	
+end
+
+
+  function UITable:DoSendRpc(boxRpc,succussCallback,failCallback)
+	
+	if #boxRpc == 0 then
+		succussCallback()
+		return
+	end
+
+	local rpc = boxRpc[1]
+	table.remove(boxRpc,1)
+
+	local rpcCallback = rpc.callback
+	rpc.callback = function ()
+		-- print("发送请求返回一次")
+		if rpcCallback ~= nil then
+			rpcCallback(rpc)
+		end
+		self:DoSendRpc(boxRpc,succussCallback,failCallback)
+	end
+	rpc.ErrorHandler = function ()
+		failCallback()
+	end
+	-- print("发送请求一次")
+	rpc:Send()
+end

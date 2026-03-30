@@ -1,0 +1,153 @@
+ 
+ 
+Public={}  
+ 
+	 LuaTools =   CS.LuaTools  
+function Public.GetModule(modNmae,...)
+	--CS.Logging.HYLDDebug.Log("modNmae="..modNmae)
+  
+    local pb =nil
+   if #... >0 then 
+    ---- print("..." ,   #...)
+     pb = Public.ResourceManager.GetModulePath(modNmae,...) 
+   else 
+     pb = Public.ResourceManager.GetModule(modNmae) 
+   end  
+	return pb
+end
+ 
+function Public.GetPrefab(prebName,...)
+
+    local pb =nil
+  if #... >0 then  
+     pb = Public.ResourceManager.GetPrefabPath(prebName,...) 
+   else 
+     pb = Public.ResourceManager.GetPrefab(prebName) 
+   end  
+	return pb
+
+
+end 
+function Public.GetSprite(sptNmae,...)
+	local pb  = nil 
+	 if #... > 0 then  
+			  pb = Public.ResourceManager.GetSpritePath(sptNmae,...) 
+	 else
+ 			pb = Public.ResourceManager.GetSprite(sptNmae) 
+	  end 
+	return pb
+end
+
+
+function Public.GetTexturePath(sptNmae,...)
+
+local pb  = nil 
+	 if #... > 0 then  
+			  pb = Public.ResourceManager.GetTexturePath(sptNmae,...) 
+	 else
+ 			pb = Public.ResourceManager.GetTexture(sptNmae) 
+	  end 
+	return pb
+
+end 
+
+
+ 
+function Public.GetGameObject(ObjNmae,...)
+	local pb  = nil 
+ if #... >0 then  
+		pb = Public.ResourceManager.GetGameObjectPath(ObjNmae,...) 
+ else
+	    pb = Public.ResourceManager.GetGameObject(ObjNmae) 
+end 
+	return pb
+end
+ 
+     Serverdata_UI=CS.Serverdata_UI
+     Public.ResourceManager =  CS.ResourceManager 
+	 Public.Ptool =   CS.Public.instance 
+	
+	 Public.Debug =  CS.Debug
+     Public.GameObject =  CS.UnityEngine.GameObject  
+	 Public.UnityEngineTool =  CS.UnityEngineTool 
+	  local parent = Public.GameObject.Find("gameMain").transform 
+	
+		 
+	Public.MusicManager =  CS.MusicManage.instance 
+	 -- print("Public.MusicManager  "  , Public.MusicManager)
+
+
+    
+if Public['NetTool'] == nil then
+	Public.NetTool  =  CS.NetTool.instance
+end
+
+
+if Public['GameMainData'] == nil then
+	Public.GameMainData = CS.GameMainData.instance
+end
+
+
+ 
+
+
+if Public['Get_show_time'] == nil then
+	Public.Get_show_time = CS.Get_show_time.instance
+end
+
+if Public['PDM'] == nil then
+	Public.PDM = CS.PDM
+end
+
+
+ 
+
+if Public['ResMeg'] == nil then
+	Public['ResMeg'] = CS.ResourceManager
+end
+ 
+
+if Public['DicManager'] == nil then
+	Public['DicManager'] =CS.DicManager
+end 
+
+
+
+ 
+ 
+  function Public.init() 
+     if  Public.LoadingScene == nil then
+		 Public.LoadingScene = UI.Instantiate(Public.GetModule("a_loadingpage"), UI
+		 ,"a_loadingpage")
+	 end 
+	
+  end  
+	function Public.Split(s, sp)
+        local res = {}
+        
+        local temp = s
+        local len = 0
+        while true do
+            len = string.find(temp, sp)
+            if len ~= nil then
+                local result = string.sub(temp, 1, len-1)
+                temp = string.sub(temp, len+1)
+                table.insert(res, result)
+            else
+                table.insert(res, temp)
+                break
+            end
+        end
+        
+        return res
+	end
+	
+ 
+
+   
+	  
+
+
+
+return Public
+ 

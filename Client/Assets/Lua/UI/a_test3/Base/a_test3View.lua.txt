@@ -1,0 +1,25 @@
+local a_test3View = {}
+setmetatable(a_test3View, {__index = UIBase})
+
+function a_test3View:Create()
+	self.name = "a_test3"
+	self.path = "a_test3"
+end
+function a_test3View:SetUICompent(child)
+		if child.name == "ButtonY" then 
+			a_test3View.ButtonY = child:GetComponent("Button")
+		elseif child.name == "DetailPage" then 
+			a_test3View.DetailPage = child.gameObject 
+		elseif child.name == "ButtonBlack" then 
+		    a_test3View.ButtonBlack = child:GetComponent("Button")	
+	    elseif child.name == "Button2" then 
+		    a_test3View.Button2 = child:GetComponent("Button")
+		end 
+end 
+function a_test3View:Init()
+    	a_test3View.Button2.onClick:AddListener( function() self:ButtonClickHandler(a_test3View.Button2) end)
+
+		a_test3View.ButtonY.onClick:AddListener( function() self:ButtonClickHandler(a_test3View.ButtonY) end)
+		a_test3View.ButtonBlack.onClick:AddListener( function() self:ButtonClickHandler(a_test3View.ButtonBlack) end)
+end 
+return a_test3View

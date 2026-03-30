@@ -1,0 +1,247 @@
+syntax="proto3";
+package SocketProto;
+
+enum RequestCode
+{
+    RequestNone=0;
+    User=1;
+    Room=2;
+    Friend=3;
+    FriendRoom=4;
+    PingPong=5;
+    Matching=6;
+    Battle=7;
+    ClearSence=8;
+}
+
+enum ActionCode
+{
+    ActionNone=0;
+    Logon=1;
+    Login=2;
+    CreateRoom=3;
+    FindRoom=4;
+    PlayerList=5;
+    JoinRoom=6;
+    Exit=7;
+    Chat=8;
+    AplyAddFriend=9;
+    InviteFriend=10;
+    FindName=11;
+    UpdateName=12;
+    AcceptAddFriend=13;
+    RejectAddFriend=14;
+    FindPlayerInfo=15;
+    FindFriendsInfo=16;
+    FriendLogin=17;
+    FriendLogout=18;
+    AcceptInvateFriend=19;
+    RejectInvateFriend=20;
+    CancalInvateFriend=21;
+    ExitRoom=22;
+    GetFriendRoomInfo=23;
+    Ping=24;
+    Pong=25;
+    ChangeHero=26;
+    UpDateActiveFriendInfo=27;
+    AddMatchingPlayer=28;
+    RemoveMatchingPlayer=29;
+    StartEnterBattle=30;
+    BattleReady=31;
+    BattleStart=32;
+    BattlePushDowmAllFrameOpeartions=33;
+    BattlePushDowmPlayerOpeartions=34;
+    ClientSendClearSenceReady=35;
+    AllClearSenceReady=36;
+    ClientSendGameOver=37;
+    BattlePushDowmGameOver=38;
+    BattleReview=39;
+    BattlePushDownHitEvents=40;
+}
+
+enum ReturnCode
+{
+    ReturnNone=0;
+    Succeed=1;
+    Fail=2;
+    NotRoom=3;
+    AddFriend=4;
+}
+
+enum RoomState
+{
+    RoomNormal=0;
+    RoomFull=1;
+    RoomGame=2;
+}
+
+enum PlayerState
+{
+    PlayerOnline=0;
+    PlayerOutline=1;
+    PlayerGame=2;
+    PlayerOnRoom=3;
+    PlayerOnInvated=4;
+}
+
+enum Hero
+{
+    XueLi=0;
+    KeErTe=1;
+    PeiPei=2;
+    PanNi=3;
+    BaLi=4;
+    GongNiu=5;
+    DaLiEr=6;
+    GeEr=7;
+    BuLuoKe=8;
+    BaoPoMaiKe=9;
+    ABo=10;
+    DiKe=11;
+    BeiYa=12;
+    TaLa=13;
+    MaiKeSi=14;
+    SiPaiKe=15;
+    HeiYa=16;
+    LiAng=17;
+    PaMu=18;
+    RuiKe=19;
+}
+
+enum FightPattern
+{
+    BaoShiZhengBa=0;
+    Sheji=1;
+}
+
+message MainPack
+{
+    RequestCode requestcode=1;
+    ActionCode actioncode=2;
+    ReturnCode returncode=3;
+    LoginPack loginpack=4;
+    string str=5;
+    repeated RoomPack roompack=6;
+    repeated PlayerPack friendspack=7;
+    PlayerPack userInfopack=8;
+    repeated FriendRoomPack friendroompack=9;
+    repeated PlayerPack playerspack=10;
+    ChatPack chatpack=11;
+    repeated BattlePlayerPack battleplayerpack=12;
+    BattleInfo battleInfo=13;
+    int64 timestamp=14;
+}
+
+message ChatPack
+{
+    string playername=1;
+    string message=2;
+    int32 state=3;
+}
+
+message LoginPack
+{
+    string username=1;
+    string password=2;
+}
+
+message RoomPack
+{
+    string roomid=1;
+    int32 maxnum=2;
+    int32 curnum=3;
+    RoomState state=4;
+}
+
+message BattlePlayerPack
+{
+    int32 id=1;
+    int32 teamid=2;
+    int32 roomid=3;
+    string playername=4;
+    Hero hero=5;
+    int32 battleid=6;
+}
+
+message BattleRoomPack
+{
+    string roomid=1;
+    int32 maxnum=2;
+    int32 curnum=3;
+    FightPattern fightpattern=4;
+    repeated BattlePlayerPack battleplayerpack=5;
+}
+
+message FriendRoomPack
+{
+    string roomid=1;
+    int32 maxnum=2;
+    int32 curnum=3;
+    RoomState state=4;
+}
+
+message PlayerPack
+{
+    string username=1;
+    string playername=2;
+    int32 id=3;
+    PlayerState state=4;
+    Hero hero=5;
+    FightPattern fightpattern=6;
+}
+
+message BattleInfo
+{
+    int32 operationID=1;
+    int32 randSeed=2;
+    repeated BattlePlayerPack battleUserInfo=3;
+    repeated AllPlayerOperation allPlayerOperation=4;
+    PlayerOperation selfOperation=5;
+    repeated HitEvent hit_events=6;
+}
+
+message AllPlayerOperation
+{
+    repeated PlayerOperation operations=1;
+    int32 frameid=2;
+    repeated AuthoritativePlayerState player_states=3;
+}
+
+message AttackOperation
+{
+    int32 attack_id=1;
+    float towardx=2;
+    float towardy=3;
+    int32 client_frame_id=4;
+}
+
+message PlayerOperation
+{
+    int32 battleid=1;
+    float playerMoveX=2;
+    float playerMoveY=3;
+    repeated AttackOperation attack_operations=4;
+}
+
+message HitEvent
+{
+    int32 attack_id=1;
+    int32 attacker_battle_id=2;
+    int32 victim_battle_id=3;
+    int32 damage=4;
+    int32 hit_frame_id=5;
+    float hit_pos_x=6;
+    float hit_pos_y=7;
+    float hit_pos_z=8;
+    bool is_kill=9;
+}
+
+message AuthoritativePlayerState
+{
+    int32 battle_id=1;
+    float pos_x=2;
+    float pos_y=3;
+    float pos_z=4;
+    int32 hp=5;
+    bool is_dead=6;
+}

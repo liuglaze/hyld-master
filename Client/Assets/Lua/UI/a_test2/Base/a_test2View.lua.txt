@@ -1,0 +1,29 @@
+local a_test2View = {}
+setmetatable(a_test2View,{__index = UIBase})
+function a_test2View:Create()
+		self.name = "a_test2"
+		self.path = "a_test2"
+end
+
+function a_test2View:SetUICompent(child)
+	if child.name == "Btn1" then 
+	    a_test2View.Btn1 = 
+	    child:GetComponent("Button")
+    elseif child.name == "Btn2" then 
+           a_test2View.Btn2 = 
+	    child:GetComponent("Button")
+    elseif child.name == "Tnum" then 
+           a_test2View.Tnum = 
+	    child:GetComponent("Text")
+    end     
+end 
+
+function a_test2View:Init()
+	a_test2View.Btn1.onClick:AddListener(function()
+      self:ButtonClickHandler(a_test2View.Btn1) end)
+	a_test2View.Btn2.onClick:AddListener(function()
+      self:ButtonClickHandler(a_test2View.Btn2) end)
+ 
+end 
+
+return a_test2View

@@ -1,0 +1,39 @@
+a_test = {}
+ 
+local UITable = require("UI/a_test/Base/a_testView")
+-- print("UITable   ",UITable)
+function a_test.Create()
+	local ui = {}
+	setmetatable(ui, {__index=UITable})	
+	ui:Create()
+    ui.layer = 3
+    UI.LoadUI(ui) 
+	return ui
+end
+ 
+
+
+function UITable:Awake()   
+	UITable:Start()
+end
+function UITable:Start() 
+	self:Init() 
+	 
+end
+
+function UITable:callback(rpc)  
+ 	 -- print("doCallBack  ",rpc)
+end
+
+
+function UITable:ButtonClickHandler(btn) 
+
+   print("ButtonClickHandler2  ****")
+	if btn == self.ButtonY then  
+		UI.OpenUI("a_test2")
+			self.DetailPage:SetActive(true); 
+    elseif btn == self.ButtonBlack then
+			 self.DetailPage:SetActive(false);  
+	end
+end
+

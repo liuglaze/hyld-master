@@ -1,0 +1,35 @@
+local loginView = {}
+setmetatable(loginView, {__index = UIBase})
+
+function loginView:Create()
+	print("CreateView")
+    self.name = "login"
+    self.path = "login"
+end
+function loginView:SetUICompent(child)  
+	print("SetUICompent")
+	print(child.name)
+	if child.name == "Button1" then 
+		loginView.Button1 = child:GetComponent("Button") 
+	elseif child.name == "Button2" then 
+		loginView.Button2 = child:GetComponent("Button") 
+	elseif child.name == "Button3" then 
+		loginView.Button3 = child:GetComponent("Button") 
+	elseif child.name == "Button4" then 
+		loginView.Button4 = child:GetComponent("Button") 
+	 
+	end
+    
+end
+function loginView:Init()  
+	print("Init")
+	loginView.Button1.onClick:AddListener(function() self:ButtonClickHandler(loginView.Button1) end) 
+	loginView.Button2.onClick:AddListener(function() self:ButtonClickHandler(loginView.Button2) end) 
+	loginView.Button3.onClick:AddListener(function() self:ButtonClickHandler(loginView.Button3) end) 
+	loginView.Button4.onClick:AddListener(function() self:ButtonClickHandler(loginView.Button4) end) 
+end
+
+
+
+return loginView
+

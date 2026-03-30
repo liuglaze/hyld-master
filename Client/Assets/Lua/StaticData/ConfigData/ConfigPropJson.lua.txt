@@ -1,0 +1,48 @@
+ConfigPropJson  = {}  
+
+ local configName = "ConfigPropJson"
+local configTable ={
+{
+    ["get_way"] = "可通过活动领取或地图怪物掉落获得",
+    ["prop_type"] = "1",
+    ["prop_info"] = "神秘的丹药可将弟子潜力置换为基础属性",
+    ["prop_name"] = "培养药",
+    ["prop_btname"] = "5",
+    ["prop_id"] = "1001",
+},
+
+{
+    ["get_way"] = "可通过活动领取或地图怪物掉落获得",
+    ["prop_type"] = "1",
+    ["prop_info"] = "用来打开金箱子",
+    ["prop_name"] = "金钥匙",
+    ["prop_btname"] = "1",
+    ["prop_id"] = "1002",
+},
+ 
+}
+function ConfigPropJson.getVarByCustom(name, value)
+    for key, var in pairs(configTable) do
+        if var[name] == value then
+            return var
+        end
+    end
+    return nil
+end
+
+function ConfigPropJson.getVarById(id)
+    for key, var in pairs(configTable) do
+        if tonumber(var.id) == tonumber(id) then
+            return var
+        end
+    end
+    return nil
+end
+
+function ConfigPropJson.getVarByIndex(index)
+    return configTable[tonumber(index)]
+end
+
+function ConfigPropJson.getSize()
+    return #configTable
+end

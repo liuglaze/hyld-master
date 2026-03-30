@@ -1,0 +1,248 @@
+fileFormatVersion: 2
+guid: 6b616f235eb6edf49a0ee19753ef967e
+TextureImporter:
+  internalIDToNameTable:
+  - first:
+      213: 21300000
+    second: PanNi
+  - first:
+      213: 21300002
+    second: PanNi_1
+  - first:
+      213: 21300004
+    second: PanNi_2
+  - first:
+      213: 21300006
+    second: PanNi_3
+  - first:
+      213: 21300008
+    second: PanNi_4
+  - first:
+      213: 21300010
+    second: PanNi_5
+  - first:
+      213: 21300012
+    second: PanNi_6
+  - first:
+      213: 21300014
+    second: PanNi_7
+  - first:
+      213: 21300016
+    second: PanNi_8
+  - first:
+      213: 21300018
+    second: PanNi_9
+  - first:
+      213: 21300020
+    second: PanNi_10
+  - first:
+      213: 21300022
+    second: PanNi_11
+  - first:
+      213: 21300024
+    second: PanNi_12
+  - first:
+      213: 21300026
+    second: PanNi_13
+  - first:
+      213: 21300028
+    second: PanNi_14
+  - first:
+      213: 21300030
+    second: PanNi_15
+  - first:
+      213: 21300032
+    second: PanNi_16
+  - first:
+      213: 21300034
+    second: PanNi_17
+  - first:
+      213: 21300036
+    second: PanNi_18
+  - first:
+      213: 21300038
+    second: PanNi_19
+  - first:
+      213: 21300040
+    second: PanNi_20
+  - first:
+      213: 21300042
+    second: PanNi_21
+  - first:
+      213: 21300044
+    second: PanNi_22
+  - first:
+      213: 21300046
+    second: PanNi_23
+  - first:
+      213: 21300048
+    second: PanNi_24
+  - first:
+      213: 21300050
+    second: PanNi_25
+  - first:
+      213: 21300052
+    second: PanNi_26
+  - first:
+      213: 21300054
+    second: PanNi_27
+  - first:
+      213: 21300056
+    second: PanNi_28
+  - first:
+      213: 21300058
+    second: PanNi_29
+  - first:
+      213: 21300060
+    second: PanNi_30
+  - first:
+      213: 21300062
+    second: PanNi_31
+  - first:
+      213: 21300064
+    second: PanNi_32
+  - first:
+      213: 21300066
+    second: PanNi_33
+  - first:
+      213: 21300068
+    second: PanNi_34
+  - first:
+      213: 21300070
+    second: PanNi_35
+  - first:
+      213: -7230698961131942699
+    second: PanNi
+  externalObjects: {}
+  serializedVersion: 11
+  mipmaps:
+    mipMapMode: 0
+    enableMipMap: 0
+    sRGBTexture: 1
+    linearTexture: 0
+    fadeOut: 0
+    borderMipMap: 0
+    mipMapsPreserveCoverage: 0
+    alphaTestReferenceValue: 0.5
+    mipMapFadeDistanceStart: 1
+    mipMapFadeDistanceEnd: 3
+  bumpmap:
+    convertToNormalMap: 0
+    externalNormalMap: 0
+    heightScale: 0.25
+    normalMapFilter: 0
+  isReadable: 0
+  streamingMipmaps: 0
+  streamingMipmapsPriority: 0
+  grayScaleToAlpha: 0
+  generateCubemap: 6
+  cubemapConvolution: 0
+  seamlessCubemap: 0
+  textureFormat: 1
+  maxTextureSize: 2048
+  textureSettings:
+    serializedVersion: 2
+    filterMode: -1
+    aniso: -1
+    mipBias: -100
+    wrapU: 1
+    wrapV: 1
+    wrapW: -1
+  nPOTScale: 0
+  lightmap: 0
+  compressionQuality: 50
+  spriteMode: 2
+  spriteExtrude: 1
+  spriteMeshType: 1
+  alignment: 0
+  spritePivot: {x: 0.5, y: 0.5}
+  spritePixelsToUnits: 100
+  spriteBorder: {x: 0, y: 0, z: 0, w: 0}
+  spriteGenerateFallbackPhysicsShape: 1
+  alphaUsage: 1
+  alphaIsTransparency: 1
+  spriteTessellationDetail: -1
+  textureType: 8
+  textureShape: 1
+  singleChannelComponent: 0
+  maxTextureSizeSet: 0
+  compressionQualitySet: 0
+  textureFormatSet: 0
+  applyGammaDecoding: 1
+  platformSettings:
+  - serializedVersion: 3
+    buildTarget: DefaultTexturePlatform
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 1
+  - serializedVersion: 3
+    buildTarget: Standalone
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 1
+  - serializedVersion: 3
+    buildTarget: Android
+    maxTextureSize: 2048
+    resizeAlgorithm: 0
+    textureFormat: -1
+    textureCompression: 1
+    compressionQuality: 50
+    crunchedCompression: 0
+    allowsAlphaSplitting: 0
+    overridden: 0
+    androidETC2FallbackOverride: 0
+    forceMaximumCompressionQuality_BC6H_BC7: 1
+  spriteSheet:
+    serializedVersion: 2
+    sprites:
+    - serializedVersion: 2
+      name: PanNi
+      rect:
+        serializedVersion: 2
+        x: 712
+        y: 288
+        width: 434
+        height: 466
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 5dcc1ffca9567ab90800000000000000
+      internalID: -7230698961131942699
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    outline: []
+    physicsShape: []
+    bones: []
+    spriteID: 611bd0945f2b37440b5313560d0f139e
+    internalID: 0
+    vertices: []
+    indices: 
+    edges: []
+    weights: []
+    secondaryTextures: []
+  spritePackingTag: 
+  pSDRemoveMatte: 0
+  pSDShowRemoveMatteOption: 0
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 

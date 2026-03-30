@@ -1,0 +1,15 @@
+schema: spec-driven
+
+context: |
+  项目上下文与结构说明统一维护在 `CLAUDE.md` 与 `Docs/ForClient.md`。
+  OpenSpec 配置不再重复维护项目结构细节，避免双份文档漂移。
+
+rules:
+  proposal:
+    - 分析变更对帧同步一致性的影响
+    - 评估对 TCP/UDP 双通道架构的兼容性
+    - 指出涉及的协议层变更 (proto/Controller/DAO 三层配套)
+  tasks:
+    - 每个任务应明确涉及的文件和层级
+    - 涉及协议变更时必须包含 proto 定义、Controller 路由、业务实现三个子任务
+    - 涉及战斗逻辑时需考虑 UDP 单例回调的并发安全

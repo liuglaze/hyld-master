@@ -1,0 +1,313 @@
+UI = {}  
+require("UI/LuaAntList") 
+require("UI/UIBase")
+ 
+local arrUI = {} 
+local tfCanvas = CS.UnityEngine.GameObject.Find("Canvas").transform 
+  UI.CameraFather =  CS.UnityEngine.GameObject.Find("CameraFather")
+local layerBox = {}
+local uiTableBox = {} 
+ -- --print("tfCanvas.childCount == " , tfCanvas.childCount)
+for i=0,tfCanvas.childCount-1 do
+    -- --print("child == " ,tfCanvas:GetChild(i).name)
+	table.insert(layerBox,tfCanvas:GetChild(i))
+	uiTableBox[i+1] = {}
+end
+function  UI.getCanvas()
+		return  tfCanvas
+end 
+ 
+function UI.Instantiate(prefab,parent)
+	local obj = CS.UnityEngine.GameObject.Instantiate(prefab)
+	if parent ~= nil then
+		obj.transform:SetParent(parent)
+		obj.transform:SetAsLastSibling() 
+	end
+	return obj
+end
+function UI.Instantiate(prefab,parent,name)
+ print("prefab " , prefab)
+	local obj = CS.UnityEngine.GameObject.Instantiate(prefab)
+	if parent ~= nil then
+		if name ~= nil then 
+		   obj.name = name
+	    end
+		obj.transform:SetParent(parent.transform,false) 
+	end
+	return obj
+end
+
+function UI.SetEnable(value)
+	local canvasGroup = layerBox[1]:GetComponent("CanvasGroup")
+	if canvasGroup == nil then
+		canvasGroup = layerBox[1].gameObject:AddComponent("CS.UnityEngine.CanvasGroup")
+	end
+	canvasGroup.blocksRaycasts = value
+end
+function UI.GetCanvas()
+	return  tfCanvas
+end
+
+local uiIndex = 0
+local function GetIndex()
+	uiIndex = uiIndex + 1
+	return uiIndex
+end
+
+function UI.LoadUI(uiTable,...)
+ 
+	local obj  = nil 
+	if uiTable.layer == 99 then 
+
+			obj = UI.Instantiate(Public.GetModule(uiTable.name,uiTable.path),UI._3DObject,uiTable.name)
+	else 
+			 
+			obj = UI.Instantiate(Public.GetModule(uiTable.name,uiTable.path),layerBox[uiTable.layer],uiTable.name)
+	end 
+ 
+	uiTable.gameObject = obj
+	uiTable.transform = obj.transform
+	UI.FindUICompent(uiTable,uiTable.transform) 
+ 
+	if uiTableBox[uiTable.layer] ~= nil then  
+	   if  uiTable.layer == 4 then  
+		  		UI.RemoveAllByLevel( 4 ) 
+		end 
+		table.insert(uiTableBox[uiTable.layer],uiTable)  
+	end 
+	 
+
+
+	
+	if uiTable.needBlack == true then
+	    local objBlack =  UI.Instantiate(Public.GetGameObject("MainUI"),layerBox[uiTable.layer],layerBox[uiTable.layer])
+	 
+		objBlack.transform:SetSiblingIndex(0)
+	end
+ 
+	
+ 
+
+end
+
+function UI.StartUI(uiTable)
+	if uiTable ~= nil then
+		uiTable:Start()
+		Event.Call(EventType.LoadUI,uiTable.name)
+		GameData.guide:Run("OpenUI_"..uiTable.name)--
+	end
+end
+
+
+local function DoDestroyUI(uiTablea)
+	uiTablea:OnClose()
+	CS.UnityEngine.GameObject.Destroy(uiTablea.gameObject)
+	uiTablea:Clear()
+end
+
+function UI.RemoveUI(uiTable) 
+	local uiTableArr = uiTableBox[uiTable.layer]
+	local index = -1
+	if uiTableArr == nil then
+		error("RemoveUI uiTableArr is nil uiTable.layer ="..uiTable.layer)
+		return
+	end
+	for i,v in ipairs(uiTableArr) do
+		if v == uiTable then
+			index = i
+		end
+	end
+	if index == -1 then
+		return
+	end
+
+	if uiTable.layer == 1 then
+		for i=#uiTableArr,index,-1 do
+			local tempUI = 	uiTableArr[i]
+			table.remove(uiTableArr,i)
+			tempUI:DoClose()
+		end
+
+		index = index - 1
+
+		if uiTableArr[index] ~= nil then
+			uiTableArr[index]:OnEnable()
+		end
+	else
+		table.remove(uiTableArr,index)
+		uiTable:DoClose()
+	end
+end
+
+function UI.RemoveAll()
+	-- --print("UI.RemoveAll")
+	local uiTableArr = uiTableBox[1]
+	for i=#uiTableArr,1,-1 do
+		local tempUI = uiTableArr[i]
+		if tempUI.lockui ~= true then
+			table.remove(uiTableArr,i)
+			tempUI:DoClose()
+		end
+	end
+
+	uiTableArr = uiTableBox[3]
+	for i=#uiTableArr,1,-1 do
+		--print(i,uiTableArr[i].name)
+		local tempUI = uiTableArr[i]
+		table.remove(uiTableArr,i)
+		tempUI:DoClose()
+	end
+end
+
+function UI.GetUI(name)
+	local arrUI = uiTableBox[1]
+	for i,v in ipairs(arrUI) do
+		if v.name == name then
+			return v
+		end
+	end
+	arrUI = uiTableBox[3]
+	for i,v in ipairs(arrUI) do
+		if v.name == name then
+			return v
+		end
+	end
+	return nil
+end 
+
+
+function UI.FindUICompent(ui,transform)	
+	print("FindUICompoent"..transform.childCount)
+	for i=0,transform.childCount -1 do
+		local child = transform:GetChild(i)
+		print("** " , child.name )
+		if child.tag == "uiCompnent" then
+			print("SetUI")
+			ui:SetUICompent(child)
+		end
+		if child.childCount > 0 then
+			UI.FindUICompent(ui,child)
+		end
+	end
+end
+
+
+
+
+
+function UI.FindRenderUI(ui,transform)
+	for i=0,transform.childCount -1 do
+		local child = transform:GetChild(i)
+		ui:SetUICompent(child)
+		if child.childCount > 0 then
+			UI.FindRenderUI(ui,child)
+		end
+	end
+end
+
+
+
+function UI.CreateRenderTable()	
+	local Render = {}
+	Render.__index = Render
+
+	Render.Awake = function(self)
+	end
+
+	Render.Init = function(self,tf)
+		self.transform = tf
+		self:Awake()
+		UI.FindRenderUI(self,self.transform)
+	end
+
+	Render.SetUICompent = function(self,child)
+
+	end
+
+	return Render
+end
+
+ 
+
+function UI.DestroyChildren(transform)
+	for i=transform.childCount-1,0,-1 do
+		if transform:GetChild(i).gameObject ~= nil then
+		CS.UnityEngine.GameObject.Destroy(transform:GetChild(i).gameObject)
+		end
+	end
+end
+ 
+ local UIRootCanvas =  CS.UnityEngine.GameObject.Find("Canvas")
+   UI.rootLoading = UIRootCanvas.transform:Find("levelLoading") 
+  
+ 
+require("UI/a_test/a_test")  
+require("UI/a_test2/a_test2")  
+require("UI/a_test3/a_test3")  
+require("UI/login/login")  
+
+ 
+
+function UI.OpenUI(name,...)
+	print("!!!!")
+    print(type(name)..name)
+
+	local uiTable = nil
+	 
+	if _G[name] ~= nil then 
+		uiTable = _G[name].Create()
+		 
+	else
+		print(name.."is not Eixt")
+		return nil
+	end 
+	
+	if select("#", ...) > 0 then
+	 
+		uiTable:Awake(...)
+	else 
+		uiTable:Awake()
+	end 
+end
+	
+function UI.RemoveAllByLevel( level )
+	for i ,v in ipairs	(uiTableBox[level]) do
+		-- --print("RemoveAllByLevel    name  ==  "  ,v.name ) 
+		UI.RemoveUI(v)
+	end 
+end 
+ 
+	
+if   UI.canvas == nil    then
+	 UI.canvas = CS.UnityEngine.GameObject.Find("Canvas").transform
+end
+ 
+
+ 
+function UI.hideCanvas()
+	 if   UI.canvas ~= nil    then
+			 UI.canvas.gameObject:SetActive(false) 
+	 end 
+end
+
+function UI.showCanvas()
+	 if   UI.canvas ~= nil    then
+			UI.canvas.gameObject:SetActive(true)
+
+	 end 
+end
+function UI.hideCanvasJ()
+	 if   UI.canvasJ ~= nil    then
+			UI.canvasJ.gameObject:SetActive(false)
+
+	 end 
+end
+function UI.showCanvasJ()
+	 if   UI.canvasJ ~= nil    then
+			UI.canvasJ.gameObject:SetActive(true)
+
+	 end 
+end
+ 
+  
+return uiTable

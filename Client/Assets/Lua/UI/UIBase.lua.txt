@@ -1,0 +1,75 @@
+UIBase = {}
+
+function UIBase:Create(path,name,layer)
+   -- print("UIBase:Create **************************== ",path,name,layer)
+    self.path = path
+    self.name = name
+    self.layer = layer
+end
+
+function UIBase:Awake()
+  
+end
+
+function UIBase:OnEnable()
+    
+end
+
+function UIBase:SetUICompent(child)
+    
+end
+
+function UIBase:ButtonClickHandler(btn)
+
+end
+
+function UIBase.Close_(o)
+-- print("o == ",o)
+	UI.RemoveUI(o)
+end
+function UIBase:Close()
+
+	
+	-- print("UIBase:Close **************************== ",self.path,self.name,self.layer)
+	UI.RemoveUI(self)
+end
+
+function UIBase:DoClose()
+	 
+	self:OnClose()
+	CS.UnityEngine.GameObject.Destroy(self.gameObject)
+	self:Clear()
+end
+
+
+function UIBase:OnClose()
+
+end
+
+function UIBase:Clear()
+	if self.dicEvent ~= nil then
+		for k,v in pairs(self.dicEvent) do
+			Event.Remove(k,self._eventCallback)
+		end
+	end
+
+	for k,v in pairs(self) do
+		self[k] = nil
+	end
+end
+
+function UIBase:AddListener(type,callback)
+	if self.dicEvent == nil then
+		self.dicEvent = {}
+	end
+	self.dicEvent[type] = callback
+	if self._eventCallback == nil then
+		self._eventCallback = function (type,...)
+			if self.dicEvent[type] ~= nil then
+				self.dicEvent[type](self,type,...)
+			end
+		end
+	end
+
+	Event.Add(type,self._eventCallback)
+end

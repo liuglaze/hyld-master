@@ -1,0 +1,32 @@
+local a_testView = {}
+setmetatable(a_testView, {__index=UIBase})
+
+function a_testView:Create()
+    self.name = "a_test"
+    self.path = "a_test"
+end
+function a_testView:SetUICompent(child) 
+	if child.name == "ButtonY" then 
+	 	a_testView.ButtonY = child:GetComponent("Button") 
+		  
+	elseif child.name == "Text1" then 
+		 a_testView.Text1 = child:GetComponent("Text")
+	 elseif child.name =="DetailPage" then
+		 a_testView.DetailPage = child.gameObject
+	  elseif  child.name == "ButtonBlack" then 
+	 	a_testView.ButtonBlack = child:GetComponent("Button") 
+		
+	end
+    
+end
+function a_testView:Init()  
+
+   a_testView.ButtonY.onClick:AddListener(function() self:ButtonClickHandler(a_testView.ButtonY) end) 
+   a_testView.ButtonBlack.onClick:AddListener(function() self:ButtonClickHandler(a_testView.ButtonBlack) end) 
+
+end
+
+
+
+return a_testView
+

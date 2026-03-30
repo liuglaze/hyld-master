@@ -1,0 +1,57 @@
+local LuaAntList = {}
+LuaAntList.__index = LuaAntList
+
+function CreateLuaAntList(ui,scrollView,renderFun,renderTable)
+	local t = {}
+	setmetatable(t,LuaAntList)
+	t:Init(ui,scrollView,renderFun,renderTable)
+	return t
+end
+
+
+function LuaAntList:Init(ui,scrollView,renderFun,renderTable)
+	
+	self.scrollView = scrollView
+	self.renderFun = renderFun
+	self.renderTable = renderTable
+	self.renderTable.__index = self.renderTable
+	self.items = {}
+	self.count = 0
+	
+	self.scrollView.renderHandler = function(dataIndex,tf,tfIndex)
+	  
+		if self.items[tfIndex] == nil then
+			self.items[tfIndex] = {}
+			setmetatable(self.items[tfIndex], self.renderTable)
+			self.items[tfIndex]:Init(tf)
+		end
+		self.renderFun(ui,dataIndex,self.items[tfIndex])
+	end
+
+end
+
+function LuaAntList:SetCount(v)
+	if self.count == 0 or self.count ~= v then
+		self.count = v
+		self.scrollView:SetCount(self.count)
+	else
+		self.scrollView:Refresh()
+	end
+	
+end
+
+function LuaAntList:Dispose()
+	for k,v in pairs(self.items) do
+
+		if v.Dispose ~= nil then
+			v:Dispose()
+		end
+
+		for k1,v1 in pairs(v) do
+			v[k1] = nil
+		end
+	end
+	for k,v in pairs(self) do
+		self[k] = nil
+	end
+end

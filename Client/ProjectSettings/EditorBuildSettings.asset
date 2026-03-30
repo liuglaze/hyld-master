@@ -1,0 +1,44 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1045 &1
+EditorBuildSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/HYLDLogon.unity
+    guid: 086db56e649afb847a99f3e3889897fc
+  - enabled: 1
+    path: Assets/Scenes/HYLDStart.unity
+    guid: cf9a2f3002298e148b5c2149c315e9a2
+  - enabled: 1
+    path: Assets/Scenes/HYLDGame.unity
+    guid: df98059cdf2e0fc46b19bc2ad1a5be45
+  - enabled: 1
+    path: Assets/Scenes/HYLDAsyncScence.unity
+    guid: 8f669d22ffb5cd642b780001cc677cce
+  - enabled: 0
+    path: 
+    guid: 00000000000000000000000000000000
+  - enabled: 0
+    path: Assets/RemakeHYLD/Scenes/TestUDP.unity
+    guid: 1f081c6b28dd5f545b69afa7f2099f42
+  - enabled: 0
+    path: Assets/HYLD1.0/Scenses/HuangYeLuanDouStart.unity
+    guid: 742e433371346404581fdf289698e7cc
+  - enabled: 0
+    path: Assets/HYLD1.0/Scenses/HYLDInit.unity
+    guid: df4aa3c89bf3ecd498e60a3486d6ce2a
+  - enabled: 0
+    path: Assets/HYLD1.0/Scenses/HYLDAsyncScence.unity
+    guid: 15852dd182c04264298d541c6e235404
+  - enabled: 0
+    path: Assets/HYLD1.0/Scenses/HYLDGame.unity
+    guid: 67c407bc6af6e8146b07d2ad67d71431
+  - enabled: 0
+    path: Assets/HYLD1.0/Scenses/HYLDTryGame.unity
+    guid: 68fc1e9db92de8347ba98a0290ac3fa7
+  - enabled: 0
+    path: 
+    guid: 00000000000000000000000000000000
+  m_configObjects: {}

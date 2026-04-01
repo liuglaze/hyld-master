@@ -7,7 +7,15 @@ namespace Server
 	// ==================== BattleController — 子弹系统（生成/碰撞/追帧/HP） ====================
 	partial class BattleController
 	{
-		// ==================== 子弹生成 ====================
+		// ==================== 子弹生成 ===============
+
+		//收到客户端45帧时的攻击请求，然后你服务端可能跑到47帧了
+		//记录所有的权威状态
+		//找到45帧时玩家的位置，然后那个位置去发射子弹
+		//然后对子弹进行tick,46,47，同时看有没有击中别的玩家，
+		//击中了，对hp进行相应的扣除
+		//47直接把扣除的血量发下去
+
 
 		private void SpawnBulletsFromOperations(AllPlayerOperation frameOp)
 		{

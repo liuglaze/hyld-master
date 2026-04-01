@@ -84,9 +84,9 @@ namespace Server
 		private static readonly float[] SpawnZ = { -5f, 0f, 5f };
 
 		// ---- 网络模拟（测试用，发布前设为 0） ----
-		private const float SimDropRate = 0.3f;
-		private const int SimDelayMinMs = 75;
-		private const int SimDelayMaxMs = 100;
+		private const float SimDropRate = 0.1f;
+		private const int SimDelayMinMs = 25;
+		private const int SimDelayMaxMs = 30;
 		private const int MaxAcceptableAttackDelay = 8;
 		private readonly Random _simRandom = new Random();
 

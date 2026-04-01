@@ -1,4 +1,4 @@
-using Google.Protobuf;
+﻿using Google.Protobuf;
 using SocketProto;
 using System;
 using System.Collections.Generic;
@@ -20,6 +20,8 @@ namespace Server
 		private readonly object _scheduledNetSimLock = new object();
 		private readonly AutoResetEvent _scheduledNetSimSignal = new AutoResetEvent(false);
 		private readonly List<ScheduledNetSimItem> _scheduledNetSimItems = new List<ScheduledNetSimItem>();
+
+
 
 		private class EndpointRouteInfo
 		{
@@ -354,6 +356,7 @@ namespace Server
 			return -1;
 		}
 
+
 		private bool TryScheduleBattleNetSim(MainPack pack, string endpoint, NetSimTrafficDirection direction)
 		{
 			NetSimPacketStrategy strategy = GetPacketStrategy(pack.Actioncode);
@@ -608,7 +611,11 @@ namespace Server
 					{
 						continue;
 					}
-
+					//按了一下射击，不太希望这个射击操作被比如丢包了，或者说是延迟到达了
+					//状态帧，然后也会发一些比如受击事件，所有人物操作
+					//vibe
+					//
+					//客户端统一放在一帧里去
 					ProcessInboundBattlePacket(pack, currentPoint);
 				}
 				catch (Exception ex)

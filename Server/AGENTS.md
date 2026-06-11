@@ -37,7 +37,7 @@
 
 **Server/BattleController.Bullets.cs**（299 行） — 子弹生成 / 碰撞 / 追帧 / HP
 
-- `SpawnBulletsFromOperations`:12 — 遍历帧操作中的 AttackOperation，逐攻击生成子弹 + 追帧
+- `SpawnBulletsFromOperations`:12 — 遍历帧操作中的 ServerAttack，逐攻击生成子弹 + 追帧
 - `SpawnServerBullets`:70 — 按英雄配置生成子弹列表（支持散弹扇形），V2 历史位置回溯
 - `CreateServerBullet`:137 — 创建单颗 ServerBullet 数据对象
 - `CheckBulletCollision`:163 — 共享碰撞检测：距离判定 + HP 扣减 + 击杀判定 + GameOver 触发
@@ -48,7 +48,7 @@
 
 - `PackPlayerStates`:18 — 打包所有玩家权威状态（位置/HP/IsDead）到帧数据
 - `SendUnsyncedFrames`:50 — 只下发当前权威帧，并按 `CurrentFrameRepeatSendCount` 重复发送（含 HitEvent 搭载）
-- `UpdatePlayerOperation`:103 — 接收客户端操作：ClientAckedFrame 单调更新 + ClientMoveFrame 单调处理 + 攻击去重/超时
+- `UpdatePlayerOperation`:103 — 接收 `BattleInfo.client_input`：AckedServerFrame 单调更新 + ClientMoveFrame 单调处理 + ClientAttack 去重/超时
 - `HandleBattleEnd`:183 — 战斗结束：停循环、清理资源、清 NetSim、注销 UDP、发送 FinishBattle
 - `SendFinishBattle`:224 — 发送 GameOver 包（含 winnerTeamId）
 - `UpdatePlayerGameOver`:235 — 处理客户端上报 GameOver
@@ -203,7 +203,7 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
 
 ```
 SpawnBulletsFromOperations (Bullets.cs:12):
-  遍历帧操作中每个玩家的 AttackOperation
+  遍历帧操作中每个玩家的 ServerAttack
   → SpawnServerBullets (Bullets.cs:70):
     V2 历史位置回溯（positionHistory[clientFrameId]）
     方向编解码（baseX=-Towardy*teamSign, baseZ=Towardx*teamSign）
@@ -243,11 +243,11 @@ oneGameOver = true（来源：击杀 / 断线）
 ### 5.1 CMC-style ClientMove 时间轴
 
 - 帧号语义：
-  - `ServerFrame`：服务端 `frameid`，只由 BattleLoop 每 16ms 推进；下行 `BattleInfo.OperationID` 与 `BattleFrameSync.frameid` 都是 ServerFrame。
+  - `ServerFrame`：服务端 `frameid`，只由 BattleLoop 每 16ms 推进；下行 `BattleInfo.server_frame` 与 `BattleFrame.server_frame` 都是 ServerFrame。
   - `ClientMoveFrame`：客户端本地预测 tick，写在 `ClientMove.move_frame`；只用于移动上行排序、OldMove 去重、SavedMove 确认。
-  - `ClientAckedFrame`：客户端上行 `BattleInfo.client_acked_frame`，表示客户端已应用到的最新 ServerFrame。
-  - `AckedMoveFrame`：服务端下行兼容字段，等同于 `BattleInfo.move_ack.acked_move_frame`。
-- 协议字段：`BattleInfo.client_moves` 携带 `ClientMove`；`BattleInfo.move_ack` 携带服务端对本地玩家 Move 的确认/修正结果。
+  - `AckedServerFrame`：客户端上行 `BattleInfo.client_input.acked_server_frame`，表示客户端已应用到的最新 ServerFrame。
+  - `AckedMoveFrame`：服务端下行 `BattleInfo.server_update.move_ack.acked_move_frame`。
+- 协议字段：`BattleInfo.client_input.moves` 携带 `ClientMove`；`BattleInfo.client_input.attacks` 携带 `ClientAttack`；`BattleInfo.server_update.move_ack` 携带服务端对本地玩家 Move 的确认/修正结果。
 - 客户端每个预测 tick 生成 SavedMove；普通帧可先挂起为 `pendingMove`，下一帧若可合并则只发 current `NewMove`，不可合并则同包按顺序发送 pending + current 两个 `NewMove`（DualMove）。上行包可附带一个最旧的重要 `OldMove`。
 - 服务端状态（Battle.cs）：`dic_lastProcessedMoveFrame`、`dic_lastProcessedMoveServerFrame`、`dic_lastProcessedMoveInput`、`dic_accumulatedFrameDiscrepancy`、`dic_resolvingFrameDiscrepancy`、`dic_lastMoveAck`。
 - 接收（BattleController.Network.cs `UpdatePlayerOperation` / `ProcessClientMove`）：
@@ -283,7 +283,7 @@ oneGameOver = true（来源：击杀 / 断线）
 
 - **服务端权威**：帧状态（frameid）、玩家 HP（playerHp）、死亡（playerIsDead）、击杀判定、GameOver、胜负结果
 - **服务端维护**：playerPositions、positionHistory、activeBullets、ClientMove 处理进度
-- **客户端上报**：移动 SavedMove（ClientMove）、攻击操作（AttackOperation）、BattleReady、ClientSendGameOver
+- **客户端上报**：移动 SavedMove（ClientMove）、攻击操作（ClientAttack）、BattleReady、ClientSendGameOver
 
 ## 8. 日志系统
 

@@ -316,14 +316,14 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             // ★ 本地预测子弹：只要本帧 selfOperation 里有攻击，就立刻先出表现，不等待服务端回包。
             // 注意：这里的 selfOperation.AttackOperations 并不等于“仅本帧新攻击”，
             // 而是“这一发送帧准备上报的全部待确认攻击”——既可能包含本帧新攻击，也可能包含前几帧未确认而重发的旧攻击。
-            if (Manger.BattleData.Instance.selfOperation.AttackOperations.Count > 0)
+            if (Manger.BattleData.Instance.selfOperation.Attacks.Count > 0)
             {
                 int selfIdx = HYLDStaticValue.playerSelfIDInServer;
                 // 只有本地玩家索引有效且角色未死亡，才允许生成预测视觉子弹。
                 if (selfIdx >= 0 && selfIdx < HYLDStaticValue.Players.Count && HYLDStaticValue.Players[selfIdx].isNotDie)
                 {
                     Vector3 selfPos = HYLDStaticValue.Players[selfIdx].playerPositon;
-                    foreach (var attackOp in Manger.BattleData.Instance.selfOperation.AttackOperations)
+                    foreach (var attackOp in Manger.BattleData.Instance.selfOperation.Attacks)
                     {
                         // 预测视觉子弹只能对同一个 AttackId 生成一次。
                         // 如果这次只是 pendingAttacks 因为还没被权威帧 Confirm 而再次刷进 selfOperation 的“重发攻击”，这里必须跳过。
@@ -332,7 +332,7 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
                         // 协议里保存的是二维朝向分量，这里还原成世界空间方向。
                         // 本地视角下 x 需要取反，和当前战斗坐标系保持一致。
-                        Vector3 dir = LZJ.MathFixed.xAndY2UnitVector3(attackOp.Towardy, attackOp.Towardx);
+                        Vector3 dir = LZJ.MathFixed.xAndY2UnitVector3(attackOp.TowardY, attackOp.TowardX);
                         dir.x *= -1;
 
                         // 这里只生成视觉子弹；真正命中与伤害仍以服务端权威结果为准。
@@ -369,11 +369,11 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             // 子模式逐逻辑帧扩展点：挂在当前真实 BattleTick 主链路上，不再依赖失效的 ApplyFullFrame 链。
             OnBattleLogicTick(nextFrame);
 
-            bool zeroMoveThisTick = Mathf.Abs(Manger.BattleData.Instance.selfOperation.PlayerMoveX) <= 1e-6f
-                && Mathf.Abs(Manger.BattleData.Instance.selfOperation.PlayerMoveY) <= 1e-6f;
+            bool zeroMoveThisTick = Mathf.Abs(Manger.BattleData.Instance.selfOperation.MoveX) <= 1e-6f
+                && Mathf.Abs(Manger.BattleData.Instance.selfOperation.MoveY) <= 1e-6f;
             bool stopTransitionThisTick = !_lastBattleTickMoveWasZero && zeroMoveThisTick;
             bool newAttackThisTick = queuedAttackCommandsBeforeExecute > 0
-                && Manger.BattleData.Instance.selfOperation.AttackOperations.Count > 0
+                && Manger.BattleData.Instance.selfOperation.Attacks.Count > 0
                 && Manger.BattleData.Instance.LastEnqueuedAttackId > lastEnqueuedAttackIdBeforeExecute;
             bool criticalInputThisTick = stopTransitionThisTick || newAttackThisTick;
             int sendRepeatCount = criticalInputThisTick ? CriticalInputBurstSendCount : 1;
@@ -385,26 +385,26 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                 Logging.HYLDDebug.FrameTrace(
                     $"[StopInput][BattleTick] next={nextFrame} upload={uploadOperationId} target={_lastComputedTargetFrame} sync={Manger.BattleData.Instance.sync_frameID} " +
                     $"predictedBeforeCommit={Manger.BattleData.Instance.predicted_frameID} history={Manger.BattleData.Instance.PredictionHistoryCount} " +
-                    $"move=({Manger.BattleData.Instance.selfOperation.PlayerMoveX:F4},{Manger.BattleData.Instance.selfOperation.PlayerMoveY:F4}) stopTransition={stopTransitionThisTick}");
+                    $"move=({Manger.BattleData.Instance.selfOperation.MoveX:F4},{Manger.BattleData.Instance.selfOperation.MoveY:F4}) stopTransition={stopTransitionThisTick}");
             }
             if (criticalInputThisTick)
             {
                 Logging.HYLDDebug.FrameTrace(
                     $"[CriticalInput][BurstSend] next={nextFrame} upload={uploadOperationId} target={_lastComputedTargetFrame} sync={Manger.BattleData.Instance.sync_frameID} " +
-                    $"reason={burstReason} repeats={sendRepeatCount} lastAttackId={Manger.BattleData.Instance.LastEnqueuedAttackId} attackCount={Manger.BattleData.Instance.selfOperation.AttackOperations.Count} " +
-                    $"move=({Manger.BattleData.Instance.selfOperation.PlayerMoveX:F4},{Manger.BattleData.Instance.selfOperation.PlayerMoveY:F4})");
+                    $"reason={burstReason} repeats={sendRepeatCount} lastAttackId={Manger.BattleData.Instance.LastEnqueuedAttackId} attackCount={Manger.BattleData.Instance.selfOperation.Attacks.Count} " +
+                    $"move=({Manger.BattleData.Instance.selfOperation.MoveX:F4},{Manger.BattleData.Instance.selfOperation.MoveY:F4})");
             }
 
             // ★ 输入摘要：记录“这一帧到底上传了什么输入”。
             Logging.HYLDDebug.FrameLog_Authority(
                 $"input upload={uploadOperationId} target={_lastComputedTargetFrame} sync={Manger.BattleData.Instance.sync_frameID} " +
-                $"move=({Manger.BattleData.Instance.selfOperation.PlayerMoveX},{Manger.BattleData.Instance.selfOperation.PlayerMoveY}) " +
-                $"attackCount={Manger.BattleData.Instance.selfOperation.AttackOperations.Count} " +
+                $"move=({Manger.BattleData.Instance.selfOperation.MoveX},{Manger.BattleData.Instance.selfOperation.MoveY}) " +
+                $"attackCount={Manger.BattleData.Instance.selfOperation.Attacks.Count} " +
                 $"predict={predictionPipelineEnabled} zeroMove={zeroMoveThisTick} stopTransition={stopTransitionThisTick} criticalInput={criticalInputThisTick} burstReason={burstReason} repeats={sendRepeatCount}");
 
             // 把本帧输入发给服务端；服务端稍后会在对应权威帧里消费并回传结果。
             List<ClientMove> clientMoves = Manger.BattleData.Instance.BuildClientMovesForSend(uploadOperationId, criticalInputThisTick);
-            Server.UDPSocketManger.Instance.SendOperation(uploadOperationId, sendRepeatCount, criticalInputThisTick, burstReason, clientMoves);
+            Server.UDPSocketManger.Instance.SendOperation(uploadOperationId, sendRepeatCount, criticalInputThisTick, burstReason, clientMoves, Manger.BattleData.Instance.selfOperation.Attacks);
             _lastBattleTickMoveWasZero = zeroMoveThisTick;
 
             // ★ 结帧：这里只能输出“本地推进结束”的状态。
@@ -429,7 +429,7 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         /// 这里虽然不推进远端玩家输入，但会把当前全体玩家逻辑状态统一刷新到场景对象。
         /// 缺失移动清零由 ApplyPlayerOperation 内部的零输入分支负责，这里不再额外补 clear。
         /// </summary>
-        protected void ApplyLocalPredictedInputAndRefreshAllObjects(PlayerOperation selfOperation)
+        protected void ApplyLocalPredictedInputAndRefreshAllObjects(BattleData.LocalPlayerInput selfOperation)
         {
             playerManger.ApplyPlayerOperation(selfOperation);
             playerManger.UpdateAllPlayerLogics();
@@ -520,7 +520,10 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
         private void HandleAuthorityFrames(MainPack pack)
         {
-            Logging.HYLDDebug.FrameTrace($"[Baseline][AuthorityFrameRecv] serverFrame={pack.BattleInfo.OperationID} batchCount={pack.BattleInfo.Frames.Count} localSyncBefore={BattleData.Instance.sync_frameID}");
+            int batchCount = pack.BattleInfo != null && pack.BattleInfo.ServerUpdate != null
+                ? pack.BattleInfo.ServerUpdate.Frames.Count
+                : 0;
+            Logging.HYLDDebug.FrameTrace($"[Baseline][AuthorityFrameRecv] serverFrame={pack.BattleInfo.ServerFrame} batchCount={batchCount} localSyncBefore={BattleData.Instance.sync_frameID}");
 
             // BattleManager 在这里不再编排“主状态 / HitEvent / HPDeath”的内部顺序，
             // 而是把整包 BattleInfo 直接交给 BattleData 统一消费。

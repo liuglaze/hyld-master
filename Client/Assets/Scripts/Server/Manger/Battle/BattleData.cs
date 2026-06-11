@@ -19,12 +19,20 @@ namespace Manger
         public class SavedMove
         {
             public int FrameId;
-            public PlayerOperation Input;
+            public LocalPlayerInput Input;
             public Vector3 StartPosition;
             public Vector3 PredictedPosition;
             public bool ForceNoCombine;
             public bool SentAsNewMove;
             public string ImportantReason;
+        }
+
+        public class LocalPlayerInput
+        {
+            public int BattlePlayerId;
+            public float MoveX;
+            public float MoveY;
+            public readonly List<ClientAttack> Attacks = new List<ClientAttack>();
         }
 
         //记录客户端收到的、已经被服务端确认过的每一帧快照元数据。
@@ -35,7 +43,7 @@ namespace Manger
             public int AuthorityBatchCount;
             public int AuthorityOperationCount;
             public bool HasSelfAuthorityInput;
-            public PlayerOperation SelfAuthorityInput;
+            public PlayerFrameInput SelfAuthorityInput;
         }
 
         // ═══════ 核心集合 ═══════
@@ -69,7 +77,7 @@ namespace Manger
 
         public int battleID { get; private set; }
         public int teamID { get; private set; }
-        public PlayerOperation selfOperation;
+        public LocalPlayerInput selfOperation;
         public List<BattlePlayerPack> list_battleUsers { get; private set; }
         public int sync_frameID { get; private set; }
         public int predicted_frameID { get; private set; }
@@ -210,8 +218,8 @@ namespace Manger
                 if (user.Id == HYLDStaticValue.PlayerUID)
                 {
                     battleID = user.Battleid;
-                    selfOperation = new PlayerOperation();
-                    selfOperation.Battleid = battleID;
+                    selfOperation = new LocalPlayerInput();
+                    selfOperation.BattlePlayerId = battleID;
                     teamID = user.Teamid;
                 }
             }
@@ -223,23 +231,24 @@ namespace Manger
         /// </summary>
         public void ResetOperation()
         {
-            selfOperation.PlayerMoveX = 0;
-            selfOperation.PlayerMoveY = 0;
+            selfOperation.MoveX = 0;
+            selfOperation.MoveY = 0;
         }
 
-        private PlayerOperation ClonePlayerOperation(PlayerOperation operation)
+        private LocalPlayerInput ClonePlayerOperation(LocalPlayerInput operation)
         {
-            PlayerOperation copy = new PlayerOperation();
-            copy.Battleid = operation.Battleid;
-            copy.PlayerMoveX = operation.PlayerMoveX;
-            copy.PlayerMoveY = operation.PlayerMoveY;
-            foreach (var attackOp in operation.AttackOperations)
+            LocalPlayerInput copy = new LocalPlayerInput();
+            copy.BattlePlayerId = operation.BattlePlayerId;
+            copy.MoveX = operation.MoveX;
+            copy.MoveY = operation.MoveY;
+            foreach (var attackOp in operation.Attacks)
             {
-                AttackOperation cloned = new AttackOperation();
+                ClientAttack cloned = new ClientAttack();
                 cloned.AttackId = attackOp.AttackId;
-                cloned.Towardx = attackOp.Towardx;
-                cloned.Towardy = attackOp.Towardy;
-                copy.AttackOperations.Add(cloned);
+                cloned.AttackMoveFrame = attackOp.AttackMoveFrame;
+                cloned.TowardX = attackOp.TowardX;
+                cloned.TowardY = attackOp.TowardY;
+                copy.Attacks.Add(cloned);
             }
             return copy;
         }

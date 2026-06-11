@@ -40,8 +40,8 @@ namespace Server
 		// 战斗状态
 		private int playerCount;
 		private int frameid;
-		private Dictionary<int, BattleFrameSync> dic_historyFrames;
-		private Dictionary<int, PlayerOperation> dic_pendingAttacks;
+		private Dictionary<int, BattleFrame> dic_historyFrames;
+		private Dictionary<int, PlayerFrameInput> dic_pendingAttacks;
 		private Dictionary<int, int> dic_playerAckedFrameId;
 		private Dictionary<int, int> dic_lastProcessedAttackId;
 		private Dictionary<int, bool> dic_playerGameOver;
@@ -127,7 +127,7 @@ namespace Server
 					battleUser.Playername = matchUser.userName;
 					battleUser.Hero = matchUser.hero;
 					battleUser.Teamid = matchUser.teamid;
-					battleInfo.BattleUserInfo.Add(battleUser);
+					battleInfo.BattleUsers.Add(battleUser);
 				}
 
 				pack.BattleInfo = battleInfo;
@@ -275,8 +275,8 @@ namespace Server
 				isWaitingClientConfirm = false;
 				gameOverConfirmTimeoutMs = 0;
 				_hasEnded = false;
-				dic_historyFrames = new Dictionary<int, BattleFrameSync>();
-				dic_pendingAttacks = new Dictionary<int, PlayerOperation>();
+				dic_historyFrames = new Dictionary<int, BattleFrame>();
+				dic_pendingAttacks = new Dictionary<int, PlayerFrameInput>();
 				dic_playerAckedFrameId = new Dictionary<int, int>();
 				dic_playerGameOver = new Dictionary<int, bool>();
 				dic_lastProcessedAttackId = new Dictionary<int, int>();
@@ -450,36 +450,36 @@ namespace Server
 		{
 			// nextFrameOp 表示“本次服务端权威帧最终采用的所有玩家操作集合”，
 			// 后续会继续用于：子弹生成/碰撞 -> PlayerStates 打包 -> 下行广播。
-			BattleFrameSync nextFrameOp = new BattleFrameSync();
+			BattleFrame nextFrameOp = new BattleFrame();
 			try
 			{
 				foreach (int battlePlayerId in uidToBattlePlayerId.Values)
 				{
-					PlayerOperation frameOp = null;
+					PlayerFrameInput frameOp = null;
 
 					if (dic_lastProcessedMoveInput.TryGetValue(battlePlayerId, out LastProcessedMoveInput lastMove))
 					{
-						frameOp = new PlayerOperation { Battleid = battlePlayerId };
-						frameOp.PlayerMoveX = lastMove.MoveX;
-						frameOp.PlayerMoveY = lastMove.MoveY;
+						frameOp = new PlayerFrameInput { BattlePlayerId = battlePlayerId };
+						frameOp.MoveX = lastMove.MoveX;
+						frameOp.MoveY = lastMove.MoveY;
 					}
 
                     // 攻击与移动意图解耦：
                     // pendingAttacks 在网络接收阶段完成去重/超时过滤，这里只负责把“当前仍有效”的攻击并入本帧权威操作。
 					//playeroperation只是装攻击的容器，只是拿这个方便用不用另外定义别的
-                    if (dic_pendingAttacks.TryGetValue(battlePlayerId, out PlayerOperation pendingAttackOp)
+                    if (dic_pendingAttacks.TryGetValue(battlePlayerId, out PlayerFrameInput pendingAttackOp)
 						 && pendingAttackOp != null
-						 && pendingAttackOp.AttackOperations != null
-						 && pendingAttackOp.AttackOperations.Count > 0)
+						 && pendingAttackOp.Attacks != null
+						 && pendingAttackOp.Attacks.Count > 0)
                     {
                         if (frameOp == null)
                         {
-                            frameOp = new PlayerOperation { Battleid = battlePlayerId };
+                            frameOp = new PlayerFrameInput { BattlePlayerId = battlePlayerId };
                         }
 
-                        foreach (var attack in pendingAttackOp.AttackOperations)
+                        foreach (var attack in pendingAttackOp.Attacks)
                         {
-                            frameOp.AttackOperations.Add(attack);
+                            frameOp.Attacks.Add(attack);
                         }
                     }
 
@@ -487,14 +487,14 @@ namespace Server
 					{
 						// 只有本帧最终确实产出了“可广播的该玩家操作”才加入 nextFrameOp。
 						// 这里的操作可能包含：当前移动意图、攻击，或它们的组合。
-						nextFrameOp.Operations.Add(frameOp);
+						nextFrameOp.PlayerInputs.Add(frameOp);
 					}
 				}
 			}
 			catch (Exception ex)
 			{
 				Logging.Debug.Log(ex);
-				nextFrameOp = new BattleFrameSync();
+				nextFrameOp = new BattleFrame();
 			}
             //上面只是组织本帧要广播/结算的操作，下面按服务端权威帧推进位置。
 
@@ -514,7 +514,7 @@ namespace Server
 			// 5. 最后再打包 PlayerStates，保证下发的是“服务端帧移动推进 + 子弹结算”后的最终权威状态
 			PackPlayerStates(nextFrameOp, frameid);
 
-			nextFrameOp.Frameid = frameid;
+			nextFrameOp.ServerFrame = frameid;
 			dic_historyFrames[frameid] = nextFrameOp;
 
 			// 6. 向所有尚未确认 GameOver 的客户端发送当前权威帧；包内会带上本帧 HitEvent
@@ -531,15 +531,15 @@ namespace Server
 
 		// ==================== 服务端位置追踪 ====================
 
-		private void UpdatePlayerPositions(BattleFrameSync frameOp)
+		private void UpdatePlayerPositions(BattleFrame frameOp)
 		{
-			foreach (PlayerOperation op in frameOp.Operations)
+			foreach (PlayerFrameInput op in frameOp.PlayerInputs)
 			{
-				int bpId = op.Battleid;
+				int bpId = op.BattlePlayerId;
 				if (!playerPositions.TryGetValue(bpId, out ServerVector3 pos)) continue;
 
-				float mx = op.PlayerMoveX;
-				float mz = op.PlayerMoveY; // 客户端 PlayerMoveY 对应世界 Z 轴
+				float mx = op.MoveX;
+				float mz = op.MoveY; // 客户端 MoveY 对应世界 Z 轴
 				float len = (float)Math.Sqrt(mx * mx + mz * mz);
 				if (frameid % 120 == 0)
 					Logging.Debug.Log($"[MoveInput] frame={frameid} bp{bpId} mx={mx:F4} mz=" +

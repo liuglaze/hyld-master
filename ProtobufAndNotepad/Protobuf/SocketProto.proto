@@ -202,45 +202,64 @@ message PlayerPack
 
 message BattleInfo
 {
-    int32 operationID=1;
-    int32 randSeed=2;
-    repeated BattlePlayerPack battleUserInfo=3;
-    repeated BattleFrameSync frames=4;
-    PlayerOperation selfOperation=5;
-    repeated HitEvent hit_events=6;
-    int32 client_acked_frame=7;
-    int32 client_rtt_ms=8;
-    repeated ClientMove client_moves=9;
-    int32 acked_move_frame=10;
-    MoveAckResult move_ack=11;
+    int32 server_frame=1;
+    int32 rand_seed=2;
+    repeated BattlePlayerPack battle_users=3;
+    BattleClientInput client_input=10;
+    BattleServerUpdate server_update=20;
 }
 
-message BattleFrameSync
+message BattleClientInput
 {
-    repeated PlayerOperation operations=1;
-    int32 frameid=2;
+    int32 battle_player_id=1;
+    int32 client_tick=2;
+    int32 acked_server_frame=3;
+    int32 rtt_ms=4;
+    repeated ClientMove moves=10;
+    repeated ClientAttack attacks=11;
+}
+
+message BattleServerUpdate
+{
+    repeated BattleFrame frames=1;
+    MoveAckResult move_ack=2;
+    repeated HitEvent hit_events=3;
+}
+
+message BattleFrame
+{
+    int32 server_frame=1;
+    repeated PlayerFrameInput player_inputs=2;
     repeated AuthoritativePlayerState player_states=3;
 }
 
-message AttackOperation
+message PlayerFrameInput
 {
-    int32 attack_id=1;
-    float towardx=2;
-    float towardy=3;
-    int32 client_frame_id=4;
-    float spawn_pos_x=5;
-    float spawn_pos_y=6;
-    float spawn_pos_z=7;
+    int32 battle_player_id=1;
+    float move_x=2;
+    float move_y=3;
+    repeated ServerAttack attacks=4;
 }
 
-
-
-message PlayerOperation
+message ClientAttack
 {
-    int32 battleid=1;
-    float playerMoveX=2;
-    float playerMoveY=3;
-    repeated AttackOperation attack_operations=4;
+    int32 attack_id=1;
+    int32 attack_move_frame=2;
+    float toward_x=3;
+    float toward_y=4;
+}
+
+message ServerAttack
+{
+    int32 attack_id=1;
+    int32 attacker_battle_player_id=2;
+    int32 attack_move_frame=3;
+    int32 spawn_server_frame=4;
+    float toward_x=5;
+    float toward_y=6;
+    float spawn_pos_x=7;
+    float spawn_pos_y=8;
+    float spawn_pos_z=9;
 }
 
 message ClientMove

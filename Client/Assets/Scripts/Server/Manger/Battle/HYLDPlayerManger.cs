@@ -142,9 +142,9 @@ namespace Manger
         /// 将一条玩家操作落到本地运行时玩家状态。
         /// 包含：移动输入写入、逻辑位置推进、攻击朝向更新。
         /// </summary>
-        public void ApplyPlayerOperation(PlayerOperation opt)
+        public void ApplyPlayerOperation(BattleData.LocalPlayerInput opt)
         {
-            int playerIndex = dic_battleID_map_Playeridx[opt.Battleid];
+            int playerIndex = dic_battleID_map_Playeridx[opt.BattlePlayerId];
             PlayerInformation player = HYLDStaticValue.Players[playerIndex];
             int sign = GetTeamRelativeSign(playerIndex);
 
@@ -160,10 +160,10 @@ namespace Manger
                 : 1;
         }
 
-        private LZJ.Fixed3 ApplyMovementInput(PlayerInformation player, PlayerOperation opt, int sign)
+        private LZJ.Fixed3 ApplyMovementInput(PlayerInformation player, BattleData.LocalPlayerInput opt, int sign)
         {
-            player.playerMoveX = sign * opt.PlayerMoveX;
-            player.playerMoveY = sign * opt.PlayerMoveY;
+            player.playerMoveX = sign * opt.MoveX;
+            player.playerMoveY = sign * opt.MoveY;
 
             LZJ.Fixed3 movementDir = new LZJ.Fixed3(-player.playerMoveX, 0f, player.playerMoveY);
             LZJ.Fixed movementMagnitude = movementDir.magnitude;
@@ -190,16 +190,16 @@ namespace Manger
             player.playerPositon = (new LZJ.Fixed3(player.playerPositon) + move).ToVector3();
         }
 
-        private void ApplyAttackFacing(PlayerInformation player, PlayerOperation opt, int sign)
+        private void ApplyAttackFacing(PlayerInformation player, BattleData.LocalPlayerInput opt, int sign)
         {
             // ★ 新协议：AttackOperations 是 repeated 列表，取最后一个攻击的方向作为开火朝向
-            if (opt.AttackOperations == null || opt.AttackOperations.Count <= 0)
+            if (opt.Attacks == null || opt.Attacks.Count <= 0)
                 return;
 
-            AttackOperation lastAttack = opt.AttackOperations[opt.AttackOperations.Count - 1];
+            ClientAttack lastAttack = opt.Attacks[opt.Attacks.Count - 1];
             player.fireState = FireState.PstolNormal;
 
-            Vector3 temp = LZJ.MathFixed.xAndY2UnitVector3(lastAttack.Towardy, lastAttack.Towardx);
+            Vector3 temp = LZJ.MathFixed.xAndY2UnitVector3(lastAttack.TowardY, lastAttack.TowardX);
             temp.x *= -1 * sign;
             temp.z *= sign;
 

@@ -26,21 +26,25 @@ namespace Manger
             if (battleInfo == null)
                 return false;
 
-            if (!ConsumeAuthoritativeFrameBatch(battleInfo.OperationID, battleInfo.Frames, battleInfo.MoveAck))
+            BattleServerUpdate update = battleInfo.ServerUpdate;
+            if (update == null)
                 return false;
 
-            if (battleInfo.HitEvents != null && battleInfo.HitEvents.Count > 0)
+            if (!ConsumeAuthoritativeFrameBatch(battleInfo.ServerFrame, update.Frames, update.MoveAck))
+                return false;
+
+            if (update.HitEvents != null && update.HitEvents.Count > 0)
             {
-                Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyHitEvents START frame={battleInfo.OperationID} hitCount={battleInfo.HitEvents.Count}");
+                Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyHitEvents START frame={battleInfo.ServerFrame} hitCount={update.HitEvents.Count}");
                 //这个在HitEvent
-                ApplyHitEvents(battleInfo.HitEvents);
-                Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyHitEvents END frame={battleInfo.OperationID}");
+                ApplyHitEvents(update.HitEvents);
+                Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyHitEvents END frame={battleInfo.ServerFrame}");
             }
 
-            Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyAuthHpDeath START frame={battleInfo.OperationID}");
+            Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyAuthHpDeath START frame={battleInfo.ServerFrame}");
             //这个在HitEvent
-            ApplyAuthoritativeHpAndDeath(battleInfo.Frames, battleInfo.OperationID);
-            Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyAuthHpDeath END frame={battleInfo.OperationID}");
+            ApplyAuthoritativeHpAndDeath(update.Frames, battleInfo.ServerFrame);
+            Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyAuthHpDeath END frame={battleInfo.ServerFrame}");
             return true;
         }
 
@@ -58,7 +62,7 @@ namespace Manger
         /// <param name="authorityFrames">当前批次包含的所有服务端操作集合</param>
         /// <returns>如果批次有效并被处理返回 true，过时则返回 false</returns>
         public bool ConsumeAuthoritativeFrameBatch(int authorityFrameId,
-            Google.Protobuf.Collections.RepeatedField<BattleFrameSync> authorityFrames,
+            Google.Protobuf.Collections.RepeatedField<BattleFrame> authorityFrames,
             MoveAckResult moveAck)
         {
             //判断是否应该拒绝这个权威帧批次（如果 authorityFrameId 已经过时了），如果过时了就直接丢弃不处理
@@ -73,10 +77,10 @@ namespace Manger
             LogAuthorityFrameBatchBegin(authorityFrameId, authorityBatchCount);
 
             // 应用权威状态；本地玩家移动修正由服务端 MoveAckResult 显式驱动。
-            ApplyAuthoritativeStateAndReplay(authorityFrameId, authorityFrames, authorityBatchCount, out BattleFrameSync latestAuthorityFrame, moveAck);
+            ApplyAuthoritativeStateAndReplay(authorityFrameId, authorityFrames, authorityBatchCount, out BattleFrame latestAuthorityFrame, moveAck);
             SpawnVisualBulletsFromAuthorityFrames(authorityFrames, localSyncBeforeReconcile);
 
-            int authorityOpCount = latestAuthorityFrame != null ? latestAuthorityFrame.Operations.Count : 0;
+            int authorityOpCount = latestAuthorityFrame != null ? latestAuthorityFrame.PlayerInputs.Count : 0;
             LogAuthorityFrameBatchEnd(authorityFrameId);
             Logging.HYLDDebug.FrameLog_EndFrame(sync_frameID, predicted_frameID, authorityOpCount, PredictionHistoryCount);
 
@@ -98,8 +102,8 @@ namespace Manger
         /// 覆盖权威位置 -> 确认攻击移除缓存 -> 裁剪旧预测历史 -> 重放未确认输入
         /// </summary>
         private void ApplyAuthoritativeStateAndReplay(int authorityFrameId,
-            Google.Protobuf.Collections.RepeatedField<BattleFrameSync> authorityFrames,
-            int authorityBatchCount, out BattleFrameSync latestAuthorityFrame, MoveAckResult moveAck)
+            Google.Protobuf.Collections.RepeatedField<BattleFrame> authorityFrames,
+            int authorityBatchCount, out BattleFrame latestAuthorityFrame, MoveAckResult moveAck)
         {
             ApplyAuthoritativePositions(authorityFrames);
             UpdateAnimationStateFromAuthority(authorityFrames);
@@ -185,12 +189,12 @@ namespace Manger
         /// 11.1: 从权威帧批次中取最后一帧的 player_states，将所有玩家逻辑位置设为权威位置。
         /// 对本地玩家额外记录 lastAuthorityPosition 作为重放起点。
         /// </summary>
-        private void ApplyAuthoritativePositions(Google.Protobuf.Collections.RepeatedField<BattleFrameSync> frames)
+        private void ApplyAuthoritativePositions(Google.Protobuf.Collections.RepeatedField<BattleFrame> frames)
         {
             if (frames == null || frames.Count == 0) return;
 
             // 取批次中最后一帧的 player_states
-            BattleFrameSync lastFrame = frames[frames.Count - 1];
+            BattleFrame lastFrame = frames[frames.Count - 1];
             var playerStates = lastFrame.PlayerStates;
 
             if (playerStates == null || playerStates.Count == 0) return;
@@ -239,11 +243,11 @@ namespace Manger
             }
 
             // 验证日志（每 60 帧打印一次）
-            if (lastFrame.Frameid % 60 == 0)
+            if (lastFrame.ServerFrame % 60 == 0)
             {
                 Vector3 localPos = selfPlayerIndex >= 0 ? HYLDStaticValue.Players[selfPlayerIndex].playerPositon : Vector3.zero;
                 float delta = selfPlayerIndex >= 0 ? Vector3.Distance(localPos, lastAuthorityPosition) : 0f;
-                Logging.HYLDDebug.FrameTrace($"[AuthPos] frame={lastFrame.Frameid} stateCount={stateCount} selfIdx={selfPlayerIndex} authPos=({lastAuthorityPosition.x:F2},{lastAuthorityPosition.y:F2},{lastAuthorityPosition.z:F2}) delta={delta:F3}");
+                Logging.HYLDDebug.FrameTrace($"[AuthPos] frame={lastFrame.ServerFrame} stateCount={stateCount} selfIdx={selfPlayerIndex} authPos=({lastAuthorityPosition.x:F2},{lastAuthorityPosition.y:F2},{lastAuthorityPosition.z:F2}) delta={delta:F3}");
             }
         }
 
@@ -252,13 +256,13 @@ namespace Manger
         /// 仅写 playerMoveMagnitude / playerMoveDir，不修改位置（位置由 ApplyAuthoritativePositions 处理）。
         /// 不在操作列表中的玩家清零动画参数（表示该帧没有移动输入）。
         /// </summary>
-        private void UpdateAnimationStateFromAuthority(Google.Protobuf.Collections.RepeatedField<BattleFrameSync> frames)
+        private void UpdateAnimationStateFromAuthority(Google.Protobuf.Collections.RepeatedField<BattleFrame> frames)
         {
             if (frames == null || frames.Count == 0) return;
 
             // 取批次最后一帧的操作列表
-            BattleFrameSync lastFrame = frames[frames.Count - 1];
-            if (lastFrame.Operations == null || lastFrame.Operations.Count == 0)
+            BattleFrame lastFrame = frames[frames.Count - 1];
+            if (lastFrame.PlayerInputs == null || lastFrame.PlayerInputs.Count == 0)
             {
                 // 没有操作 -> 所有玩家清零
                 for (int i = 0; i < playerIndexBattleIds.Count && i < HYLDStaticValue.Players.Count; i++)
@@ -275,10 +279,10 @@ namespace Manger
             // 记录本帧有操作的 playerIndex 集合
             HashSet<int> updatedIndices = new HashSet<int>();
 
-            for (int i = 0; i < lastFrame.Operations.Count; i++)
+            for (int i = 0; i < lastFrame.PlayerInputs.Count; i++)
             {
-                PlayerOperation op = lastFrame.Operations[i];
-                int bpId = op.Battleid;
+                PlayerFrameInput op = lastFrame.PlayerInputs[i];
+                int bpId = op.BattlePlayerId;
 
                 // battleId -> playerIndex
                 int playerIndex = -1;
@@ -302,8 +306,8 @@ namespace Manger
                     flipSign = -1;
                 }
 
-                float mx = flipSign * op.PlayerMoveX;
-                float mz = flipSign * op.PlayerMoveY;
+                float mx = flipSign * op.MoveX;
+                float mz = flipSign * op.MoveY;
 
                 LZJ.Fixed3 tempDir = new LZJ.Fixed3(-mx, 0f, mz);
                 LZJ.Fixed tempMagnitude = tempDir.magnitude;
@@ -331,17 +335,17 @@ namespace Manger
             }
         }
 
-        private void SpawnVisualBulletsFromAuthorityFrames(Google.Protobuf.Collections.RepeatedField<BattleFrameSync> authorityFrames, int localSyncBeforeReconcile)
+        private void SpawnVisualBulletsFromAuthorityFrames(Google.Protobuf.Collections.RepeatedField<BattleFrame> authorityFrames, int localSyncBeforeReconcile)
         {
             for (int i = 0; i < authorityFrames.Count; i++)
             {
-                int frameId = authorityFrames[i].Frameid;
+                int frameId = authorityFrames[i].ServerFrame;
                 // 跳过本地已经处理过的旧权威帧
                 if (frameId <= localSyncBeforeReconcile)
                     continue;
-                foreach (var playerOp in authorityFrames[i].Operations)
+                foreach (var playerOp in authorityFrames[i].PlayerInputs)
                 {
-                    if (playerOp.AttackOperations == null || playerOp.AttackOperations.Count == 0)
+                    if (playerOp.Attacks == null || playerOp.Attacks.Count == 0)
                         continue;
 
                     Vector3 spawnPos = Vector3.zero;
@@ -349,11 +353,11 @@ namespace Manger
                     int playerIndex = -1;
 
                     // 尝试从权威快照中获取生成子弹时的权威位置（延迟补偿前的默认位置）
-                    TryGetAuthorityPosition(frameId, playerOp.Battleid, out spawnPos);
+                    TryGetAuthorityPosition(frameId, playerOp.BattlePlayerId, out spawnPos);
 
                     for (int p = 0; p < HYLDStaticValue.Players.Count; p++)
                     {
-                        if (p < playerIndexBattleIds.Count && playerIndexBattleIds[p] == playerOp.Battleid)
+                        if (p < playerIndexBattleIds.Count && playerIndexBattleIds[p] == playerOp.BattlePlayerId)
                         {
                             ownerTeamId = HYLDStaticValue.Players[p].teamID;
                             playerIndex = p;
@@ -361,10 +365,10 @@ namespace Manger
                         }
                     }
 
-                    foreach (var attack in playerOp.AttackOperations)
+                    foreach (var attack in playerOp.Attacks)
                     {
                         // 路径B（权威帧子弹）：如果这是本地玩家自己的攻击，并且已经在本地预测过了，则跳过，避免重复生成两波子弹
-                        if (playerOp.Battleid == battleID && _predictedBulletAttackIds.Contains(attack.AttackId))
+                        if (playerOp.BattlePlayerId == battleID && _predictedBulletAttackIds.Contains(attack.AttackId))
                         {
                             Logging.HYLDDebug.FrameTrace($"[PredBullet] SKIP_AUTH attackId={attack.AttackId} reason=already-predicted");
                             _predictedBulletAttackIds.Remove(attack.AttackId);
@@ -372,7 +376,7 @@ namespace Manger
                         }
 
                         int bulletSign = ownerTeamId != teamID ? -1 : 1;
-                        Vector3 dir = LZJ.MathFixed.xAndY2UnitVector3(attack.Towardy, attack.Towardx);
+                        Vector3 dir = LZJ.MathFixed.xAndY2UnitVector3(attack.TowardY, attack.TowardX);
                         dir.x *= -1 * bulletSign;
                         dir.z *= bulletSign;
 
@@ -391,7 +395,7 @@ namespace Manger
                         }
 
                         // 客户端半空推进（Lag Compensation Visual）：计算子弹应该飞了多远，并直接将其推移到那个位置
-                        int elapsedFrames = attack.ClientFrameId > 0 ? (frameId - attack.ClientFrameId) : 0;
+                        int elapsedFrames = attack.SpawnServerFrame > 0 ? (frameId - attack.SpawnServerFrame) : 0;
                         if (elapsedFrames > 0 && playerIndex >= 0 && playerIndex < HYLDStaticValue.Players.Count)
                         {
                             float bulletSpeed = HYLDStaticValue.Players[playerIndex].hero.speed;

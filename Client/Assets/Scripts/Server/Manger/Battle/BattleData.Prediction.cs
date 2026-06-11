@@ -27,7 +27,7 @@ namespace Manger
 
 *****************************************************/
         /// </summary>
-        public void RecordPredictedHistory(int frameId, PlayerOperation input, Vector3 startPosition, Vector3 predictedPosition)
+        public void RecordPredictedHistory(int frameId, LocalPlayerInput input, Vector3 startPosition, Vector3 predictedPosition)
         {
             if (!IsPredictionEnabled)
             {
@@ -181,8 +181,8 @@ namespace Manger
 
         private string GetImportantMoveReason(SavedMove current, SavedMove previous)
         {
-            float currX = current.Input.PlayerMoveX;
-            float currY = current.Input.PlayerMoveY;
+            float currX = current.Input.MoveX;
+            float currY = current.Input.MoveY;
             float currMag = Mathf.Sqrt(currX * currX + currY * currY);
             bool currZero = currMag <= 1e-6f;
 
@@ -191,8 +191,8 @@ namespace Manger
                 return !currZero ? "initial-non-zero" : null;
             }
 
-            float prevX = previous.Input.PlayerMoveX;
-            float prevY = previous.Input.PlayerMoveY;
+            float prevX = previous.Input.MoveX;
+            float prevY = previous.Input.MoveY;
             float prevMag = Mathf.Sqrt(prevX * prevX + prevY * prevY);
             bool prevZero = prevMag <= 1e-6f;
             if (currZero != prevZero)
@@ -229,10 +229,10 @@ namespace Manger
                 return false;
             }
 
-            float pendingX = pending.Input.PlayerMoveX;
-            float pendingY = pending.Input.PlayerMoveY;
-            float currentX = current.Input.PlayerMoveX;
-            float currentY = current.Input.PlayerMoveY;
+            float pendingX = pending.Input.MoveX;
+            float pendingY = pending.Input.MoveY;
+            float currentX = current.Input.MoveX;
+            float currentY = current.Input.MoveY;
             float pendingMag = Mathf.Sqrt(pendingX * pendingX + pendingY * pendingY);
             float currentMag = Mathf.Sqrt(currentX * currentX + currentY * currentY);
             bool pendingZero = pendingMag <= 1e-6f;
@@ -256,8 +256,8 @@ namespace Manger
             return new ClientMove
             {
                 MoveFrame = entry.FrameId,
-                MoveX = entry.Input.PlayerMoveX,
-                MoveY = entry.Input.PlayerMoveY,
+                MoveX = entry.Input.MoveX,
+                MoveY = entry.Input.MoveY,
                 PredictedPosX = entry.PredictedPosition.x * sign,
                 PredictedPosY = entry.PredictedPosition.y,
                 PredictedPosZ = entry.PredictedPosition.z * sign,
@@ -305,10 +305,10 @@ namespace Manger
         /// 为什么只确认最新帧：因为服务端的攻击确认机制是基于"最大已处理AttackId"（MaxConfirmedId）的批量确认。
         /// 只要最新帧里包含了你的攻击操作，说明这个AttackId以及之前的攻击服务端都收到了，直接移除本地缓存即可。
         /// </summary>
-        private void RecordAuthorityConfirmation(int serverFrameId, int serverOperationId, int authorityBatchCount, BattleFrameSync authorityFrame)
+        private void RecordAuthorityConfirmation(int serverFrameId, int serverOperationId, int authorityBatchCount, BattleFrame authorityFrame)
         {
             // 只做攻击确认，不再做输入匹配判定
-            PlayerOperation selfAuthorityOperation = null;
+            PlayerFrameInput selfAuthorityOperation = null;
             bool HasSelfAuthorityInput = authorityFrame != null && TryFindSelfAuthorityOperation(authorityFrame, out selfAuthorityOperation);
             if (HasSelfAuthorityInput)
             {
@@ -322,13 +322,13 @@ namespace Manger
         /// <summary>
         /// 工具函数：拿到某一帧全场所有人的操作操作后，把主角自己的那一份抽离出来。
         /// 比如场上十个人推摇杆，我只找 battleID 跟我匹配的那一个。
-        private bool TryFindSelfAuthorityOperation(BattleFrameSync authorityFrame, out PlayerOperation selfAuthorityOperation)
+        private bool TryFindSelfAuthorityOperation(BattleFrame authorityFrame, out PlayerFrameInput selfAuthorityOperation)
         {
-            for (int i = 0; i < authorityFrame.Operations.Count; i++)
+            for (int i = 0; i < authorityFrame.PlayerInputs.Count; i++)
             {
-                if (authorityFrame.Operations[i].Battleid == battleID)
+                if (authorityFrame.PlayerInputs[i].BattlePlayerId == battleID)
                 {
-                    selfAuthorityOperation = authorityFrame.Operations[i];
+                    selfAuthorityOperation = authorityFrame.PlayerInputs[i];
                     return true;
                 }
             }
@@ -438,8 +438,8 @@ namespace Manger
                 if (entry.FrameId <= predicted_frameID)
                 {
                     // 取本地输入中的移动分量
-                    float mx = entry.Input.PlayerMoveX;
-                    float mz = entry.Input.PlayerMoveY;
+                    float mx = entry.Input.MoveX;
+                    float mz = entry.Input.MoveY;
                     bool zeroInput = Mathf.Abs(mx) <= 1e-6f && Mathf.Abs(mz) <= 1e-6f;
 
                     // 移动公式与 HYLDPlayerManger.ApplyPlayerOperation 一致：

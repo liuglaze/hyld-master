@@ -101,7 +101,7 @@ Program.cs -> Server/Server.cs -> Server/Client.cs -> Controller/ControllerMange
 7. 战斗已开始后若某客户端继续重发 `BattleReady`，服务端会视为其可能漏收首个 `BattleStart`，并对该 endpoint **单播补发** `BattleStart`（不重复 `BeginBattle`）：`Server/Battle.cs:196`
 8. 帧下发与补帧：`Server/BattleController.Network.cs:50`（`SendUnsyncedFrames`）
 9. **Pong 路由**：`Server/ClientUdp.cs:250`（Ping 识别 → Pong 构造）。Pong 发送**经过 NetSim**（`LZJUDP.SimDropRate/SimDelayMinMs/SimDelayMaxMs`），确保客户端 RTT 测量反映真实模拟延迟。NetSim 参数由 `BattleController.BeginBattle`（Battle.cs:224）写入、`HandleBattleEnd`（BattleController.Network.cs:183）清零
-10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_moves` 上报 `OldMove + NewMove`。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastProcessedMoveFrame` 的旧包丢弃，合法 move 会按帧差在接收阶段做服务端权威重模拟并推进 `playerPositions`。`OldMove` 只重模拟，不产生最终确认；`NewMove` 生成下行 `BattleInfo.move_ack`，用于客户端裁剪 SavedMove；`ack_good_move=false` 时客户端使用 `correct_pos_x/y/z` 拉回并重放未确认 SavedMove。`BattleInfo.acked_move_frame` 只同步兼容值。
+10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_input.moves` 上报 `OldMove + NewMove`，攻击通过 `BattleInfo.client_input.attacks` 独立上报。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastProcessedMoveFrame` 的旧包丢弃，合法 move 会按帧差在接收阶段做服务端权威重模拟并推进 `playerPositions`。`OldMove` 只重模拟，不产生最终确认；`NewMove` 生成下行 `BattleInfo.server_update.move_ack`，用于客户端裁剪 SavedMove；`ack_good_move=false` 时客户端使用 `correct_pos_x/y/z` 拉回并重放未确认 SavedMove。
 
 > 关键前提：客户端必须先成功发 `BattleReady`，否则后续 UDP 包无法命中 battle 路由。
 >
@@ -205,10 +205,10 @@ D:\unity\hyld-master\hyld-master\Server\log\
 
 伤害判定已完全迁移至服务端，客户端子弹系统仅作视觉表现：
 
-1. 客户端上报 `AttackOperation`（含 `attack_id`、`client_frame_id`）
+1. 客户端上报 `ClientAttack`（含 `attack_id`、`attack_move_frame`）
 2. 服务端 `SpawnServerBullets`（BattleController.Bullets.cs:70）生成 ServerBullet
 3. 每帧 `TickServerBullets`（BattleController.Bullets.cs:265）模拟子弹飞行 + 碰撞检测（`CheckBulletCollision`，BattleController.Bullets.cs:163，hitRadius 距离判定）
-4. 命中 → 生成 `HitEvent`（含 `damage`、`is_kill`）→ 随 `BattleInfo.hit_events` 下行
+4. 命中 → 生成 `HitEvent`（含 `damage`、`is_kill`）→ 随 `BattleInfo.server_update.hit_events` 下行
 5. 客户端 `ApplyHitEvents` 触发受击动画（纯表现，不修改 HP）
 6. 客户端 `ApplyAuthoritativeHpAndDeath` 从 `PlayerStates.Hp` 覆写 HP，从 `PlayerStates.IsDead` 驱动死亡判定
 
@@ -228,8 +228,8 @@ D:\unity\hyld-master\hyld-master\Server\log\
 ### 8.5.4 攻击方向编解码对齐
 
 proto 字段语义（摇杆轴与世界轴互换）：
-- `AttackOperation.towardx` = 摇杆 X（对应世界 Z 轴分量）
-- `AttackOperation.towardy` = 摇杆 Y（对应世界 X 轴分量）
+- `ClientAttack.toward_x` / `ServerAttack.toward_x` = 摇杆 X（对应世界 Z 轴分量）
+- `ClientAttack.toward_y` / `ServerAttack.toward_y` = 摇杆 Y（对应世界 X 轴分量）
 
 服务端消费（`BattleController.Bullets.cs:70 SpawnServerBullets`）：
 ```
@@ -255,7 +255,7 @@ dir.z *= sign
 
 ### 8.5.6 权威 HP/IsDead 下行（authoritative-hp-sync）
 
-- **proto 字段**：`PlayerState` 消息含 `hp`（int32）和 `is_dead`（bool），随 `AllPlayerOperation.PlayerStates` 每帧下发
+- **proto 字段**：`AuthoritativePlayerState` 消息含 `hp`（int32）和 `is_dead`（bool），随 `BattleInfo.server_update.frames[].player_states` 每帧下发
 - **服务端写入**：`PackPlayerStates`（BattleController.Network.cs:18）将 `playerHp[battleId]` 和 `playerIsDead[battleId]` 写入帧数据
 - **客户端消费**：`ApplyAuthoritativeHpAndDeath` 取批次最后一帧的 `PlayerStates` 覆写 `playerBloodValue`
 - **帧序保护**：`_lastAuthHpFrameId` 跳过乱序到达的旧批次（UDP 包乱序时防止 HP 回弹）

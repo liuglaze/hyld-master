@@ -122,23 +122,33 @@ namespace Server
             }
         }
 
-        public void SendOperation(int operationFrameId, int repeatCount = 1, bool isCriticalInput = false, string criticalReason = null, IList<ClientMove> clientMoves = null)
+        public void SendOperation(int operationFrameId, int repeatCount = 1, bool isCriticalInput = false, string criticalReason = null, IList<ClientMove> clientMoves = null, IList<ClientAttack> clientAttacks = null)
         {
             MainPack pack = new MainPack();
             pack.Requestcode = RequestCode.Battle;
             pack.Actioncode = ActionCode.BattlePushDowmPlayerOpeartions;
             pack.BattleInfo = new BattleInfo();
-            pack.BattleInfo.SelfOperation = Manger.BattleData.Instance.selfOperation;
-            pack.BattleInfo.OperationID = operationFrameId;
-            pack.BattleInfo.ClientAckedFrame = Manger.BattleData.Instance.sync_frameID;
-            pack.BattleInfo.ClientRttMs = Manger.BattleData.Instance.IsRttInitialized
-                ? Mathf.RoundToInt(Manger.BattleData.Instance.smoothedRTT)
-                : 0;
+            pack.BattleInfo.ClientInput = new BattleClientInput
+            {
+                BattlePlayerId = Manger.BattleData.Instance.battleID,
+                ClientTick = operationFrameId,
+                AckedServerFrame = Manger.BattleData.Instance.sync_frameID,
+                RttMs = Manger.BattleData.Instance.IsRttInitialized
+                    ? Mathf.RoundToInt(Manger.BattleData.Instance.smoothedRTT)
+                    : 0,
+            };
             if (clientMoves != null)
             {
                 for (int i = 0; i < clientMoves.Count; i++)
                 {
-                    pack.BattleInfo.ClientMoves.Add(clientMoves[i]);
+                    pack.BattleInfo.ClientInput.Moves.Add(clientMoves[i]);
+                }
+            }
+            if (clientAttacks != null)
+            {
+                for (int i = 0; i < clientAttacks.Count; i++)
+                {
+                    pack.BattleInfo.ClientInput.Attacks.Add(clientAttacks[i]);
                 }
             }
 
@@ -147,7 +157,7 @@ namespace Server
             {
                 if (isCriticalInput)
                 {
-                    Logging.HYLDDebug.FrameTrace($"[CriticalInput][Send] op={operationFrameId} repeat={sendIndex + 1}/{normalizedRepeatCount} reason={criticalReason ?? "unknown"} ack={pack.BattleInfo.ClientAckedFrame} move=({pack.BattleInfo.SelfOperation.PlayerMoveX:F4},{pack.BattleInfo.SelfOperation.PlayerMoveY:F4}) clientMoves={pack.BattleInfo.ClientMoves.Count} attackCount={pack.BattleInfo.SelfOperation.AttackOperations.Count}");
+                    Logging.HYLDDebug.FrameTrace($"[CriticalInput][Send] tick={operationFrameId} repeat={sendIndex + 1}/{normalizedRepeatCount} reason={criticalReason ?? "unknown"} ack={pack.BattleInfo.ClientInput.AckedServerFrame} clientMoves={pack.BattleInfo.ClientInput.Moves.Count} attackCount={pack.BattleInfo.ClientInput.Attacks.Count}");
                 }
                 Send(pack);
             }

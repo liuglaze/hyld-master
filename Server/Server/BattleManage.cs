@@ -195,7 +195,7 @@ namespace Server
 			}
 		}
 
-		public void FinishBattle(int battleId, Dictionary<int, BattleFrameSync> frameHistory)
+		public void FinishBattle(int battleId, Dictionary<int, BattleFrame> frameHistory)
 		{
 			BattleContext battleContext;
 			lock (_manageLock)
@@ -223,12 +223,13 @@ namespace Server
 				battleUser.Playername = matchUser.userName;
 				battleUser.Hero = matchUser.hero;
 				battleUser.Teamid = matchUser.teamid;
-				battleInfo.BattleUserInfo.Add(battleUser);
+				battleInfo.BattleUsers.Add(battleUser);
 			}
 
-			foreach (BattleFrameSync frame in frameHistory.Values)
+			battleInfo.ServerUpdate = new BattleServerUpdate();
+			foreach (BattleFrame frame in frameHistory.Values)
 			{
-				battleInfo.Frames.Add(frame);
+				battleInfo.ServerUpdate.Frames.Add(frame);
 			}
 
 			mainPack.Str = ((int)battleContext.FightPattern).ToString();

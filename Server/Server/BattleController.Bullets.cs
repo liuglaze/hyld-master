@@ -9,21 +9,21 @@ namespace Server
 	{
 		// ==================== 子弹生成 ====================
 
-		private void SpawnBulletsFromOperations(BattleFrameSync frameOp)
+		private void SpawnBulletsFromOperations(BattleFrame frameOp)
 		{
-			foreach (PlayerOperation op in frameOp.Operations)
+			foreach (PlayerFrameInput op in frameOp.PlayerInputs)
 			{
-				int bpId = op.Battleid;
-				if (op.AttackOperations == null || op.AttackOperations.Count == 0) continue;
+				int bpId = op.BattlePlayerId;
+				if (op.Attacks == null || op.Attacks.Count == 0) continue;
 				if (!playerPositions.TryGetValue(bpId, out _)) continue;
 				if (!playerTeamIds.TryGetValue(bpId, out int teamId)) continue;
 				if (!playerHeroes.TryGetValue(bpId, out Hero hero)) continue;
 
 				HeroConfig.BulletParams cfg = HeroConfig.Get(hero);
 
-				foreach (AttackOperation atk in op.AttackOperations)
+				foreach (ServerAttack atk in op.Attacks)
 				{
-					int clientFrameId = atk.ClientFrameId;
+					int clientFrameId = atk.AttackMoveFrame;
 					// 服务端 clamp：防止客户端帧号超过服务端当前帧（丢包恢复后 predicted_frameID 跳跃导致）
 					if (clientFrameId > frameid)
 					{
@@ -64,12 +64,12 @@ namespace Server
 		}
 
 		/// <summary>
-		/// 根据 AttackOperation 生成服务端子弹。
+		/// 根据 ServerAttack 生成服务端子弹。
 		/// 每个攻击按各自 clientFrameId 独立解析出生点：优先历史快照，缺失时回退到当前权威位置。
 		/// 返回生成的子弹列表，由调用者决定是否做追帧模拟或直接加入 activeBullets。
 		/// </summary>
 		private List<ServerBullet> SpawnServerBullets(int ownerBattleId, int ownerTeamId,
-			AttackOperation atk, HeroConfig.BulletParams cfg, int clientFrameId)
+			ServerAttack atk, HeroConfig.BulletParams cfg, int clientFrameId)
 		{
 			var bullets = new List<ServerBullet>();
 			if (!playerPositions.TryGetValue(ownerBattleId, out ServerVector3 spawnPos))
@@ -86,6 +86,7 @@ namespace Server
 			atk.SpawnPosX = spawnPos.X;
 			atk.SpawnPosY = spawnPos.Y;
 			atk.SpawnPosZ = spawnPos.Z;
+			atk.SpawnServerFrame = frameid;
 
 			// proto 字段语义（俯视角，摇杆轴与世界轴互换）：
 			//   towardy = joystickAxis.y -> 世界 X 轴分量
@@ -98,13 +99,13 @@ namespace Server
 			if (playerTeamIds.TryGetValue(ownerBattleId, out int bulletTid) && bulletTid != baseTeamId)
 				teamSign = -1f;
 
-			float baseX = -atk.Towardy * teamSign; // 世界 X：取反 + 队伍镜像
-			float baseZ = atk.Towardx * teamSign;  // 世界 Z：队伍镜像
+			float baseX = -atk.TowardY * teamSign; // 世界 X：取反 + 队伍镜像
+			float baseZ = atk.TowardX * teamSign;  // 世界 Z：队伍镜像
 
 			ServerVector3 baseDir = new ServerVector3(baseX, 0, baseZ).Normalized();
 			if (baseDir.Magnitude() < 1e-6f) return bullets; // 方向无效
 
-			Logging.Debug.Log($"[BulletDir] bp{ownerBattleId} teamSign={teamSign} raw=({atk.Towardx:F3},{atk.Towardy:F3}) -> dir=({baseDir.X:F3},{baseDir.Z:F3}) pos=({spawnPos.X:F2},{spawnPos.Z:F2})");
+			Logging.Debug.Log($"[BulletDir] bp{ownerBattleId} teamSign={teamSign} raw=({atk.TowardX:F3},{atk.TowardY:F3}) -> dir=({baseDir.X:F3},{baseDir.Z:F3}) pos=({spawnPos.X:F2},{spawnPos.Z:F2})");
 
 			// 散弹扇形生成
 			int bulletCount = cfg.BulletCount;

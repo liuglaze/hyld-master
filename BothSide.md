@@ -4,7 +4,25 @@
 
 ---
 
+## 0. 当前 BattleInfo 单包结构（battle-protocol-split，2026-06）
+
+- **外层不变**：战斗 UDP 仍然通过一个 `MainPack` 收发，`RequestCode.Battle` + 原有 `ActionCode` 不变，战斗载荷仍在 `MainPack.battleInfo`。
+- **BattleInfo 当前结构**：
+  - `server_frame`：服务端权威帧号；下行权威帧包填写，上行可为 0。
+  - `rand_seed`、`battle_users`：开局初始化信息。
+  - `client_input`：客户端上行输入，包含 `battle_player_id`、`client_tick`、`acked_server_frame`、`rtt_ms`、`moves`、`attacks`。
+  - `server_update`：服务端下行更新，包含 `frames`、`move_ack`、`hit_events`。
+- **移动上行**：只走 `BattleClientInput.moves`（`ClientMove`），按 `move_frame` 做 CMC-style 单调处理。
+- **攻击上行**：只走 `BattleClientInput.attacks`（`ClientAttack`），字段为 `attack_id`、`attack_move_frame`、`toward_x/y`。
+- **权威下行**：只走 `BattleServerUpdate.frames`（`BattleFrame`），每帧包含 `player_inputs` 与 `player_states`；攻击表现使用 `ServerAttack`，包含 `spawn_pos_x/y/z` 与 `spawn_server_frame`。
+- **已删除旧字段/旧类型**：`BattleInfo.selfOperation`、`BattleInfo.client_moves`、`BattleInfo.client_acked_frame`、`BattleInfo.client_rtt_ms`、`BattleInfo.acked_move_frame`、顶层 `BattleInfo.move_ack`、顶层 `BattleInfo.hit_events`、`BattleFrameSync`、`PlayerOperation`、`AttackOperation`。
+- **不做兼容兜底**：客户端与服务端必须由同一份权威 `SocketProto.proto` 生成后一起运行。
+
+---
+
 ## 1. AttackOperation.client_frame_id（新增字段）
+
+> 历史记录：当前协议已由 `ClientAttack.attack_move_frame` / `ServerAttack.attack_move_frame` 取代 `AttackOperation.client_frame_id`。
 
 - **proto 字段**：`AttackOperation.client_frame_id = 4`（int32）
 - **语义**：客户端构造 AttackOperation 时，填入当前 `BattleData.predicted_frameID`，表示攻击发出时客户端的预测帧号。

@@ -116,21 +116,21 @@ namespace Manger
                 Logging.HYLDDebug.FrameTrace($"[AttackPipeline] TimeoutCleanup removed={removedCount} currentFrame={predicted_frameID} remaining={pendingAttacks.Count}");
             }
 
-            selfOperation.AttackOperations.Clear();
+            selfOperation.Attacks.Clear();
             for (int i = 0; i < pendingAttacks.Count; i++)
             {
-                AttackOperation attackOp = new AttackOperation();
+                ClientAttack attackOp = new ClientAttack();
                 attackOp.AttackId = pendingAttacks[i].AttackId;
-                attackOp.Towardx = pendingAttacks[i].Towardx;
-                attackOp.Towardy = pendingAttacks[i].Towardy;
+                attackOp.TowardX = pendingAttacks[i].Towardx;
+                attackOp.TowardY = pendingAttacks[i].Towardy;
                 // 6.1: 填充客户端预测帧号，供服务端 V2 延迟补偿使用
                 // 使用入队时锁定的帧号（重发时不刷新，避免丢包恢复后 predicted_frameID 跳跃导致 delay<0）
-                attackOp.ClientFrameId = pendingAttacks[i].ClientFrameId;
-                selfOperation.AttackOperations.Add(attackOp);
+                attackOp.AttackMoveFrame = pendingAttacks[i].ClientFrameId;
+                selfOperation.Attacks.Add(attackOp);
             }
             if (pendingAttacks.Count > 0)
             {
-                Logging.HYLDDebug.FrameTrace($"[AttackPipeline] Flush pendingCount={pendingAttacks.Count} -> selfOp.AttackOps={selfOperation.AttackOperations.Count}");
+                Logging.HYLDDebug.FrameTrace($"[AttackPipeline] Flush pendingCount={pendingAttacks.Count} -> selfOp.Attacks={selfOperation.Attacks.Count}");
             }
         }
 
@@ -142,18 +142,18 @@ namespace Manger
         /// 3. 把本地 pendingAttacks 队列里所有 <= maxConfirmedId 的攻击全部移除（因为服务端的确认是累进的）。
         /// 4. 顺便把本地预测子弹的防重名集合 `_predictedBulletAttackIds` 中老的 AttackId 也清掉，防止内存泄露。
         /// </summary>
-        public void ConfirmAttacks(PlayerOperation authorityOperation)
+        public void ConfirmAttacks(PlayerFrameInput authorityOperation)
         {
-            if (authorityOperation == null || authorityOperation.AttackOperations == null || authorityOperation.AttackOperations.Count == 0)
+            if (authorityOperation == null || authorityOperation.Attacks == null || authorityOperation.Attacks.Count == 0)
             {
                 return;
             }
             int maxConfirmedId = 0;
-            for (int i = 0; i < authorityOperation.AttackOperations.Count; i++)
+            for (int i = 0; i < authorityOperation.Attacks.Count; i++)
             {
-                if (authorityOperation.AttackOperations[i].AttackId > maxConfirmedId)
+                if (authorityOperation.Attacks[i].AttackId > maxConfirmedId)
                 {
-                    maxConfirmedId = authorityOperation.AttackOperations[i].AttackId;
+                    maxConfirmedId = authorityOperation.Attacks[i].AttackId;
                 }
             }
             pendingAttacks.RemoveAll(a => a.AttackId <= maxConfirmedId);

@@ -12,10 +12,10 @@ namespace Server
 		// ==================== 权威状态打包 ====================
 
 		/// <summary>
-		/// 将当前帧所有玩家的权威状态打包到 BattleFrameSync.PlayerStates 中下发。
+		/// 将当前帧所有玩家的权威状态打包到 BattleFrame.PlayerStates 中下发。
 		/// 填充位置（pos_x/y/z）、HP 和死亡状态。
 		/// </summary>
-		private void PackPlayerStates(BattleFrameSync frameOp, int currentFrameId)
+		private void PackPlayerStates(BattleFrame frameOp, int currentFrameId)
 		{
 			foreach (var kvp in playerPositions)
 			{
@@ -49,7 +49,7 @@ namespace Server
 
 		private void SendUnsyncedFrames(string endpoint, int battlePlayerId, List<HitEvent> hitEventsThisFrame)
 		{
-			if (string.IsNullOrEmpty(endpoint) || !dic_historyFrames.TryGetValue(frameid, out BattleFrameSync currentFrame))
+			if (string.IsNullOrEmpty(endpoint) || !dic_historyFrames.TryGetValue(frameid, out BattleFrame currentFrame))
 			{
 				return;
 			}
@@ -64,21 +64,18 @@ namespace Server
 				pack.Requestcode = RequestCode.Battle;
 				pack.Actioncode = ActionCode.BattlePushDowmAllFrameOpeartions;
 				BattleInfo battleInfo = new BattleInfo();
-				battleInfo.Frames.Add(currentFrame);
-				battleInfo.OperationID = frameid;
-				battleInfo.AckedMoveFrame = dic_lastProcessedMoveFrame != null && dic_lastProcessedMoveFrame.TryGetValue(battlePlayerId, out int moveFrame)
-					? moveFrame
-					: 0;
+				battleInfo.ServerFrame = frameid;
+				battleInfo.ServerUpdate = new BattleServerUpdate();
+				battleInfo.ServerUpdate.Frames.Add(currentFrame);
 				if (dic_lastMoveAck != null && dic_lastMoveAck.TryGetValue(battlePlayerId, out MoveAckResult moveAck))
 				{
-					battleInfo.MoveAck = moveAck.Clone();
-					battleInfo.AckedMoveFrame = moveAck.AckedMoveFrame;
+					battleInfo.ServerUpdate.MoveAck = moveAck.Clone();
 				}
 
 				if (hitEventsThisFrame != null && hitEventsThisFrame.Count > 0)
 				{
 					foreach (HitEvent evt in hitEventsThisFrame)
-						battleInfo.HitEvents.Add(evt);
+						battleInfo.ServerUpdate.HitEvents.Add(evt);
 				}
 
 				pack.BattleInfo = battleInfo;
@@ -104,12 +101,14 @@ namespace Server
 		{
 			lock (_battleLock)
 			{
-				// SelfOperation 当前仍承载 battlePlayerId 和攻击列表；移动已迁移到 ClientMoves。
-				// ClientAckedFrame 则是客户端显式确认“自己已收到并消费到哪一帧服务端权威状态”。
-				PlayerOperation operation = battleInfo.SelfOperation;
-				int clientAckedFrame = battleInfo.ClientAckedFrame; // 客户端已确认收到的最新权威帧
+				BattleClientInput input = battleInfo.ClientInput;
+				if (input == null)
+				{
+					return;
+				}
 
-				int battlePlayerId = operation.Battleid;
+				int clientAckedFrame = input.AckedServerFrame;
+				int battlePlayerId = input.BattlePlayerId;
 				// battlePlayerId 不存在通常意味着：玩家已退出战斗、战斗结束，或该输入属于非法/过时 battle 上下文。
 				// 这里直接忽略，避免把脏数据写进当前战斗缓冲区。
 				if (!dic_playerAckedFrameId.ContainsKey(battlePlayerId))
@@ -133,37 +132,35 @@ namespace Server
 				bool ackAdvanced = effectiveAckedFrame > previousAckedFrame;
 				if (ackAdvanced || ackGap >= AckGapRepeatThreshold || frameid % 60 == 0)
 				{
-					Logging.Debug.Log($"[AckGap][Recv] bp={battlePlayerId} serverFrame={frameid} uploadOperationId={battleInfo.OperationID} clientAckedFrame={clientAckedFrame} storedAckedFrame={effectiveAckedFrame} prevAckedFrame={previousAckedFrame} ackGap={ackGap} ackAdvanced={ackAdvanced} clientRttMs={battleInfo.ClientRttMs}");
+					Logging.Debug.Log($"[AckGap][Recv] bp={battlePlayerId} serverFrame={frameid} clientTick={input.ClientTick} clientAckedFrame={clientAckedFrame} storedAckedFrame={effectiveAckedFrame} prevAckedFrame={previousAckedFrame} ackGap={ackGap} ackAdvanced={ackAdvanced} clientRttMs={input.RttMs}");
 				}
 
-				// dic_pendingAttacks 里存的 PlayerOperation 这里只把它当作“攻击缓冲容器”使用，
-				// 不是完整的当帧输入本体。这样可以复用 proto 结构，避免再定义一套单独的待发攻击容器类型。
-				if (!dic_pendingAttacks.TryGetValue(battlePlayerId, out PlayerOperation bufferedAttackOperation)
+				if (!dic_pendingAttacks.TryGetValue(battlePlayerId, out PlayerFrameInput bufferedAttackOperation)
 					|| bufferedAttackOperation == null)
 				{
-					bufferedAttackOperation = new PlayerOperation { Battleid = battlePlayerId };
+					bufferedAttackOperation = new PlayerFrameInput { BattlePlayerId = battlePlayerId };
 					dic_pendingAttacks[battlePlayerId] = bufferedAttackOperation;
 				}
 
-				ProcessClientMoves(battlePlayerId, battleInfo);
+				ProcessClientMoves(battlePlayerId, input);
 
 				// 攻击与移动解耦：
 				// - 移动使用 ClientMoveFrame 做上行排序，并在接收合法 move 时推进权威位置。
 				// - 攻击是离散事件，只要未过期且未重复，就先缓存进 pendingAttacks。
 				// 后续 CollectAndBroadcastCurrentFrame 会把这些待处理攻击并入当前权威帧。
-				if (operation.AttackOperations != null && operation.AttackOperations.Count > 0)
+				if (input.Attacks != null && input.Attacks.Count > 0)
 				{
-					foreach (var incomingAttack in operation.AttackOperations)
+					foreach (var incomingAttack in input.Attacks)
 					{
-						Logging.Debug.Log($"[SERVER DEBUG] 收到来自 BattlePlayerID {battlePlayerId} 的攻击. 原始方向: ({incomingAttack.Towardx}, {incomingAttack.Towardy}) clientFrameId={incomingAttack.ClientFrameId}");
+						Logging.Debug.Log($"[SERVER DEBUG] 收到来自 BattlePlayerID {battlePlayerId} 的攻击. 原始方向: ({incomingAttack.TowardX}, {incomingAttack.TowardY}) attackMoveFrame={incomingAttack.AttackMoveFrame}");
 
 						// 攻击允许有一定延迟补偿空间，但不是无限回补。
 						// 若攻击声明的 clientFrameId 距当前服务端帧已经太老，就拒绝进入待处理队列，
 						// 避免超迟到攻击重新命中过去状态，拉高补偿复杂度和作弊面。
-						int frameDelay = frameid - incomingAttack.ClientFrameId;
-						if (incomingAttack.ClientFrameId > 0 && frameDelay > MaxAcceptableAttackDelay)
+						int frameDelay = frameid - incomingAttack.AttackMoveFrame;
+						if (incomingAttack.AttackMoveFrame > 0 && frameDelay > MaxAcceptableAttackDelay)
 						{
-							Logging.Debug.Log($"[AttackTimeout] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} clientFrame={incomingAttack.ClientFrameId} serverFrame={frameid} delay={frameDelay} max={MaxAcceptableAttackDelay}");
+							Logging.Debug.Log($"[AttackTimeout] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} attackMoveFrame={incomingAttack.AttackMoveFrame} serverFrame={frameid} delay={frameDelay} max={MaxAcceptableAttackDelay}");
 							continue;
 						}
 
@@ -172,7 +169,14 @@ namespace Server
 						// 这允许客户端在 UDP 丢包时持续重发“同一次攻击”，而服务端只真正处理一次。
 						if (incomingAttack.AttackId > dic_lastProcessedAttackId[battlePlayerId])
 						{
-							bufferedAttackOperation.AttackOperations.Add(incomingAttack);
+							bufferedAttackOperation.Attacks.Add(new ServerAttack
+							{
+								AttackId = incomingAttack.AttackId,
+								AttackerBattlePlayerId = battlePlayerId,
+								AttackMoveFrame = incomingAttack.AttackMoveFrame,
+								TowardX = incomingAttack.TowardX,
+								TowardY = incomingAttack.TowardY,
+							});
 							dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
 							Logging.Debug.Log($"[AttackDedup] ACCEPT bp={battlePlayerId} attackId={incomingAttack.AttackId} lastProcessed={dic_lastProcessedAttackId[battlePlayerId]} delay={frameDelay}");
 						}
@@ -190,25 +194,25 @@ namespace Server
 			}
 		}
 
-		private void ProcessClientMoves(int battlePlayerId, BattleInfo battleInfo)
+		private void ProcessClientMoves(int battlePlayerId, BattleClientInput input)
 		{
-			if (battleInfo.ClientMoves == null || battleInfo.ClientMoves.Count == 0)
+			if (input.Moves == null || input.Moves.Count == 0)
 			{
 				return;
 			}
 
-			for (int i = 0; i < battleInfo.ClientMoves.Count; i++)
+			for (int i = 0; i < input.Moves.Count; i++)
 			{
-				ClientMove move = battleInfo.ClientMoves[i];
+				ClientMove move = input.Moves[i];
 				if (move.MoveType == MoveType.OldMove)
 				{
 					ProcessClientMove(battlePlayerId, move);
 				}
 			}
 
-			for (int i = 0; i < battleInfo.ClientMoves.Count; i++)
+			for (int i = 0; i < input.Moves.Count; i++)
 			{
-				ClientMove move = battleInfo.ClientMoves[i];
+				ClientMove move = input.Moves[i];
 				if (move.MoveType != MoveType.OldMove)
 				{
 					ProcessClientMove(battlePlayerId, move);
@@ -360,7 +364,7 @@ namespace Server
 		private void HandleBattleEnd()
 		{
 			Dictionary<int, string> endpointSnapshot;
-			Dictionary<int, BattleFrameSync> historySnapshot;
+			Dictionary<int, BattleFrame> historySnapshot;
 
 			lock (_battleLock)
 			{
@@ -371,7 +375,7 @@ namespace Server
 				_hasEnded = true;
 				_isRun = false;
 				endpointSnapshot = new Dictionary<int, string>(battlePlayerIdToIp);
-				historySnapshot = new Dictionary<int, BattleFrameSync>(dic_historyFrames);
+				historySnapshot = new Dictionary<int, BattleFrame>(dic_historyFrames);
 
 				// 清理子弹和位置历史
 				activeBullets?.Clear();

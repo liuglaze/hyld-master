@@ -155,12 +155,12 @@ namespace Manger
         ///    则在这里强行补播一个 "Hit" 受击动画，防止玩家莫名其妙掉血却没反馈。
         /// 6. 【权威死亡判定】：如果服务端说你死了(IsDead=true)且客户端还活着，立刻强制血量-1，置标志位 isNotDie=false，并播放死亡动画。
         /// </summary>
-        public void ApplyAuthoritativeHpAndDeath(Google.Protobuf.Collections.RepeatedField<BattleFrameSync> frames, int frameId)
+        public void ApplyAuthoritativeHpAndDeath(Google.Protobuf.Collections.RepeatedField<BattleFrame> frames, int frameId)
         {
             if (frames == null || frames.Count == 0) return;
 
-            BattleFrameSync lastFrame = frames[frames.Count - 1];
-            int batchLastFrameId = lastFrame.Frameid;
+            BattleFrame lastFrame = frames[frames.Count - 1];
+            int batchLastFrameId = lastFrame.ServerFrame;
 
             // -- 帧序保护：跳过乱序到达的旧批次，防止 HP 回弹 --
             if (batchLastFrameId <= _lastAuthHpFrameId)

@@ -29,12 +29,12 @@ Assets/Scripts/Manger/CommandManger.cs
 
 - AddCommad_Move 只缓存"最新移动值"（连续输入）。
 - AddCommad_Attack 入队到 BattleData.pendingAttacks（分配唯一 AttackID）。
-- Execute() 每个发送帧先写移动，再消费离散命令，最后 FlushPendingAttacksToOperation 把所有待确认攻击打包。
+- Execute() 每个发送帧先写本地 LocalPlayerInput 移动，再消费离散命令，最后 FlushPendingAttacksToOperation 把所有待确认攻击打包为 ClientAttack。
 
 **攻击操作重发窗口机制（四段式）**：
 
 1. **EnqueueAttack**：入队时锁定 `ClientFrameId = predicted_frameID`，后续重发不刷新（避免丢包恢复后 predicted_frameID 跳跃导致延迟补偿 delay<0）。
-2. **FlushPendingAttacksToOperation**：每帧先做**超时清理**（`predicted_frameID - ClientFrameId > MaxClientAttackAge=10` 的攻击直接移除），然后将剩余待确认攻击全部打包到 selfOperation.AttackOperations。
+2. **FlushPendingAttacksToOperation**：每帧先做**超时清理**（`predicted_frameID - ClientFrameId > MaxClientAttackAge=10` 的攻击直接移除），然后将剩余待确认攻击全部打包到 `BattleInfo.client_input.attacks`。
 3. **dic_lastProcessedAttackId**（服务端）：服务端记录每个玩家最后处理的 AttackId，重复收到旧攻击时忽略。超过 `MaxAcceptableAttackDelay=6` 帧的攻击直接 REJECT。
 4. **ConfirmAttacks**：收到权威帧后，若该帧包含本玩家的攻击确认（HasSelfAuthorityInput），调用 ConfirmAttacks 从 pendingAttacks 移除已确认的攻击（通过 maxConfirmedId 批量移除 <= maxConfirmedId 的项）。
 
@@ -47,6 +47,7 @@ Assets/Scripts/Server/Manger/Battle/BattleManger.cs
 - **驱动方式**：已从 `InvokeRepeating("Send_operation", _time, _time)` 改为 `Update()` 中累加器驱动。`_tickAccumulator += Time.deltaTime`，当 `_tickAccumulator >= currentTickInterval` 时调用 `BattleTick()`（原 Send_operation 逻辑），每帧最多执行 `maxCatchupPerUpdate=3` 次 tick。
 - **动态 Tick 调节**：BattleStart 后先以固定 `frameTime` 推进并发送 `ClientMove`；RTT 与首个权威帧就绪后，`currentTickInterval = 0.016f / actualSpeedFactor`，`actualSpeedFactor` 由 `AdjustTickInterval()` 每帧平滑调整（详见 §X 动态追帧系统）。
 - **BattleReady / BattleStart 握手语义**：客户端在初始化完成后每 200ms 重发一次 `BattleReady`；收到 `BattleStart` 后才会 `CancelInvoke("Send_BattleReady")` 并开启 `_battleTickActive`。服务端已支持：若首次 `BattleStart` 丢失，客户端继续重发的 `BattleReady` 会触发服务端单播补发 `BattleStart`。
+- **战斗包结构**：外层仍是单个 `MainPack.battleInfo`。上行输入写入 `BattleInfo.client_input`（`battle_player_id/client_tick/acked_server_frame/rtt_ms/moves/attacks`）；下行权威写入 `BattleInfo.server_update`（`frames/move_ack/hit_events`）。旧 `selfOperation`、顶层 `client_moves`、顶层 `move_ack`、顶层 `hit_events` 已删除。
 - **Update 管线顺序**：DrainAndDispatch → Ping 调度 → 尝试 CalcTargetFrame + AdjustTickInterval（未就绪则固定 tick）→ 累加器循环（while tick）。
 - 联机预测路径（IsPredictionEnabled=true），BattleTick() 内部逻辑：
   1. DrainAndDispatch() -> 消费 UDP 队列中已收到的权威帧
@@ -445,8 +446,9 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 ### 8.5 上报帧号与 MoveAck 适配
 
 - **客户端**：`uploadOperationId = nextFrame`，语义为“当前 BattleTick 真实推进并上报的本地逻辑帧号”；`targetFrame` 仅用于调节 Tick 频率。
-- **移动上行**：`BattleInfo.client_moves` 携带 `OldMove + NewMove`。普通帧可先挂起为 `pendingMove`；下一帧可合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove。每个 `ClientMove.move_frame` 是客户端预测帧号。
-- **服务端权威移动 Ack**：服务端下行 `BattleInfo.move_ack`，其中 `acked_move_frame` 用于裁剪 SavedMove，`ack_good_move=false` 时携带 `correct_pos_x/y/z`。
+- **移动上行**：`BattleInfo.client_input.moves` 携带 `OldMove + NewMove`。普通帧可先挂起为 `pendingMove`；下一帧可合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove。每个 `ClientMove.move_frame` 是客户端预测帧号。
+- **攻击上行**：`BattleInfo.client_input.attacks` 携带 `ClientAttack`，字段为 `attack_id / attack_move_frame / toward_x / toward_y`。
+- **服务端权威移动 Ack**：服务端下行 `BattleInfo.server_update.move_ack`，其中 `acked_move_frame` 用于裁剪 SavedMove，`ack_good_move=false` 时携带 `correct_pos_x/y/z`。
 - **服务端权威帧 Ack**：客户端仍通过 `ClientAckedFrame` 上报已应用的最新 ServerFrame，用于服务端下行帧确认统计。
 
 ### 8.6 端到端数据流

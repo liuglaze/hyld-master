@@ -107,8 +107,8 @@ public class CommandManger
     public void Execute()
     {
         // 每个发送帧都先应用最新移动输入（避免摇杆事件频率影响）
-        Manger.BattleData.Instance.selfOperation.PlayerMoveX = latestMoveX;
-        Manger.BattleData.Instance.selfOperation.PlayerMoveY = latestMoveY;
+        Manger.BattleData.Instance.selfOperation.MoveX = latestMoveX;
+        Manger.BattleData.Instance.selfOperation.MoveY = latestMoveY;
 
         // 再消费这一帧的离散指令（如攻击 → 入队 pendingAttacks）
         for (int i = 0; i < allCommad.Count; i++)

@@ -41,7 +41,7 @@ namespace MVC
                 ExitMathcing.SetActive(false);
                 //初始化比赛数据，异步加载战斗场景
                 Logging.HYLDDebug.LogError("初始化比赛数据，异步加载战斗场景    " + pack);
-                Manger.BattleData.Instance.InitBattleInfo(pack.BattleInfo.RandSeed, pack.BattleInfo.BattleUserInfo);
+                Manger.BattleData.Instance.InitBattleInfo(pack.BattleInfo.RandSeed, pack.BattleInfo.BattleUsers);
                 Manger.ClearSenceManger.LoadScene(SceneConfig.battleScene);
             }
         }

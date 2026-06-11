@@ -99,11 +99,10 @@
   ## 5. 协作检查清单（服务端联调时）
 
   1. **帧与操作ID语义**
-     - ServerFrame：服务端 `frameid`，下行 `BattleInfo.OperationID` 与 `BattleFrameSync.frameid`。
+     - ServerFrame：服务端 `frameid`，下行 `BattleInfo.server_frame` 与 `BattleFrame.server_frame`。
      - ClientMoveFrame：客户端本地预测 tick，写入 `ClientMove.move_frame`。
-     - ClientAckedFrame：客户端已应用的最新 ServerFrame，写入 `BattleInfo.client_acked_frame`。
-     - MoveAck：服务端已处理的最新 ClientMoveFrame 与确认/修正结果，下行 `BattleInfo.move_ack`。
-     - AckedMoveFrame：兼容字段，值与 `move_ack.acked_move_frame` 同步。
+     - ClientAckedFrame：客户端已应用的最新 ServerFrame，写入 `BattleInfo.client_input.acked_server_frame`。
+     - MoveAck：服务端已处理的最新 ClientMoveFrame 与确认/修正结果，下行 `BattleInfo.server_update.move_ack`。
   2. **发包频率期望**
      - 客户端 BattleStart 后先按固定 `frameTime` 发送移动，RTT 与首个权威帧就绪后 tick 频率动态可变。上行移动以 `ClientMove` 单调排序，服务端在接收合法 move 时推进权威位置。
   3. **目标帧余量 vs ClientMoveFrame**
@@ -111,9 +110,9 @@
      - RTT 和首个权威帧未初始化时，客户端不计算目标帧，仍按固定 tick 生成真实 ClientMoveFrame。
      - `inputBufferSize` 是历史兼容配置项，服务端不再按 Input Buffer 消费移动。
   4. **同帧输入一致性**
-     - 重点核对客户端自玩家 Battleid 对应的 PlayerOperation。
+     - 重点核对客户端 `BattleInfo.client_input.battle_player_id`，移动在 `client_input.moves`，攻击在 `client_input.attacks`。
   5. **权威批次完整性 / 当前帧重复下发**
-     - 服务端已从“按 `ClientAckedFrame` 组织最近窗口补帧”切换为“每个权威帧只下发当前帧，但在同一帧内重复发送多次”。客户端应支持 `BattleInfo.Frames` 长期仅含 1 个当前帧元素，并正确处理同一当前帧的重复到达。
+     - 服务端已从“按客户端 ack 组织最近窗口补帧”切换为“每个权威帧只下发当前帧，但在同一帧内重复发送多次”。客户端应支持 `BattleInfo.server_update.frames` 长期仅含 1 个当前帧元素，并正确处理同一当前帧的重复到达。
   6. **结束包边界**
      - 客户端进入 GameOver 后会丢弃大部分战斗包（保留 BattlePushDowmGameOver）。
 
@@ -124,18 +123,14 @@
     - RequestCode
     - ActionCode（含新增 Ping=41, Pong=42）
     - MainPack.timestamp（int64，UDP Ping/Pong 时间戳）
-    - BattleInfo.OperationID
-    - BattleInfo.frames
-    - BattleInfo.client_moves
-    - BattleInfo.client_acked_frame
-    - BattleInfo.acked_move_frame（兼容字段）
-    - BattleInfo.move_ack（MoveAckResult：acked_move_frame / ack_good_move / correct_pos_x/y/z / frame_discrepancy / resolving_frame_discrepancy）
-    - PlayerOperation.Battleid
-    - AttackOperation.client_frame_id（客户端预测帧号，供服务端 V2 延迟补偿）
-    - AttackOperation.spawn_pos_x/y/z（服务端回填的攻击者历史位置，供客户端半空推进）
-    - BattleInfo.hit_events（HitEvent 列表，服务端伤害判定结果下行）
+    - BattleInfo.server_frame
+    - BattleInfo.client_input（battle_player_id / client_tick / acked_server_frame / rtt_ms / moves / attacks）
+    - BattleInfo.server_update（frames / move_ack / hit_events）
+    - ClientMove.move_frame
+    - ClientAttack.attack_move_frame
+    - ServerAttack.spawn_pos_x/y/z 与 spawn_server_frame
   - HitEvent 字段说明：
-    - attack_id：攻击唯一 ID（对应 AttackOperation.attack_id）
+    - attack_id：攻击唯一 ID（对应 ClientAttack / ServerAttack 的 attack_id）
     - attacker_battle_id：攻击者 battleId
     - victim_battle_id：被攻击者 battleId
     - damage：本次扣血量
@@ -150,8 +145,8 @@
   ## 7. 攻击方向编解码对齐（重要）
 
   **proto 字段语义（摇杆轴与世界轴互换）**：
-  - `AttackOperation.towardx` = `joystickAxis.x`（对应世界 Z 轴分量）
-  - `AttackOperation.towardy` = `joystickAxis.y`（对应世界 X 轴分量）
+  - `ClientAttack.toward_x` / `ServerAttack.toward_x` = `joystickAxis.x`（对应世界 Z 轴分量）
+  - `ClientAttack.toward_y` / `ServerAttack.toward_y` = `joystickAxis.y`（对应世界 X 轴分量）
 
   **客户端消费**（HYLDPlayerManger / BattleManger）：
   ```
@@ -172,7 +167,7 @@
 
   ## 8. 服务端 ClientMove 移动时间轴（CMC-style）
 
-  服务端不再使用移动 Input Buffer。客户端上行移动写入 `BattleInfo.client_moves`，服务端按 ClientMoveFrame 单调处理，并在接收合法 Move 时按 `moveFrame` 差值做权威重模拟。
+  服务端不再使用移动 Input Buffer。客户端上行移动写入 `BattleInfo.client_input.moves`，服务端按 ClientMoveFrame 单调处理，并在接收合法 Move 时按 `moveFrame` 差值做权威重模拟。
 
   - **数据结构**：每个玩家维护 `dic_lastProcessedMoveFrame`、`dic_lastProcessedMoveServerFrame`、`dic_lastProcessedMoveInput`、帧差异累计状态与最新 `MoveAckResult`。
   - **接收**（`UpdatePlayerOperation` / `ProcessClientMove`）：

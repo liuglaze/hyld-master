@@ -441,11 +441,11 @@ namespace Server
 					return battlePlayerId > 0;
 
 				case ActionCode.BattlePushDowmPlayerOpeartions:
-					if (pack.BattleInfo == null || pack.BattleInfo.SelfOperation == null)
+					if (pack.BattleInfo == null || pack.BattleInfo.ClientInput == null)
 					{
 						return false;
 					}
-					battlePlayerId = pack.BattleInfo.SelfOperation.Battleid;
+					battlePlayerId = pack.BattleInfo.ClientInput.BattlePlayerId;
 					return battlePlayerId > 0;
 
 				case ActionCode.ClientSendGameOver:

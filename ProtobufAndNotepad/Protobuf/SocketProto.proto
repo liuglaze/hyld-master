@@ -224,6 +224,7 @@ message BattleServerUpdate
     repeated BattleFrame frames=1;
     MoveAckResult move_ack=2;
     repeated HitEvent hit_events=3;
+    int32 state_base_frame=4;
 }
 
 message BattleFrame
@@ -306,4 +307,5 @@ message AuthoritativePlayerState
     float pos_z=4;
     int32 hp=5;
     bool is_dead=6;
+    uint32 state_mask=7;
 }

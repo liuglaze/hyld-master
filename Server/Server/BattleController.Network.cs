@@ -12,8 +12,8 @@ namespace Server
 		// ==================== 权威状态打包 ====================
 
 		/// <summary>
-		/// 将当前帧所有玩家的权威状态打包到 BattleFrame.PlayerStates 中下发。
-		/// 填充位置（pos_x/y/z）、HP 和死亡状态。
+		/// 将当前帧所有玩家的完整权威状态写入历史帧。
+		/// 网络发送时会按接收者已确认状态裁剪为增量。
 		/// </summary>
 		private void PackPlayerStates(BattleFrame frameOp, int currentFrameId)
 		{
@@ -31,8 +31,11 @@ namespace Server
 					PosZ = pos.Z,
 					Hp = hp,
 					IsDead = isDead,
+					StateMask = AuthorityStateMaskAll,
 				});
 			}
+
+			StoreAuthorityStateSnapshot(currentFrameId, frameOp.PlayerStates);
 
 			// 每 60 帧打印一次验证日志（约每秒一次），避免刷屏
 			if (currentFrameId % 60 == 0)
@@ -66,7 +69,9 @@ namespace Server
 				BattleInfo battleInfo = new BattleInfo();
 				battleInfo.ServerFrame = frameid;
 				battleInfo.ServerUpdate = new BattleServerUpdate();
-				battleInfo.ServerUpdate.Frames.Add(currentFrame);
+				BattleFrame receiverFrame = BuildDeltaFrameForReceiver(currentFrame, battlePlayerId, out int stateBaseFrame, out int deltaStateCount, out int fullStateCount);
+				battleInfo.ServerUpdate.StateBaseFrame = stateBaseFrame;
+				battleInfo.ServerUpdate.Frames.Add(receiverFrame);
 				if (dic_lastMoveAck != null && dic_lastMoveAck.TryGetValue(battlePlayerId, out MoveAckResult moveAck))
 				{
 					battleInfo.ServerUpdate.MoveAck = moveAck.Clone();
@@ -84,8 +89,103 @@ namespace Server
 
 			if (repeatCount > 1 || ackGap >= AckGapRepeatThreshold || frameid % 60 == 0)
 			{
-				Logging.Debug.Log($"[AckGap][FrameSend] bp={battlePlayerId} frame={frameid} ackedFrame={ackedFrame} ackGap={ackGap} threshold={AckGapRepeatThreshold} repeats={repeatCount} hitEvents={(hitEventsThisFrame != null ? hitEventsThisFrame.Count : 0)} endpoint={endpoint}");
+				int baseFrame = dic_playerAcknowledgedAuthorityStateFrame.TryGetValue(battlePlayerId, out int storedBaseFrame) ? storedBaseFrame : 0;
+				Logging.Debug.Log($"[AckGap][FrameSend] bp={battlePlayerId} frame={frameid} ackedFrame={ackedFrame} stateBaseFrame={baseFrame} ackGap={ackGap} threshold={AckGapRepeatThreshold} repeats={repeatCount} hitEvents={(hitEventsThisFrame != null ? hitEventsThisFrame.Count : 0)} endpoint={endpoint}");
 			}
+		}
+
+		private BattleFrame BuildDeltaFrameForReceiver(BattleFrame currentFrame, int receiverBattlePlayerId,
+			out int stateBaseFrame, out int deltaStateCount, out int fullStateCount)
+		{
+			BattleFrame result = new BattleFrame
+			{
+				ServerFrame = currentFrame.ServerFrame,
+			};
+
+			for (int i = 0; i < currentFrame.PlayerInputs.Count; i++)
+			{
+				result.PlayerInputs.Add(currentFrame.PlayerInputs[i].Clone());
+			}
+
+			Dictionary<int, FullAuthorityState> baseline = null;
+			if (dic_playerAcknowledgedAuthorityStates != null)
+			{
+				dic_playerAcknowledgedAuthorityStates.TryGetValue(receiverBattlePlayerId, out baseline);
+			}
+			stateBaseFrame = dic_playerAcknowledgedAuthorityStateFrame != null
+				&& dic_playerAcknowledgedAuthorityStateFrame.TryGetValue(receiverBattlePlayerId, out int storedBaseFrame)
+					? storedBaseFrame
+					: 0;
+
+			deltaStateCount = 0;
+			fullStateCount = currentFrame.PlayerStates.Count;
+			for (int i = 0; i < currentFrame.PlayerStates.Count; i++)
+			{
+				AuthoritativePlayerState currentState = currentFrame.PlayerStates[i];
+				FullAuthorityState baseState = null;
+				if (baseline != null)
+				{
+					baseline.TryGetValue(currentState.BattleId, out baseState);
+				}
+
+				uint mask = ComputeAuthorityStateDeltaMask(currentState, baseState);
+				if (mask == 0)
+				{
+					continue;
+				}
+
+				AuthoritativePlayerState deltaState = new AuthoritativePlayerState
+				{
+					BattleId = currentState.BattleId,
+					StateMask = mask,
+				};
+				if ((mask & AuthorityStateMaskPosition) != 0)
+				{
+					deltaState.PosX = currentState.PosX;
+					deltaState.PosY = currentState.PosY;
+					deltaState.PosZ = currentState.PosZ;
+				}
+				if ((mask & AuthorityStateMaskHp) != 0)
+				{
+					deltaState.Hp = currentState.Hp;
+				}
+				if ((mask & AuthorityStateMaskDead) != 0)
+				{
+					deltaState.IsDead = currentState.IsDead;
+				}
+				result.PlayerStates.Add(deltaState);
+				deltaStateCount++;
+			}
+
+			if (currentFrame.ServerFrame % 60 == 0 || deltaStateCount != fullStateCount)
+			{
+				Logging.Debug.Log($"[AuthStateDelta][Build] receiver={receiverBattlePlayerId} frame={currentFrame.ServerFrame} baseFrame={stateBaseFrame} deltaStates={deltaStateCount} fullStates={fullStateCount}");
+			}
+
+			return result;
+		}
+
+		private uint ComputeAuthorityStateDeltaMask(AuthoritativePlayerState currentState, FullAuthorityState baseState)
+		{
+			if (baseState == null)
+			{
+				return AuthorityStateMaskAll;
+			}
+
+			uint mask = 0;
+			if (currentState.PosX != baseState.PosX || currentState.PosY != baseState.PosY || currentState.PosZ != baseState.PosZ)
+			{
+				mask |= AuthorityStateMaskPosition;
+			}
+			if (currentState.Hp != baseState.Hp)
+			{
+				mask |= AuthorityStateMaskHp;
+			}
+			if (currentState.IsDead != baseState.IsDead)
+			{
+				mask |= AuthorityStateMaskDead;
+			}
+			return mask;
 		}
 
 		// ==================== 操作接收 ====================
@@ -126,6 +226,7 @@ namespace Server
 				if (previousAckedFrame < clientAckedFrame)
 				{
 					dic_playerAckedFrameId[battlePlayerId] = clientAckedFrame;
+					UpdateAcknowledgedAuthorityStateBaseline(battlePlayerId, clientAckedFrame);
 				}
 				int effectiveAckedFrame = dic_playerAckedFrameId[battlePlayerId];
 				int ackGap = frameid - effectiveAckedFrame;
@@ -191,6 +292,80 @@ namespace Server
 						}
 					}
 				}
+			}
+		}
+
+		private void StoreAuthorityStateSnapshot(int frameId, Google.Protobuf.Collections.RepeatedField<AuthoritativePlayerState> states)
+		{
+			Dictionary<int, FullAuthorityState> snapshot = new Dictionary<int, FullAuthorityState>();
+			for (int i = 0; i < states.Count; i++)
+			{
+				AuthoritativePlayerState state = states[i];
+				snapshot[state.BattleId] = ToFullAuthorityState(state);
+			}
+
+			dic_authorityStateHistory[frameId] = snapshot;
+			List<int> expiredFrames = null;
+			foreach (var kvp in dic_authorityStateHistory)
+			{
+				if (kvp.Key < frameId - AuthorityStateHistoryWindowSize)
+				{
+					if (expiredFrames == null)
+					{
+						expiredFrames = new List<int>();
+					}
+					expiredFrames.Add(kvp.Key);
+				}
+			}
+			if (expiredFrames != null)
+			{
+				for (int i = 0; i < expiredFrames.Count; i++)
+				{
+					dic_authorityStateHistory.Remove(expiredFrames[i]);
+				}
+			}
+		}
+
+		private FullAuthorityState ToFullAuthorityState(AuthoritativePlayerState state)
+		{
+			return new FullAuthorityState
+			{
+				BattleId = state.BattleId,
+				PosX = state.PosX,
+				PosY = state.PosY,
+				PosZ = state.PosZ,
+				Hp = state.Hp,
+				IsDead = state.IsDead,
+			};
+		}
+
+		private Dictionary<int, FullAuthorityState> CloneAuthoritySnapshot(Dictionary<int, FullAuthorityState> source)
+		{
+			Dictionary<int, FullAuthorityState> copy = new Dictionary<int, FullAuthorityState>();
+			foreach (var kvp in source)
+			{
+				copy[kvp.Key] = kvp.Value.Clone();
+			}
+			return copy;
+		}
+
+		private void UpdateAcknowledgedAuthorityStateBaseline(int battlePlayerId, int ackedFrame)
+		{
+			if (ackedFrame <= 0 || dic_authorityStateHistory == null)
+			{
+				return;
+			}
+			if (!dic_authorityStateHistory.TryGetValue(ackedFrame, out Dictionary<int, FullAuthorityState> snapshot))
+			{
+				Logging.Debug.Log($"[AuthStateDelta][AckSkip] bp={battlePlayerId} ackedFrame={ackedFrame} reason=snapshot_not_found");
+				return;
+			}
+
+			dic_playerAcknowledgedAuthorityStates[battlePlayerId] = CloneAuthoritySnapshot(snapshot);
+			dic_playerAcknowledgedAuthorityStateFrame[battlePlayerId] = ackedFrame;
+			if (ackedFrame % 60 == 0)
+			{
+				Logging.Debug.Log($"[AuthStateDelta][AckBaseline] bp={battlePlayerId} baseFrame={ackedFrame} stateCount={snapshot.Count}");
 			}
 		}
 
@@ -448,6 +623,9 @@ namespace Server
 				dic_pendingMoveSegments?.Clear();
 				dic_lastProcessedMoveInput?.Clear();
 				dic_lastMoveAck?.Clear();
+				dic_authorityStateHistory?.Clear();
+				dic_playerAcknowledgedAuthorityStates?.Clear();
+				dic_playerAcknowledgedAuthorityStateFrame?.Clear();
 			}
 
 			Logging.Debug.Log($"Battle循环结束，BattleID: {battleId}");

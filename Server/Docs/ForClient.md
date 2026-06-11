@@ -102,6 +102,8 @@ Program.cs -> Server/Server.cs -> Server/Client.cs -> Controller/ControllerMange
 8. 帧下发与补帧：`Server/BattleController.Network.cs:50`（`SendUnsyncedFrames`）
 9. **Pong 路由**：`Server/ClientUdp.cs:250`（Ping 识别 → Pong 构造）。Pong 发送**经过 NetSim**（`LZJUDP.SimDropRate/SimDelayMinMs/SimDelayMaxMs`），确保客户端 RTT 测量反映真实模拟延迟。NetSim 参数由 `BattleController.BeginBattle`（Battle.cs:224）写入、`HandleBattleEnd`（BattleController.Network.cs:183）清零
 10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_input.moves` 上报 `OldMove + NewMove`，攻击通过 `BattleInfo.client_input.attacks` 独立上报。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；每包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序排列。服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastAcceptedMoveFrame` 的旧包丢弃，`moveFrame > serverFrame + 2` 直接拒绝；合法 move 只入队为 pending segment。BattleLoop 每个 ServerFrame 对每个玩家最多消化 3 帧 pending move 并推进 `playerPositions`。下行 `BattleInfo.server_update.move_ack.acked_move_frame` 等于 `lastSimulatedMoveFrame`，客户端只裁剪已经被服务端权威位置实际模拟过的 SavedMove；`ack_good_move=false` 时客户端使用 `correct_pos_x/y/z` 拉回并重放未确认 SavedMove。
+11. **PlayerStates 增量下行**：服务端每个 ServerFrame 仍发送当前权威帧，`server_frame` 持续递增；但 `BattleFrame.player_states` 按接收客户端的已确认状态基准裁剪字段。客户端必须按 `AuthoritativePlayerState.state_mask` 合并：bit0=position(`pos_x/y/z`)，bit1=`hp`，bit2=`is_dead`。`BattleServerUpdate.state_base_frame` 表示本次增量基准帧，仅用于联调观测。
+12. **客户端首权威门控**：客户端收到 `BattleStart` 后先进入战斗网络泵，首个有效权威帧到达前不发送 `ClientMove`；首权威帧消费成功后才开启本地 `BattleTick`。若下行权威帧超过 1000ms 未刷新，或客户端 SavedMove 历史满，客户端会暂停继续生成预测 tick。
 
 > 关键前提：客户端必须先成功发 `BattleReady`，否则后续 UDP 包无法命中 battle 路由。
 >

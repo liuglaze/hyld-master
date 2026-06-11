@@ -47,6 +47,29 @@ namespace Server
 			public ServerVector3 PredictedPosition;
 		}
 
+		private sealed class FullAuthorityState
+		{
+			public int BattleId;
+			public float PosX;
+			public float PosY;
+			public float PosZ;
+			public int Hp;
+			public bool IsDead;
+
+			public FullAuthorityState Clone()
+			{
+				return new FullAuthorityState
+				{
+					BattleId = BattleId,
+					PosX = PosX,
+					PosY = PosY,
+					PosZ = PosZ,
+					Hp = Hp,
+					IsDead = IsDead,
+				};
+			}
+		}
+
 		// 战斗状态
 		private int playerCount;
 		private int frameid;
@@ -64,6 +87,9 @@ namespace Server
 		private Dictionary<int, Queue<PendingMoveSegment>> dic_pendingMoveSegments;
 		private Dictionary<int, LastProcessedMoveInput> dic_lastProcessedMoveInput;
 		private Dictionary<int, MoveAckResult> dic_lastMoveAck;
+		private Dictionary<int, Dictionary<int, FullAuthorityState>> dic_authorityStateHistory;
+		private Dictionary<int, Dictionary<int, FullAuthorityState>> dic_playerAcknowledgedAuthorityStates;
+		private Dictionary<int, int> dic_playerAcknowledgedAuthorityStateFrame;
 		private bool isAllReady;
 		private bool _battleStarted;
 		private bool _isRun;
@@ -102,6 +128,11 @@ namespace Server
 		private const int MaxAcceptableAttackDelay = 8;
 		private const int AckGapRepeatThreshold = 3;
 		private const int CurrentFrameRepeatSendCount = 3;
+		private const int AuthorityStateHistoryWindowSize = 120;
+		private const uint AuthorityStateMaskPosition = 1u;
+		private const uint AuthorityStateMaskHp = 2u;
+		private const uint AuthorityStateMaskDead = 4u;
+		private const uint AuthorityStateMaskAll = AuthorityStateMaskPosition | AuthorityStateMaskHp | AuthorityStateMaskDead;
 		private readonly Random _simRandom = new Random();
 
 		// ==================== 构造 / 初始化 ====================
@@ -294,6 +325,9 @@ namespace Server
 				dic_pendingMoveSegments = new Dictionary<int, Queue<PendingMoveSegment>>();
 				dic_lastProcessedMoveInput = new Dictionary<int, LastProcessedMoveInput>();
 				dic_lastMoveAck = new Dictionary<int, MoveAckResult>();
+				dic_authorityStateHistory = new Dictionary<int, Dictionary<int, FullAuthorityState>>();
+				dic_playerAcknowledgedAuthorityStates = new Dictionary<int, Dictionary<int, FullAuthorityState>>();
+				dic_playerAcknowledgedAuthorityStateFrame = new Dictionary<int, int>();
 
 				// ---- 初始化伤害判定系统 ----
 				playerPositions = new Dictionary<int, ServerVector3>();
@@ -360,6 +394,8 @@ namespace Server
 						MoveY = 0f,
 						MoveType = MoveType.NewMove,
 					};
+					dic_playerAcknowledgedAuthorityStates[battlePlayerId] = null;
+					dic_playerAcknowledgedAuthorityStateFrame[battlePlayerId] = 0;
 				}
 			}
 			// ---- 网络模拟启动日志 ----

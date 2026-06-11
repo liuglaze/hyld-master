@@ -44,11 +44,11 @@ Assets/Scripts/Manger/CommandManger.cs
 
 Assets/Scripts/Server/Manger/Battle/BattleManger.cs
 
-- **驱动方式**：已从 `InvokeRepeating("Send_operation", _time, _time)` 改为 `Update()` 中累加器驱动。`_tickAccumulator += Time.deltaTime`，当 `_tickAccumulator >= currentTickInterval` 时调用 `BattleTick()`（原 Send_operation 逻辑），每帧最多执行 `maxCatchupPerUpdate=3` 次 tick。
-- **动态 Tick 调节**：BattleStart 后先以固定 `frameTime` 推进并发送 `ClientMove`；RTT 与首个权威帧就绪后，`currentTickInterval = 0.016f / actualSpeedFactor`，`actualSpeedFactor` 由 `AdjustTickInterval()` 每帧平滑调整（详见 §X 动态追帧系统）。动态目标就绪后，预测帧达到 `targetFrame + 1` 时硬阻断新的 `BattleTick`。
-- **BattleReady / BattleStart 握手语义**：客户端在初始化完成后每 200ms 重发一次 `BattleReady`；收到 `BattleStart` 后才会 `CancelInvoke("Send_BattleReady")` 并开启 `_battleTickActive`。服务端已支持：若首次 `BattleStart` 丢失，客户端继续重发的 `BattleReady` 会触发服务端单播补发 `BattleStart`。
-- **战斗包结构**：外层仍是单个 `MainPack.battleInfo`。上行输入写入 `BattleInfo.client_input`（`battle_player_id/client_tick/acked_server_frame/rtt_ms/moves/attacks`）；下行权威写入 `BattleInfo.server_update`（`frames/move_ack/hit_events`）。旧 `selfOperation`、顶层 `client_moves`、顶层 `move_ack`、顶层 `hit_events` 已删除。
-- **Update 管线顺序**：DrainAndDispatch → Ping 调度 → 尝试 CalcTargetFrame + AdjustTickInterval（未就绪则固定 tick）→ 累加器循环（while tick）。
+- **驱动方式**：已从 `InvokeRepeating("Send_operation", _time, _time)` 改为 `Update()` 中累加器驱动。BattleStart 后先进入 `_battleNetworkActive`，只做 DrainAndDispatch 与 Ping；首个有效权威帧消费成功后才开启 `_battleTickActive`。`_tickAccumulator += Time.deltaTime`，当 `_tickAccumulator >= currentTickInterval` 时调用 `BattleTick()`（原 Send_operation 逻辑），每帧最多执行 `maxCatchupPerUpdate=3` 次 tick。
+- **动态 Tick 调节**：首个权威帧后先以固定 `frameTime` 推进并发送连续 `ClientMove`；RTT 就绪后，`currentTickInterval = 0.016f / actualSpeedFactor`，`actualSpeedFactor` 由 `AdjustTickInterval()` 每帧平滑调整（详见 §X 动态追帧系统）。动态目标就绪后，预测帧达到 `targetFrame + 1` 时硬阻断新的 `BattleTick`。
+- **BattleReady / BattleStart 握手语义**：客户端在初始化完成后每 200ms 重发一次 `BattleReady`；收到 `BattleStart` 后停止重发并进入“等待首权威帧”状态，不立刻发送 `ClientMove`。服务端已支持：若首次 `BattleStart` 丢失，客户端继续重发的 `BattleReady` 会触发服务端单播补发 `BattleStart`。
+- **战斗包结构**：外层仍是单个 `MainPack.battleInfo`。上行输入写入 `BattleInfo.client_input`（`battle_player_id/client_tick/acked_server_frame/rtt_ms/moves/attacks`）；下行权威写入 `BattleInfo.server_update`（`frames/move_ack/hit_events/state_base_frame`）。旧 `selfOperation`、顶层 `client_moves`、顶层 `move_ack`、顶层 `hit_events` 已删除。
+- **Update 管线顺序**：DrainAndDispatch → Ping 调度 → 若首权威帧未到则等待 → CalcTargetFrame + AdjustTickInterval（RTT 未就绪则固定 tick）→ 累加器循环（while tick）。若权威帧超过 1000ms 未刷新，或 SavedMove 历史达到 `PredictionHistoryWindowSize`，暂停预测 tick；收到新权威帧或 MoveAck 裁剪历史后从下一帧继续。
 - 联机预测路径（IsPredictionEnabled=true），BattleTick() 内部逻辑：
   1. DrainAndDispatch() -> 消费 UDP 队列中已收到的权威帧
   2. ResetOperation -> CommandManger.Execute
@@ -72,7 +72,7 @@ Assets/Scripts/Server/Manger/Battle/BattleManger.cs
 BattleData.OnLogicUpdate_sync_FrameIdCheck(server_sync_frameid, allPlayerOperation)
 
 - UDP 回调 HandleMessage -> BattlePushDowmAllFrameOpeartions -> 调用此方法。
-- 流程：和解 -> 记录权威确认 -> 更新 sync_frameID -> **生成视觉子弹** -> ApplyHitEvents（受击动画，不扣血）-> ApplyAuthoritativeHpAndDeath（权威 HP 覆写 + 死亡判定）。
+- 流程：先按 `AuthoritativePlayerState.state_mask` 合并 PlayerStates 增量为完整权威状态视图 -> 和解 -> 记录权威确认 -> 更新 sync_frameID -> **生成视觉子弹** -> ApplyHitEvents（受击动画，不扣血）-> ApplyAuthoritativeHpAndDeath（权威 HP 覆写 + 死亡判定）。
 
 ### 3.5 权威位置校正 (CSP 模式)
 
@@ -242,11 +242,11 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 
 ### 5.1 战斗主循环与数据
 
-**Assets/Scripts/Server/Manger/Battle/BattleManger.cs**（496 行） — 战斗主循环入口
+**Assets/Scripts/Server/Manger/Battle/BattleManger.cs** — 战斗主循环入口
 
 - `Init`:44 — 挂载子管理器、初始化 UDP
-- `Update`:81 — DrainAndDispatch → Ping → 动态目标帧就绪则 AdjustTickInterval，否则固定 tick → 累加器 BattleTick
-- `CalcTargetFrame`:191 — `targetFrame = EstimateServerFrameNow()`；表示客户端估算的服务器当前帧，只用于动态调速，不阻断 BattleStart 后的基础 ClientMove 上行
+- `Update`:81 — DrainAndDispatch → Ping → 首权威帧门控 → 动态目标帧就绪则 AdjustTickInterval，否则固定 tick → 累加器 BattleTick
+- `CalcTargetFrame`:191 — `targetFrame = EstimateServerFrameNow()`；表示客户端估算的服务器当前帧，只用于动态调速，不改写 ClientMoveFrame
 - `AdjustTickInterval`:216 — 动态 Tick 间隔 + 严重超前暂停
 - `BattleTick`:249 — 单次逻辑帧：预测子弹 + 历史录入 + OnLogicUpdate + 发送
 - `OnLogicUpdate`:331 — 遍历操作驱动玩家移动和子弹更新
@@ -401,6 +401,7 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 | minSpeedFactor                          | 0.85f                   | ConstValue.cs           |
 | maxSpeedFactor                          | 1.15f                   | ConstValue.cs           |
 | MaxPredictedLeadBeyondTarget            | 1                       | BattleManger.cs         |
+| AuthorityStalePauseMs                   | 1000ms                  | BattleManger.cs         |
 | smoothRate                              | 5.0f                    | ConstValue.cs           |
 | maxCatchupPerUpdate                     | 3                       | ConstValue.cs           |
 | pingIntervalMs                          | 200f                    | ConstValue.cs           |
@@ -424,11 +425,12 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 
 ### 8.3 目标帧号与 Tick 调节
 
-- **目标帧号**：`CalcTargetFrame()` — `targetFrame = EstimateServerFrameNow()`。RTT 和首个权威帧未初始化时客户端仍按固定 `frameTime` 推进并发送 `ClientMove`；目标帧只在就绪后接管 tick 调速
+- **目标帧号**：`CalcTargetFrame()` — `targetFrame = EstimateServerFrameNow()`。首个权威帧未到时客户端不启动 `BattleTick`，因此不会发送 `ClientMove`；首权威帧到达后先固定 `frameTime` 推进，RTT 就绪后目标帧接管 tick 调速
 - **速度因子**：`frameDiff = targetFrame - predicted_frameID`，`targetSpeedFactor = Clamp(1 + frameDiff * adjustRate, minSpeedFactor, maxSpeedFactor)`
 - **Lerp 平滑**：`actualSpeedFactor = Lerp(actual, target, smoothRate * deltaTime)`，防止帧间跳变
 - **Tick 间隔**：`currentTickInterval = 0.016f / actualSpeedFactor`
 - **超前硬限制**：`predicted_frameID >= targetFrame + 1` 时跳过本轮累加器循环，不再产出新的预测 tick
+- **预测暂停**：权威帧超过 1000ms 未刷新，或 `PredictionHistoryCount >= PredictionHistoryWindowSize` 时暂停生成新的预测 tick；恢复时清空累加器，不补跑暂停期间累计的 tick
 - **累加器驱动**：`Update()` 中 `_tickAccumulator += Time.deltaTime`，`while(accumulator >= interval)` 调用 `BattleTick()`，每帧最多 3 次
 
 ### 8.4 服务端 ClientMove 时间轴

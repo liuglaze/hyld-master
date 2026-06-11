@@ -200,7 +200,7 @@
   - 首次全员 ready：广播 `BattleStart` 并执行一次 `BeginBattle`
   - 战斗已开始后：若某客户端继续发送 `BattleReady`，服务端视为该客户端可能未收到 `BattleStart`，对该 endpoint **单播补发** `BattleStart`
   - 补发只重发 `BattleStart`，**不会重复执行** `BeginBattle`
-- **客户端现状**：客户端 `BattleManger.Send_BattleReady()` 会每 200ms 重发 `BattleReady`；收到 `BattleStart` 后 `HandleBattleStart()` 立即 `CancelInvoke("Send_BattleReady")` 并开启 `_battleTickActive`。因此无需新增协议字段，即可形成“BattleReady 重试 → BattleStart 补发”的弱可靠开局握手。
+- **客户端现状**：客户端 `BattleManger.Send_BattleReady()` 会每 200ms 重发 `BattleReady`；收到 `BattleStart` 后 `HandleBattleStart()` 立即 `CancelInvoke("Send_BattleReady")` 并进入 `_battleNetworkActive`。本地 `_battleTickActive` 等首个有效权威帧消费成功后再开启。无需新增协议字段，即可形成“BattleReady 重试 → BattleStart 补发 → 首权威帧锚定”的开局握手。
 - **联调结论**：已验证首次 `BattleStart` 未生效时，客户端后续 `BattleReady` 可触发服务端补发，并成功进入战斗；服务端 `BeginBattle` 仅执行一次。
 - **影响范围**：属于两端状态流语义修复，不涉及 protobuf 变更。
 
@@ -213,7 +213,7 @@
 - **客户端目标帧变更**：
   - `CalcTargetFrame()` 从 `estimatedServerFrame + ceil(halfRTT) + jitterBufferFrames + safetyFrames` 改为 `EstimateServerFrameNow()`
   - `EstimateServerFrameNow()` 表示客户端估算的服务器当前帧：最后收到的权威帧 + halfRTT + 本地经过时间
-  - 当前实现中 RTT 和首个权威帧未初始化时，客户端不计算目标帧，但 BattleStart 后仍按固定 `frameTime` 推进并发送 `ClientMove`
+  - 当前实现中首个权威帧未初始化时，客户端不启动 `BattleTick`，因此不发送 `ClientMove`；首权威帧到达后先按固定 `frameTime` 推进，RTT 就绪后再按目标帧调速
   - `inputBufferSize`、`targetFrameSafetyFrames`、`jitterBufferRatio` 不再直接参与 targetFrame 公式，仅保留为兼容配置项
 - **OperationID 新语义**：
   - 客户端上行 `uploadOperationId = nextFrame`
@@ -334,8 +334,9 @@
   - 若存在未确认的重要 move，则每包最多附带 4 个重要 `OldMove`，按 `moveFrame` 升序发送；OldMove 不会重复选择当前帧或 pendingMove。
   - 重要 move 判定参考 UE CMC：零/非零切换、幅度变化超过阈值、方向 dot 低于阈值。停步属于重要 move。
   - 合并阈值：`moveCombineMagnitudeThreshold = 0.01f`，`moveCombineDotThreshold = 0.996f`。
-  - BattleStart 后先按固定 `frameTime` 发送 `ClientMove`；RTT 与首个权威帧就绪后，`targetFrame` 只调节本地 tick 频率，不伪造上行 ClientMoveFrame。
+  - BattleStart 后先等待首个有效权威帧；首权威帧到达前不发送 `ClientMove`。首权威帧到达后先按固定 `frameTime` 发送 `ClientMove`；RTT 就绪后，`targetFrame` 只调节本地 tick 频率，不伪造上行 ClientMoveFrame。
   - 动态目标就绪后，客户端最多预测到 `targetFrame + 1`；当 `predicted_frameID >= targetFrame + 1` 时，本帧不再生成新的 BattleTick。
+  - 权威帧超过 1000ms 未刷新，或客户端 SavedMove 历史达到 `PredictionHistoryWindowSize` 时，客户端暂停生成新的预测 tick；恢复时清空累加器，不补跑暂停期间累计的 tick。
 - **服务端处理**：
   - 每个玩家维护 `lastAcceptedMoveFrame`、`lastSimulatedMoveFrame`、`pendingMoveSegments`、当前移动输入和最新 `MoveAckResult`。
   - 处理顺序固定为先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`；因此 DualMove 可用两个 `NewMove` 表达。
@@ -352,4 +353,45 @@
   - 客户端收到权威 `PlayerStates` 后，远端玩家始终应用权威位置。
   - `ack_good_move=true`：本地玩家只解链，不改位置。
   - `ack_good_move=false`：本地玩家拉回到 `correct_pos_x/y/z`，再重放剩余 SavedMove。
+- **帧号隔离**：客户端不得用 `ServerFrame` 强制设置 `predicted_frameID`；`predicted_frameID` 只能由本地 `BattleTick -> CommitPredictedFrame` 连续推进。客户端落后时通过真实 tick 追赶，而不是跳 `ClientMoveFrame`。
 - **对时**：客户端用最近收到的服务端权威帧 + 半 RTT + 本地经过时间估算当前服务端帧，只用于 tick 调速，不作为移动上行帧号命中目标。
+
+---
+
+## 26. PlayerStates 增量下行（2026-06）
+
+- **目标**：保持服务端每个 ServerFrame 仍下发权威帧时钟包，但将 `BattleFrame.player_states` 从每包全字段改为按接收客户端已确认状态生成增量，降低包体大小且不影响 `targetFrame` 对时。
+- **新增 proto 字段**：
+  - `BattleServerUpdate.state_base_frame = 4`：本次增量使用的接收端状态基准帧，仅用于日志和联调校验。
+  - `AuthoritativePlayerState.state_mask = 7`：字段有效位，bit0=position(`pos_x/y/z`)，bit1=`hp`，bit2=`is_dead`。
+- **服务端发送语义**：
+  - `BattleInfo.server_frame` 与 `BattleFrame.server_frame` 每包仍写当前 ServerFrame；服务端不降低下行帧频率。
+  - 服务端内部仍保存每帧完整权威状态快照；网络发送时按接收客户端的 acknowledged snapshot 生成 delta。
+  - 客户端未确认任何状态基准前，服务端对该客户端持续发送全字段状态（`state_mask=7`）。
+  - 收到客户端上行 `acked_server_frame` 后，服务端若仍保存该帧完整快照，则把该接收客户端的增量基准推进到该帧。
+  - `player_inputs`、`move_ack`、`hit_events` 语义不变。
+- **客户端消费语义**：
+  - 客户端先按 `state_mask` 合并 `PlayerStates` 到本地权威状态缓存，再构造完整状态视图交给既有位置、HP、死亡和视觉子弹逻辑。
+  - 客户端不通过 protobuf 默认值判断字段是否存在；只认 `state_mask`。
+  - 如果某个 battleId 没有本地权威状态基准却收到非全字段状态，客户端记录 `[AuthStateDelta][Reject]` 并跳过该权威包。
+- **丢包语义**：
+  - 若某个 delta 包丢失，客户端不会 ack 该 ServerFrame；服务端后续仍按旧 acknowledged snapshot 计算 delta，因此会继续包含所有相对旧基准发生变化的字段。
+  - 同一当前帧重复到达时，客户端合并操作保持幂等；HitEvent 仍按既有 key 去重。
+
+---
+
+## 27. BattleTick 首权威门控与预测暂停（2026-06）
+
+- **目标**：避免客户端在没有服务端权威锚点时先跑出大量本地预测帧，导致开局或恢复时出现大段追赶、服务端未来帧拒绝、角色表现突然加速。
+- **客户端启动规则**：
+  - `BattleStart` 只让客户端进入 `_battleNetworkActive`，继续 DrainAndDispatch 与 Ping。
+  - 首个有效 `BattlePushDowmAllFrameOpeartions` 被 `ConsumeAuthoritativeBattleUpdate` 消费成功，并且 `sync_frameID > 0` 后，客户端才开启 `_battleTickActive`。
+  - 若权威帧先于 `BattleStart` 被 Drain 到，客户端会先消费权威状态，但不会启动本地 tick；等 `BattleStart` 到达后再按已有权威锚点启动 tick。
+- **暂停规则**：
+  - 最近权威帧超过 1000ms 未刷新时，客户端暂停生成新的预测 tick。
+  - `PredictionHistoryCount >= PredictionHistoryWindowSize` 时，客户端暂停生成新的预测 tick，等待 MoveAck 裁剪历史。
+  - 从暂停恢复时清空 `_tickAccumulator`，下一帧重新按当前 `frameTime/currentTickInterval` 推进，不补跑暂停期间累计的 tick。
+- **服务端联调预期**：
+  - BattleStart 后到首个权威帧到达前，服务端不应期待该客户端已经发送 `ClientMove`。
+  - 若网络长时间丢下行权威帧，客户端上行移动会停止增长；新权威帧恢复后才继续上报连续 ClientMoveFrame。
+  - 正常情况下服务端日志中的 `[ClientMove][ACCEPT] segment=` 不应在开局出现几十帧级别的首段 backlog。

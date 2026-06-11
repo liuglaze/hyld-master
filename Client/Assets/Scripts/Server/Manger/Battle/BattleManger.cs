@@ -28,6 +28,7 @@ namespace Manger
         // ── 累加器驱动（动态追帧系统 Task 5） ──
         private float _tickAccumulator;
         private float currentTickInterval = 0.016f;
+        private bool _battleNetworkActive;
         private bool _battleTickActive;
         // ── 动态追帧（Task 6） ──
         private float _actualSpeedFactor = 1.0f;
@@ -36,6 +37,9 @@ namespace Manger
         private const int CriticalInputBurstSendCount = 3;
         // 客户端允许相对 targetFrame 的最大超前量；达到后不再继续生成新的 predicted tick。
         private const int MaxPredictedLeadBeyondTarget = 1;
+        private const float AuthorityStalePauseMs = 1000f;
+        private bool _predictionPausedForAuthorityStale;
+        private bool _predictionPausedForHistoryFull;
         public Toolbox toolbox;
         public bool EnableDebugGameOverHotkey = true;
         public KeyCode DebugGameOverHotkey = KeyCode.F10;
@@ -85,7 +89,7 @@ namespace Manger
             }
 #endif
 
-            if (!_battleTickActive || IsGameOver)
+            if (!_battleNetworkActive || IsGameOver)
             {
                 return;
             }
@@ -106,9 +110,14 @@ namespace Manger
                 Server.UDPSocketManger.Instance.Send(pingPack);
             }
 
+            if (!_battleTickActive)
+            {
+                return;
+            }
+
             // ── 管线步骤 3: 目标帧号计算 + tick 调节 ──
-            // RTT / 首个权威帧只决定是否启用动态追帧，不能阻断 ClientMove 上行。
-            // BattleStart 后先用固定 tick 发送移动；RTT 与权威帧就绪后再切到动态 tick。
+            // 首个权威帧已经到达才会进入这里；RTT 未就绪时先按固定 tick 推进。
+            // RTT 就绪后再切到动态 tick。
             bool hasDynamicTarget = TryCalcTargetFrame(out int targetFrame);
             if (hasDynamicTarget)
             {
@@ -136,6 +145,12 @@ namespace Manger
 
             while (_tickAccumulator >= currentTickInterval)
             {
+                if (ShouldPausePredictionTick())
+                {
+                    _tickAccumulator = 0f;
+                    break;
+                }
+
                 if (hasDynamicTarget
                     && Manger.BattleData.Instance.predicted_frameID >= targetFrame + MaxPredictedLeadBeyondTarget)
                 {
@@ -147,6 +162,64 @@ namespace Manger
                 BattleTick();
                 _tickAccumulator -= currentTickInterval;
             }
+        }
+
+        private bool ShouldPausePredictionTick()
+        {
+            bool authorityStale = IsAuthorityStale();
+            if (authorityStale)
+            {
+                if (!_predictionPausedForAuthorityStale)
+                {
+                    _predictionPausedForAuthorityStale = true;
+                    Logging.HYLDDebug.FrameTrace($"[AuthorityFreshness][PausePrediction] reason=authority_stale ageMs={GetAuthorityAgeMs():F1} sync={Manger.BattleData.Instance.sync_frameID} predicted={Manger.BattleData.Instance.predicted_frameID}");
+                }
+                return true;
+            }
+            if (_predictionPausedForAuthorityStale)
+            {
+                _predictionPausedForAuthorityStale = false;
+                _tickAccumulator = 0f;
+                _actualSpeedFactor = 1.0f;
+                currentTickInterval = Server.NetConfigValue.frameTime;
+                Logging.HYLDDebug.FrameTrace($"[AuthorityFreshness][ResumePrediction] reason=authority_fresh ageMs={GetAuthorityAgeMs():F1} sync={Manger.BattleData.Instance.sync_frameID} predicted={Manger.BattleData.Instance.predicted_frameID}");
+                return true;
+            }
+
+            bool historyFull = Manger.BattleData.Instance.PredictionHistoryCount >= Server.NetConfigValue.PredictionHistoryWindowSize;
+            if (historyFull)
+            {
+                if (!_predictionPausedForHistoryFull)
+                {
+                    _predictionPausedForHistoryFull = true;
+                    Logging.HYLDDebug.FrameTrace($"[AuthorityFreshness][PausePrediction] reason=prediction_history_full history={Manger.BattleData.Instance.PredictionHistoryCount}/{Server.NetConfigValue.PredictionHistoryWindowSize} sync={Manger.BattleData.Instance.sync_frameID} predicted={Manger.BattleData.Instance.predicted_frameID}");
+                }
+                return true;
+            }
+            if (_predictionPausedForHistoryFull)
+            {
+                _predictionPausedForHistoryFull = false;
+                _tickAccumulator = 0f;
+                Logging.HYLDDebug.FrameTrace($"[AuthorityFreshness][ResumePrediction] reason=history_has_room history={Manger.BattleData.Instance.PredictionHistoryCount}/{Server.NetConfigValue.PredictionHistoryWindowSize} sync={Manger.BattleData.Instance.sync_frameID} predicted={Manger.BattleData.Instance.predicted_frameID}");
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsAuthorityStale()
+        {
+            return Manger.BattleData.Instance.lastReceivedAuthorityFrame > 0
+                && GetAuthorityAgeMs() > AuthorityStalePauseMs;
+        }
+
+        private float GetAuthorityAgeMs()
+        {
+            if (Manger.BattleData.Instance.lastReceivedAuthorityFrame <= 0)
+            {
+                return 0f;
+            }
+            return Mathf.Max(0f, (Manger.BattleData.Instance.cachedMainThreadTime - Manger.BattleData.Instance.lastAuthorityReceiveTime) * 1000f);
         }
 
         private void TriggerDebugGameOver()
@@ -203,7 +276,7 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         /// <summary>
         /// 6.2: 计算客户端应达到的目标帧号。
         /// 公式: targetFrame = estimatedServerFrameNow
-        /// RTT 和权威帧未初始化前不计算目标帧；BattleStart 后仍按固定 tick 发送 ClientMove。
+        /// 首个权威帧未到时 BattleTick 不启动；RTT 未初始化前不计算目标帧。
         /// </summary>
         private bool TryCalcTargetFrame(out int targetFrame)
         {
@@ -494,10 +567,15 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
             isBattleStart = true;
             this.CancelInvoke("Send_BattleReady");
-            // BattleStart 只负责打开本地逻辑帧推进；真正的首帧权威状态稍后由权威帧分支消费。
+            // BattleStart 只打开战斗网络泵；本地预测 tick 等首个权威帧锚点到达后再启动。
+            _battleNetworkActive = true;
+            _battleTickActive = false;
             _tickAccumulator = 0f;
             currentTickInterval = Server.NetConfigValue.frameTime;
-            _battleTickActive = true;
+            _actualSpeedFactor = 1.0f;
+            _predictionPausedForAuthorityStale = false;
+            _predictionPausedForHistoryFull = false;
+            TryStartBattleTickAfterFirstAuthority();
             StartCoroutine(WaitForFirstMessage());
         }
 
@@ -514,7 +592,26 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             {
                 // 返回 false 通常表示收到旧批次/乱序批次，当前包被帧序保护跳过。
                 Logging.HYLDDebug.FrameTrace("好像数据包寄了？");
+                return;
             }
+
+            TryStartBattleTickAfterFirstAuthority();
+        }
+
+        private void TryStartBattleTickAfterFirstAuthority()
+        {
+            if (!isBattleStart || _battleTickActive || BattleData.Instance.sync_frameID <= 0)
+            {
+                return;
+            }
+
+            _tickAccumulator = 0f;
+            currentTickInterval = Server.NetConfigValue.frameTime;
+            _actualSpeedFactor = 1.0f;
+            _predictionPausedForAuthorityStale = false;
+            _predictionPausedForHistoryFull = false;
+            _battleTickActive = true;
+            Logging.HYLDDebug.FrameTrace($"[BattleTick][StartAfterFirstAuthority] sync={BattleData.Instance.sync_frameID} predicted={BattleData.Instance.predicted_frameID} history={BattleData.Instance.PredictionHistoryCount}");
         }
 
         private void HandleServerGameOver(MainPack pack)
@@ -554,10 +651,13 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             IsGameOver = true;
             Logging.HYLDDebug.FrameTrace($"[GameOver] begin frameSync={BattleData.Instance.sync_frameID} predictedFrame={BattleData.Instance.predicted_frameID} historyCount={BattleData.Instance.PredictionHistoryCount} notifyServer={shouldNotifyServer}");
             // ── Task 5+6: 停止累加器 + 追帧状态清理 ──
+            _battleNetworkActive = false;
             _battleTickActive = false;
             _tickAccumulator = 0f;
             currentTickInterval = Server.NetConfigValue.frameTime;
             _actualSpeedFactor = 1.0f;
+            _predictionPausedForAuthorityStale = false;
+            _predictionPausedForHistoryFull = false;
             this.CancelInvoke("Send_BattleReady");
             this.CancelInvoke("SendGameOver");
             Logging.HYLDDebug.FrameTrace($"[GameOver][StopSend] sendOperation=false sendBattleReady=false sendGameOver=false");
@@ -580,7 +680,10 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         private void OnDestroy()
         {
             // ── Task 5: 停止累加器 ──
+            _battleNetworkActive = false;
             _battleTickActive = false;
+            _predictionPausedForAuthorityStale = false;
+            _predictionPausedForHistoryFull = false;
             this.CancelInvoke("Send_BattleReady");
             this.CancelInvoke("SendGameOver");
             BattleData.Instance.ClearPredictionRuntimeState();

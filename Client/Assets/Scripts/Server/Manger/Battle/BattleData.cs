@@ -48,6 +48,19 @@ namespace Manger
             public PlayerFrameInput SelfAuthorityInput;
         }
 
+        private class CachedAuthorityState
+        {
+            public int BattleId;
+            public float PosX;
+            public float PosY;
+            public float PosZ;
+            public int Hp;
+            public bool IsDead;
+            public bool HasPosition;
+            public bool HasHp;
+            public bool HasDead;
+        }
+
         // ═══════ 核心集合 ═══════
 
         private readonly LinkedList<SavedMove> predictionHistory = new LinkedList<SavedMove>();
@@ -55,6 +68,11 @@ namespace Manger
         private SavedMove lastAckedMove;
         private SavedMove pendingMove;
         private readonly List<int> playerIndexBattleIds = new List<int>();
+        private readonly Dictionary<int, CachedAuthorityState> authorityStateCache = new Dictionary<int, CachedAuthorityState>();
+        private const uint AuthorityStateMaskPosition = 1u;
+        private const uint AuthorityStateMaskHp = 2u;
+        private const uint AuthorityStateMaskDead = 4u;
+        private const uint AuthorityStateMaskAll = AuthorityStateMaskPosition | AuthorityStateMaskHp | AuthorityStateMaskDead;
 
         // ═══════ 权威位置校正（CSP 模式） ═══════
         private Vector3 lastAuthorityPosition;
@@ -142,14 +160,6 @@ namespace Manger
             }
         }
 
-        public void AlignPredictedFrameWithAuthority(int authorityFrameId)
-        {
-            if (predicted_frameID < authorityFrameId)
-            {
-                predicted_frameID = authorityFrameId;
-            }
-        }
-
         public void RecordAuthorityFrameTiming(int authorityFrameId)
         {
             if (authorityFrameId >= lastReceivedAuthorityFrame)
@@ -191,6 +201,7 @@ namespace Manger
             lastAckedMove = null;
             pendingMove = null;
             playerIndexBattleIds.Clear();
+            authorityStateCache.Clear();
             lastAuthorityPosition = Vector3.zero;
             hasAppliedMoveCorrection = false;
             lastAppliedCorrectionMoveFrame = 0;

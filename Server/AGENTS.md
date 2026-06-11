@@ -44,10 +44,10 @@
 - `SimulateBulletCatchUp`:233 — V2 延迟补偿追帧：逐帧推进 + 历史位置碰撞检测
 - `TickServerBullets`:265 — 每帧推进活跃子弹 + 碰撞检测 + 超距清除
 
-**Server/BattleController.Network.cs**（253 行） — 网络收发 / 权威状态
+**Server/BattleController.Network.cs** — 网络收发 / 权威状态
 
-- `PackPlayerStates`:18 — 打包所有玩家权威状态（位置/HP/IsDead）到帧数据
-- `SendUnsyncedFrames`:50 — 只下发当前权威帧，并按 `CurrentFrameRepeatSendCount` 重复发送（含 HitEvent 搭载）
+- `PackPlayerStates`:18 — 生成当前帧完整权威状态（位置/HP/IsDead）并保存状态快照
+- `SendUnsyncedFrames`:50 — 只下发当前权威帧，并按接收客户端已确认状态基准裁剪 `PlayerStates` 增量；每包仍携带当前 `server_frame`
 - `UpdatePlayerOperation`:103 — 接收 `BattleInfo.client_input`：AckedServerFrame 单调更新 + ClientMoveFrame 单调处理 + ClientAttack 去重/超时
 - `HandleBattleEnd`:183 — 战斗结束：停循环、清理资源、清 NetSim、注销 UDP、发送 FinishBattle
 - `SendFinishBattle`:224 — 发送 GameOver 包（含 winnerTeamId）
@@ -182,8 +182,8 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
           4. RecordPositionSnapshot (Battle.cs:526) — 环形缓冲区
           5. SpawnBulletsFromOperations (Bullets.cs:12) — 生成子弹 + V2 追帧，追帧命中写入同一 HitEvent 列表
           6. TickServerBullets (Bullets.cs:265) — 推进 + 碰撞 + HitEvent
-          7. PackPlayerStates (Network.cs:18) — HP/IsDead/位置 打包
-          8. SendUnsyncedFrames (Network.cs:50) — 只组织当前权威帧，并按 `CurrentFrameRepeatSendCount` 重复下发
+          7. PackPlayerStates (Network.cs:18) — HP/IsDead/位置完整快照
+          8. SendUnsyncedFrames (Network.cs:50) — 只组织当前权威帧，`PlayerStates` 按接收客户端状态基准增量下发，并按 `CurrentFrameRepeatSendCount` 重复发送
         frameid++
 ```
 

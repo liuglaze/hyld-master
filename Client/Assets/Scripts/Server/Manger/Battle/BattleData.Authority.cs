@@ -30,7 +30,15 @@ namespace Manger
             if (update == null)
                 return false;
 
-            if (!ConsumeAuthoritativeFrameBatch(battleInfo.ServerFrame, update.Frames, update.MoveAck))
+            if (ShouldRejectAuthorityFrameBatch(battleInfo.ServerFrame))
+                return false;
+
+            Google.Protobuf.Collections.RepeatedField<BattleFrame> mergedFrames =
+                MergeAuthorityStateDeltas(update.Frames, battleInfo.ServerFrame, update.StateBaseFrame);
+            if (mergedFrames == null)
+                return false;
+
+            if (!ConsumeAuthoritativeFrameBatch(battleInfo.ServerFrame, mergedFrames, update.MoveAck))
                 return false;
 
             if (update.HitEvents != null && update.HitEvents.Count > 0)
@@ -43,9 +51,145 @@ namespace Manger
 
             Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyAuthHpDeath START frame={battleInfo.ServerFrame}");
             //这个在HitEvent
-            ApplyAuthoritativeHpAndDeath(update.Frames, battleInfo.ServerFrame);
+            ApplyAuthoritativeHpAndDeath(mergedFrames, battleInfo.ServerFrame);
             Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyAuthHpDeath END frame={battleInfo.ServerFrame}");
             return true;
+        }
+
+        private Google.Protobuf.Collections.RepeatedField<BattleFrame> MergeAuthorityStateDeltas(
+            Google.Protobuf.Collections.RepeatedField<BattleFrame> frames,
+            int authorityFrameId,
+            int stateBaseFrame)
+        {
+            if (frames == null)
+            {
+                return null;
+            }
+
+            Google.Protobuf.Collections.RepeatedField<BattleFrame> mergedFrames =
+                new Google.Protobuf.Collections.RepeatedField<BattleFrame>();
+            for (int i = 0; i < frames.Count; i++)
+            {
+                BattleFrame sourceFrame = frames[i];
+                BattleFrame mergedFrame = new BattleFrame
+                {
+                    ServerFrame = sourceFrame.ServerFrame,
+                };
+
+                for (int inputIndex = 0; inputIndex < sourceFrame.PlayerInputs.Count; inputIndex++)
+                {
+                    mergedFrame.PlayerInputs.Add(sourceFrame.PlayerInputs[inputIndex].Clone());
+                }
+
+                if (authorityStateCache.Count == 0 && sourceFrame.PlayerStates.Count == 0)
+                {
+                    Logging.HYLDDebug.FrameTrace($"[AuthStateDelta][Reject] frame={authorityFrameId} stateBaseFrame={stateBaseFrame} reason=empty_initial_state");
+                    return null;
+                }
+
+                for (int stateIndex = 0; stateIndex < sourceFrame.PlayerStates.Count; stateIndex++)
+                {
+                    if (!ApplyAuthorityStateDelta(sourceFrame.PlayerStates[stateIndex], authorityFrameId, stateBaseFrame))
+                    {
+                        return null;
+                    }
+                }
+
+                AddCachedAuthorityStatesToFrame(mergedFrame);
+                mergedFrames.Add(mergedFrame);
+
+                if (authorityFrameId % 60 == 0 || sourceFrame.PlayerStates.Count != mergedFrame.PlayerStates.Count)
+                {
+                    Logging.HYLDDebug.FrameTrace($"[AuthStateDelta][Merge] frame={authorityFrameId} baseFrame={stateBaseFrame} deltaStates={sourceFrame.PlayerStates.Count} fullStates={mergedFrame.PlayerStates.Count}");
+                }
+            }
+
+            return mergedFrames;
+        }
+
+        private bool ApplyAuthorityStateDelta(AuthoritativePlayerState delta, int authorityFrameId, int stateBaseFrame)
+        {
+            if (delta.StateMask == 0)
+            {
+                Logging.HYLDDebug.FrameTrace($"[AuthStateDelta][Reject] frame={authorityFrameId} stateBaseFrame={stateBaseFrame} battleId={delta.BattleId} reason=zero_state_mask");
+                return false;
+            }
+
+            bool hasCachedState = authorityStateCache.TryGetValue(delta.BattleId, out CachedAuthorityState cached);
+            if (!hasCachedState)
+            {
+                bool hasCompleteState = (delta.StateMask & AuthorityStateMaskAll) == AuthorityStateMaskAll;
+                if (!hasCompleteState)
+                {
+                    Logging.HYLDDebug.FrameTrace($"[AuthStateDelta][Reject] frame={authorityFrameId} stateBaseFrame={stateBaseFrame} battleId={delta.BattleId} mask={delta.StateMask} reason=missing_baseline");
+                    return false;
+                }
+
+                cached = new CachedAuthorityState { BattleId = delta.BattleId };
+                authorityStateCache[delta.BattleId] = cached;
+            }
+
+            if ((delta.StateMask & AuthorityStateMaskPosition) != 0)
+            {
+                cached.PosX = delta.PosX;
+                cached.PosY = delta.PosY;
+                cached.PosZ = delta.PosZ;
+                cached.HasPosition = true;
+            }
+            if ((delta.StateMask & AuthorityStateMaskHp) != 0)
+            {
+                cached.Hp = delta.Hp;
+                cached.HasHp = true;
+            }
+            if ((delta.StateMask & AuthorityStateMaskDead) != 0)
+            {
+                cached.IsDead = delta.IsDead;
+                cached.HasDead = true;
+            }
+
+            if (!cached.HasPosition || !cached.HasHp || !cached.HasDead)
+            {
+                Logging.HYLDDebug.FrameTrace($"[AuthStateDelta][Reject] frame={authorityFrameId} stateBaseFrame={stateBaseFrame} battleId={delta.BattleId} mask={delta.StateMask} reason=incomplete_cached_state pos={cached.HasPosition} hp={cached.HasHp} dead={cached.HasDead}");
+                return false;
+            }
+
+            return true;
+        }
+
+        private void AddCachedAuthorityStatesToFrame(BattleFrame frame)
+        {
+            HashSet<int> added = new HashSet<int>();
+            for (int i = 0; i < playerIndexBattleIds.Count; i++)
+            {
+                int battlePlayerId = playerIndexBattleIds[i];
+                if (authorityStateCache.TryGetValue(battlePlayerId, out CachedAuthorityState cached))
+                {
+                    frame.PlayerStates.Add(CreateFullAuthorityState(cached));
+                    added.Add(battlePlayerId);
+                }
+            }
+
+            foreach (var kvp in authorityStateCache)
+            {
+                if (!added.Contains(kvp.Key))
+                {
+                    frame.PlayerStates.Add(CreateFullAuthorityState(kvp.Value));
+                }
+            }
+        }
+
+        private AuthoritativePlayerState CreateFullAuthorityState(CachedAuthorityState cached)
+        {
+            return new AuthoritativePlayerState
+            {
+                BattleId = cached.BattleId,
+                PosX = cached.PosX,
+                PosY = cached.PosY,
+                PosZ = cached.PosZ,
+                Hp = cached.Hp,
+                IsDead = cached.IsDead,
+                StateMask = AuthorityStateMaskAll,
+            };
         }
 
         /// <summary>
@@ -109,9 +253,9 @@ namespace Manger
             UpdateAnimationStateFromAuthority(authorityFrames);
 
             sync_frameID = authorityFrameId;
-            //“拿服务器最新确认的帧号（authorityFrameId）去对比一下我本地的预测帧号（predicted_frameID）。
-            //如果发现我本地跑得还不如服务器跑得快（或者我因为掉线卡住了），那我就把我自己内部的 predicted_frameID 强制拔高、对齐到服务器的帧号。
-            AlignPredictedFrameWithAuthority(authorityFrameId);
+            // ServerFrame 与 ClientMoveFrame 是两条时间轴。
+            // predicted_frameID 只能由本地 BattleTick 连续提交，不能用 authorityFrameId 强制拔高，
+            // 否则下一次 ClientMove.move_frame 会跳号，服务端会把同一个输入扩成超长 segment。
 
             // 当前批次默认以最后一帧作为“最新权威帧”。
             // 本文件里的位置校正和动画更新也都基于 authorityFrames[authorityFrames.Count - 1]，

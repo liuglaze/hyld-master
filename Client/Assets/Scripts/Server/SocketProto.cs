@@ -56,67 +56,79 @@ namespace SocketProto {
             "ZRgCIAEoCRIKCgJpZBgDIAEoBRInCgVzdGF0ZRgEIAEoDjIYLlNvY2tldFBy",
             "b3RvLlBsYXllclN0YXRlEh8KBGhlcm8YBSABKA4yES5Tb2NrZXRQcm90by5I",
             "ZXJvEi8KDGZpZ2h0cGF0dGVybhgGIAEoDjIZLlNvY2tldFByb3RvLkZpZ2h0",
-            "UGF0dGVybiKjAgoKQmF0dGxlSW5mbxITCgtvcGVyYXRpb25JRBgBIAEoBRIQ",
+            "UGF0dGVybiKiAwoKQmF0dGxlSW5mbxITCgtvcGVyYXRpb25JRBgBIAEoBRIQ",
             "CghyYW5kU2VlZBgCIAEoBRI1Cg5iYXR0bGVVc2VySW5mbxgDIAMoCzIdLlNv",
-            "Y2tldFByb3RvLkJhdHRsZVBsYXllclBhY2sSOwoSYWxsUGxheWVyT3BlcmF0",
-            "aW9uGAQgAygLMh8uU29ja2V0UHJvdG8uQWxsUGxheWVyT3BlcmF0aW9uEjMK",
-            "DXNlbGZPcGVyYXRpb24YBSABKAsyHC5Tb2NrZXRQcm90by5QbGF5ZXJPcGVy",
-            "YXRpb24SKQoKaGl0X2V2ZW50cxgGIAMoCzIVLlNvY2tldFByb3RvLkhpdEV2",
-            "ZW50EhoKEmNsaWVudF9hY2tlZF9mcmFtZRgHIAEoBSKVAQoSQWxsUGxheWVy",
-            "T3BlcmF0aW9uEjAKCm9wZXJhdGlvbnMYASADKAsyHC5Tb2NrZXRQcm90by5Q",
-            "bGF5ZXJPcGVyYXRpb24SDwoHZnJhbWVpZBgCIAEoBRI8Cg1wbGF5ZXJfc3Rh",
-            "dGVzGAMgAygLMiUuU29ja2V0UHJvdG8uQXV0aG9yaXRhdGl2ZVBsYXllclN0",
-            "YXRlIp4BCg9BdHRhY2tPcGVyYXRpb24SEQoJYXR0YWNrX2lkGAEgASgFEg8K",
-            "B3Rvd2FyZHgYAiABKAISDwoHdG93YXJkeRgDIAEoAhIXCg9jbGllbnRfZnJh",
-            "bWVfaWQYBCABKAUSEwoLc3Bhd25fcG9zX3gYBSABKAISEwoLc3Bhd25fcG9z",
-            "X3kYBiABKAISEwoLc3Bhd25fcG9zX3oYByABKAIihgEKD1BsYXllck9wZXJh",
-            "dGlvbhIQCghiYXR0bGVpZBgBIAEoBRITCgtwbGF5ZXJNb3ZlWBgCIAEoAhIT",
-            "CgtwbGF5ZXJNb3ZlWRgDIAEoAhI3ChFhdHRhY2tfb3BlcmF0aW9ucxgEIAMo",
-            "CzIcLlNvY2tldFByb3RvLkF0dGFja09wZXJhdGlvbiLDAQoISGl0RXZlbnQS",
-            "EQoJYXR0YWNrX2lkGAEgASgFEhoKEmF0dGFja2VyX2JhdHRsZV9pZBgCIAEo",
-            "BRIYChB2aWN0aW1fYmF0dGxlX2lkGAMgASgFEg4KBmRhbWFnZRgEIAEoBRIU",
-            "CgxoaXRfZnJhbWVfaWQYBSABKAUSEQoJaGl0X3Bvc194GAYgASgCEhEKCWhp",
-            "dF9wb3NfeRgHIAEoAhIRCgloaXRfcG9zX3oYCCABKAISDwoHaXNfa2lsbBgJ",
-            "IAEoCCJ3ChhBdXRob3JpdGF0aXZlUGxheWVyU3RhdGUSEQoJYmF0dGxlX2lk",
-            "GAEgASgFEg0KBXBvc194GAIgASgCEg0KBXBvc195GAMgASgCEg0KBXBvc196",
-            "GAQgASgCEgoKAmhwGAUgASgFEg8KB2lzX2RlYWQYBiABKAgqhgEKC1JlcXVl",
-            "c3RDb2RlEg8KC1JlcXVlc3ROb25lEAASCAoEVXNlchABEggKBFJvb20QAhIK",
-            "CgZGcmllbmQQAxIOCgpGcmllbmRSb29tEAQSDAoIUGluZ1BvbmcQBRIMCghN",
-            "YXRjaGluZxAGEgoKBkJhdHRsZRAHEg4KCkNsZWFyU2VuY2UQCCq1BgoKQWN0",
-            "aW9uQ29kZRIOCgpBY3Rpb25Ob25lEAASCQoFTG9nb24QARIJCgVMb2dpbhAC",
-            "Eg4KCkNyZWF0ZVJvb20QAxIMCghGaW5kUm9vbRAEEg4KClBsYXllckxpc3QQ",
-            "BRIMCghKb2luUm9vbRAGEggKBEV4aXQQBxIICgRDaGF0EAgSEQoNQXBseUFk",
-            "ZEZyaWVuZBAJEhAKDEludml0ZUZyaWVuZBAKEgwKCEZpbmROYW1lEAsSDgoK",
-            "VXBkYXRlTmFtZRAMEhMKD0FjY2VwdEFkZEZyaWVuZBANEhMKD1JlamVjdEFk",
-            "ZEZyaWVuZBAOEhIKDkZpbmRQbGF5ZXJJbmZvEA8SEwoPRmluZEZyaWVuZHNJ",
-            "bmZvEBASDwoLRnJpZW5kTG9naW4QERIQCgxGcmllbmRMb2dvdXQQEhIWChJB",
-            "Y2NlcHRJbnZhdGVGcmllbmQQExIWChJSZWplY3RJbnZhdGVGcmllbmQQFBIW",
-            "ChJDYW5jYWxJbnZhdGVGcmllbmQQFRIMCghFeGl0Um9vbRAWEhUKEUdldEZy",
-            "aWVuZFJvb21JbmZvEBcSCAoEUGluZxAYEggKBFBvbmcQGRIOCgpDaGFuZ2VI",
-            "ZXJvEBoSGgoWVXBEYXRlQWN0aXZlRnJpZW5kSW5mbxAbEhUKEUFkZE1hdGNo",
-            "aW5nUGxheWVyEBwSGAoUUmVtb3ZlTWF0Y2hpbmdQbGF5ZXIQHRIUChBTdGFy",
-            "dEVudGVyQmF0dGxlEB4SDwoLQmF0dGxlUmVhZHkQHxIPCgtCYXR0bGVTdGFy",
-            "dBAgEiQKIEJhdHRsZVB1c2hEb3dtQWxsRnJhbWVPcGVhcnRpb25zECESIgoe",
-            "QmF0dGxlUHVzaERvd21QbGF5ZXJPcGVhcnRpb25zECISHQoZQ2xpZW50U2Vu",
-            "ZENsZWFyU2VuY2VSZWFkeRAjEhYKEkFsbENsZWFyU2VuY2VSZWFkeRAkEhYK",
-            "EkNsaWVudFNlbmRHYW1lT3ZlchAlEhoKFkJhdHRsZVB1c2hEb3dtR2FtZU92",
-            "ZXIQJhIQCgxCYXR0bGVSZXZpZXcQJxIbChdCYXR0bGVQdXNoRG93bkhpdEV2",
-            "ZW50cxAoKk8KClJldHVybkNvZGUSDgoKUmV0dXJuTm9uZRAAEgsKB1N1Y2Nl",
-            "ZWQQARIICgRGYWlsEAISCwoHTm90Um9vbRADEg0KCUFkZEZyaWVuZBAEKjcK",
-            "CVJvb21TdGF0ZRIOCgpSb29tTm9ybWFsEAASDAoIUm9vbUZ1bGwQARIMCghS",
-            "b29tR2FtZRACKmkKC1BsYXllclN0YXRlEhAKDFBsYXllck9ubGluZRAAEhEK",
-            "DVBsYXllck91dGxpbmUQARIOCgpQbGF5ZXJHYW1lEAISEAoMUGxheWVyT25S",
-            "b29tEAMSEwoPUGxheWVyT25JbnZhdGVkEAQq6wEKBEhlcm8SCQoFWHVlTGkQ",
-            "ABIKCgZLZUVyVGUQARIKCgZQZWlQZWkQAhIJCgVQYW5OaRADEggKBEJhTGkQ",
-            "BBILCgdHb25nTml1EAUSCgoGRGFMaUVyEAYSCAoER2VFchAHEgsKB0J1THVv",
-            "S2UQCBIOCgpCYW9Qb01haUtlEAkSBwoDQUJvEAoSCAoERGlLZRALEgkKBUJl",
-            "aVlhEAwSCAoEVGFMYRANEgsKB01haUtlU2kQDhILCgdTaVBhaUtlEA8SCQoF",
-            "SGVpWWEQEBIJCgVMaUFuZxAREggKBFBhTXUQEhIJCgVSdWlLZRATKiwKDEZp",
-            "Z2h0UGF0dGVybhIRCg1CYW9TaGlaaGVuZ0JhEAASCQoFU2hlamkQAWIGcHJv",
-            "dG8z"));
+            "Y2tldFByb3RvLkJhdHRsZVBsYXllclBhY2sSLAoGZnJhbWVzGAQgAygLMhwu",
+            "U29ja2V0UHJvdG8uQmF0dGxlRnJhbWVTeW5jEjMKDXNlbGZPcGVyYXRpb24Y",
+            "BSABKAsyHC5Tb2NrZXRQcm90by5QbGF5ZXJPcGVyYXRpb24SKQoKaGl0X2V2",
+            "ZW50cxgGIAMoCzIVLlNvY2tldFByb3RvLkhpdEV2ZW50EhoKEmNsaWVudF9h",
+            "Y2tlZF9mcmFtZRgHIAEoBRIVCg1jbGllbnRfcnR0X21zGAggASgFEi0KDGNs",
+            "aWVudF9tb3ZlcxgJIAMoCzIXLlNvY2tldFByb3RvLkNsaWVudE1vdmUSGAoQ",
+            "YWNrZWRfbW92ZV9mcmFtZRgKIAEoBRIsCghtb3ZlX2FjaxgLIAEoCzIaLlNv",
+            "Y2tldFByb3RvLk1vdmVBY2tSZXN1bHQikgEKD0JhdHRsZUZyYW1lU3luYxIw",
+            "CgpvcGVyYXRpb25zGAEgAygLMhwuU29ja2V0UHJvdG8uUGxheWVyT3BlcmF0",
+            "aW9uEg8KB2ZyYW1laWQYAiABKAUSPAoNcGxheWVyX3N0YXRlcxgDIAMoCzIl",
+            "LlNvY2tldFByb3RvLkF1dGhvcml0YXRpdmVQbGF5ZXJTdGF0ZSKeAQoPQXR0",
+            "YWNrT3BlcmF0aW9uEhEKCWF0dGFja19pZBgBIAEoBRIPCgd0b3dhcmR4GAIg",
+            "ASgCEg8KB3Rvd2FyZHkYAyABKAISFwoPY2xpZW50X2ZyYW1lX2lkGAQgASgF",
+            "EhMKC3NwYXduX3Bvc194GAUgASgCEhMKC3NwYXduX3Bvc195GAYgASgCEhMK",
+            "C3NwYXduX3Bvc196GAcgASgCIoYBCg9QbGF5ZXJPcGVyYXRpb24SEAoIYmF0",
+            "dGxlaWQYASABKAUSEwoLcGxheWVyTW92ZVgYAiABKAISEwoLcGxheWVyTW92",
+            "ZVkYAyABKAISNwoRYXR0YWNrX29wZXJhdGlvbnMYBCADKAsyHC5Tb2NrZXRQ",
+            "cm90by5BdHRhY2tPcGVyYXRpb24itQEKCkNsaWVudE1vdmUSEgoKbW92ZV9m",
+            "cmFtZRgBIAEoBRIOCgZtb3ZlX3gYAiABKAISDgoGbW92ZV95GAMgASgCEhcK",
+            "D3ByZWRpY3RlZF9wb3NfeBgEIAEoAhIXCg9wcmVkaWN0ZWRfcG9zX3kYBSAB",
+            "KAISFwoPcHJlZGljdGVkX3Bvc196GAYgASgCEigKCW1vdmVfdHlwZRgHIAEo",
+            "DjIVLlNvY2tldFByb3RvLk1vdmVUeXBlItgBCg1Nb3ZlQWNrUmVzdWx0EhEK",
+            "CWJhdHRsZV9pZBgBIAEoBRIYChBhY2tlZF9tb3ZlX2ZyYW1lGAIgASgFEhUK",
+            "DWFja19nb29kX21vdmUYAyABKAgSFQoNY29ycmVjdF9wb3NfeBgEIAEoAhIV",
+            "Cg1jb3JyZWN0X3Bvc195GAUgASgCEhUKDWNvcnJlY3RfcG9zX3oYBiABKAIS",
+            "GQoRZnJhbWVfZGlzY3JlcGFuY3kYByABKAUSIwobcmVzb2x2aW5nX2ZyYW1l",
+            "X2Rpc2NyZXBhbmN5GAggASgIIsMBCghIaXRFdmVudBIRCglhdHRhY2tfaWQY",
+            "ASABKAUSGgoSYXR0YWNrZXJfYmF0dGxlX2lkGAIgASgFEhgKEHZpY3RpbV9i",
+            "YXR0bGVfaWQYAyABKAUSDgoGZGFtYWdlGAQgASgFEhQKDGhpdF9mcmFtZV9p",
+            "ZBgFIAEoBRIRCgloaXRfcG9zX3gYBiABKAISEQoJaGl0X3Bvc195GAcgASgC",
+            "EhEKCWhpdF9wb3NfehgIIAEoAhIPCgdpc19raWxsGAkgASgIIncKGEF1dGhv",
+            "cml0YXRpdmVQbGF5ZXJTdGF0ZRIRCgliYXR0bGVfaWQYASABKAUSDQoFcG9z",
+            "X3gYAiABKAISDQoFcG9zX3kYAyABKAISDQoFcG9zX3oYBCABKAISCgoCaHAY",
+            "BSABKAUSDwoHaXNfZGVhZBgGIAEoCCqGAQoLUmVxdWVzdENvZGUSDwoLUmVx",
+            "dWVzdE5vbmUQABIICgRVc2VyEAESCAoEUm9vbRACEgoKBkZyaWVuZBADEg4K",
+            "CkZyaWVuZFJvb20QBBIMCghQaW5nUG9uZxAFEgwKCE1hdGNoaW5nEAYSCgoG",
+            "QmF0dGxlEAcSDgoKQ2xlYXJTZW5jZRAIKrUGCgpBY3Rpb25Db2RlEg4KCkFj",
+            "dGlvbk5vbmUQABIJCgVMb2dvbhABEgkKBUxvZ2luEAISDgoKQ3JlYXRlUm9v",
+            "bRADEgwKCEZpbmRSb29tEAQSDgoKUGxheWVyTGlzdBAFEgwKCEpvaW5Sb29t",
+            "EAYSCAoERXhpdBAHEggKBENoYXQQCBIRCg1BcGx5QWRkRnJpZW5kEAkSEAoM",
+            "SW52aXRlRnJpZW5kEAoSDAoIRmluZE5hbWUQCxIOCgpVcGRhdGVOYW1lEAwS",
+            "EwoPQWNjZXB0QWRkRnJpZW5kEA0SEwoPUmVqZWN0QWRkRnJpZW5kEA4SEgoO",
+            "RmluZFBsYXllckluZm8QDxITCg9GaW5kRnJpZW5kc0luZm8QEBIPCgtGcmll",
+            "bmRMb2dpbhAREhAKDEZyaWVuZExvZ291dBASEhYKEkFjY2VwdEludmF0ZUZy",
+            "aWVuZBATEhYKElJlamVjdEludmF0ZUZyaWVuZBAUEhYKEkNhbmNhbEludmF0",
+            "ZUZyaWVuZBAVEgwKCEV4aXRSb29tEBYSFQoRR2V0RnJpZW5kUm9vbUluZm8Q",
+            "FxIICgRQaW5nEBgSCAoEUG9uZxAZEg4KCkNoYW5nZUhlcm8QGhIaChZVcERh",
+            "dGVBY3RpdmVGcmllbmRJbmZvEBsSFQoRQWRkTWF0Y2hpbmdQbGF5ZXIQHBIY",
+            "ChRSZW1vdmVNYXRjaGluZ1BsYXllchAdEhQKEFN0YXJ0RW50ZXJCYXR0bGUQ",
+            "HhIPCgtCYXR0bGVSZWFkeRAfEg8KC0JhdHRsZVN0YXJ0ECASJAogQmF0dGxl",
+            "UHVzaERvd21BbGxGcmFtZU9wZWFydGlvbnMQIRIiCh5CYXR0bGVQdXNoRG93",
+            "bVBsYXllck9wZWFydGlvbnMQIhIdChlDbGllbnRTZW5kQ2xlYXJTZW5jZVJl",
+            "YWR5ECMSFgoSQWxsQ2xlYXJTZW5jZVJlYWR5ECQSFgoSQ2xpZW50U2VuZEdh",
+            "bWVPdmVyECUSGgoWQmF0dGxlUHVzaERvd21HYW1lT3ZlchAmEhAKDEJhdHRs",
+            "ZVJldmlldxAnEhsKF0JhdHRsZVB1c2hEb3duSGl0RXZlbnRzECgqTwoKUmV0",
+            "dXJuQ29kZRIOCgpSZXR1cm5Ob25lEAASCwoHU3VjY2VlZBABEggKBEZhaWwQ",
+            "AhILCgdOb3RSb29tEAMSDQoJQWRkRnJpZW5kEAQqNwoJUm9vbVN0YXRlEg4K",
+            "ClJvb21Ob3JtYWwQABIMCghSb29tRnVsbBABEgwKCFJvb21HYW1lEAIqaQoL",
+            "UGxheWVyU3RhdGUSEAoMUGxheWVyT25saW5lEAASEQoNUGxheWVyT3V0bGlu",
+            "ZRABEg4KClBsYXllckdhbWUQAhIQCgxQbGF5ZXJPblJvb20QAxITCg9QbGF5",
+            "ZXJPbkludmF0ZWQQBCrrAQoESGVybxIJCgVYdWVMaRAAEgoKBktlRXJUZRAB",
+            "EgoKBlBlaVBlaRACEgkKBVBhbk5pEAMSCAoEQmFMaRAEEgsKB0dvbmdOaXUQ",
+            "BRIKCgZEYUxpRXIQBhIICgRHZUVyEAcSCwoHQnVMdW9LZRAIEg4KCkJhb1Bv",
+            "TWFpS2UQCRIHCgNBQm8QChIICgREaUtlEAsSCQoFQmVpWWEQDBIICgRUYUxh",
+            "EA0SCwoHTWFpS2VTaRAOEgsKB1NpUGFpS2UQDxIJCgVIZWlZYRAQEgkKBUxp",
+            "QW5nEBESCAoEUGFNdRASEgkKBVJ1aUtlEBMqLAoMRmlnaHRQYXR0ZXJuEhEK",
+            "DUJhb1NoaVpoZW5nQmEQABIJCgVTaGVqaRABKiQKCE1vdmVUeXBlEgsKB05l",
+            "d01vdmUQABILCgdPbGRNb3ZlEAFiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
-          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::SocketProto.RequestCode), typeof(global::SocketProto.ActionCode), typeof(global::SocketProto.ReturnCode), typeof(global::SocketProto.RoomState), typeof(global::SocketProto.PlayerState), typeof(global::SocketProto.Hero), typeof(global::SocketProto.FightPattern), }, null, new pbr::GeneratedClrTypeInfo[] {
+          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::SocketProto.RequestCode), typeof(global::SocketProto.ActionCode), typeof(global::SocketProto.ReturnCode), typeof(global::SocketProto.RoomState), typeof(global::SocketProto.PlayerState), typeof(global::SocketProto.Hero), typeof(global::SocketProto.FightPattern), typeof(global::SocketProto.MoveType), }, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MainPack), global::SocketProto.MainPack.Parser, new[]{ "Requestcode", "Actioncode", "Returncode", "Loginpack", "Str", "Roompack", "Friendspack", "UserInfopack", "Friendroompack", "Playerspack", "Chatpack", "Battleplayerpack", "BattleInfo", "Timestamp" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ChatPack), global::SocketProto.ChatPack.Parser, new[]{ "Playername", "Message", "State" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.LoginPack), global::SocketProto.LoginPack.Parser, new[]{ "Username", "Password" }, null, null, null, null),
@@ -125,10 +137,12 @@ namespace SocketProto {
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleRoomPack), global::SocketProto.BattleRoomPack.Parser, new[]{ "Roomid", "Maxnum", "Curnum", "Fightpattern", "Battleplayerpack" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.FriendRoomPack), global::SocketProto.FriendRoomPack.Parser, new[]{ "Roomid", "Maxnum", "Curnum", "State" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.PlayerPack), global::SocketProto.PlayerPack.Parser, new[]{ "Username", "Playername", "Id", "State", "Hero", "Fightpattern" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleInfo), global::SocketProto.BattleInfo.Parser, new[]{ "OperationID", "RandSeed", "BattleUserInfo", "AllPlayerOperation", "SelfOperation", "HitEvents", "ClientAckedFrame" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AllPlayerOperation), global::SocketProto.AllPlayerOperation.Parser, new[]{ "Operations", "Frameid", "PlayerStates" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleInfo), global::SocketProto.BattleInfo.Parser, new[]{ "OperationID", "RandSeed", "BattleUserInfo", "Frames", "SelfOperation", "HitEvents", "ClientAckedFrame", "ClientRttMs", "ClientMoves", "AckedMoveFrame", "MoveAck" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleFrameSync), global::SocketProto.BattleFrameSync.Parser, new[]{ "Operations", "Frameid", "PlayerStates" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AttackOperation), global::SocketProto.AttackOperation.Parser, new[]{ "AttackId", "Towardx", "Towardy", "ClientFrameId", "SpawnPosX", "SpawnPosY", "SpawnPosZ" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.PlayerOperation), global::SocketProto.PlayerOperation.Parser, new[]{ "Battleid", "PlayerMoveX", "PlayerMoveY", "AttackOperations" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ClientMove), global::SocketProto.ClientMove.Parser, new[]{ "MoveFrame", "MoveX", "MoveY", "PredictedPosX", "PredictedPosY", "PredictedPosZ", "MoveType" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MoveAckResult), global::SocketProto.MoveAckResult.Parser, new[]{ "BattleId", "AckedMoveFrame", "AckGoodMove", "CorrectPosX", "CorrectPosY", "CorrectPosZ", "FrameDiscrepancy", "ResolvingFrameDiscrepancy" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.HitEvent), global::SocketProto.HitEvent.Parser, new[]{ "AttackId", "AttackerBattleId", "VictimBattleId", "Damage", "HitFrameId", "HitPosX", "HitPosY", "HitPosZ", "IsKill" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AuthoritativePlayerState), global::SocketProto.AuthoritativePlayerState.Parser, new[]{ "BattleId", "PosX", "PosY", "PosZ", "Hp", "IsDead" }, null, null, null, null)
           }));
@@ -241,6 +255,11 @@ namespace SocketProto {
   public enum FightPattern {
     [pbr::OriginalName("BaoShiZhengBa")] BaoShiZhengBa = 0,
     [pbr::OriginalName("Sheji")] Sheji = 1,
+  }
+
+  public enum MoveType {
+    [pbr::OriginalName("NewMove")] NewMove = 0,
+    [pbr::OriginalName("OldMove")] OldMove = 1,
   }
 
   #endregion
@@ -2290,10 +2309,14 @@ namespace SocketProto {
       operationID_ = other.operationID_;
       randSeed_ = other.randSeed_;
       battleUserInfo_ = other.battleUserInfo_.Clone();
-      allPlayerOperation_ = other.allPlayerOperation_.Clone();
+      frames_ = other.frames_.Clone();
       selfOperation_ = other.selfOperation_ != null ? other.selfOperation_.Clone() : null;
       hitEvents_ = other.hitEvents_.Clone();
       clientAckedFrame_ = other.clientAckedFrame_;
+      clientRttMs_ = other.clientRttMs_;
+      clientMoves_ = other.clientMoves_.Clone();
+      ackedMoveFrame_ = other.ackedMoveFrame_;
+      moveAck_ = other.moveAck_ != null ? other.moveAck_.Clone() : null;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -2334,14 +2357,14 @@ namespace SocketProto {
       get { return battleUserInfo_; }
     }
 
-    /// <summary>Field number for the "allPlayerOperation" field.</summary>
-    public const int AllPlayerOperationFieldNumber = 4;
-    private static readonly pb::FieldCodec<global::SocketProto.AllPlayerOperation> _repeated_allPlayerOperation_codec
-        = pb::FieldCodec.ForMessage(34, global::SocketProto.AllPlayerOperation.Parser);
-    private readonly pbc::RepeatedField<global::SocketProto.AllPlayerOperation> allPlayerOperation_ = new pbc::RepeatedField<global::SocketProto.AllPlayerOperation>();
+    /// <summary>Field number for the "frames" field.</summary>
+    public const int FramesFieldNumber = 4;
+    private static readonly pb::FieldCodec<global::SocketProto.BattleFrameSync> _repeated_frames_codec
+        = pb::FieldCodec.ForMessage(34, global::SocketProto.BattleFrameSync.Parser);
+    private readonly pbc::RepeatedField<global::SocketProto.BattleFrameSync> frames_ = new pbc::RepeatedField<global::SocketProto.BattleFrameSync>();
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
-    public pbc::RepeatedField<global::SocketProto.AllPlayerOperation> AllPlayerOperation {
-      get { return allPlayerOperation_; }
+    public pbc::RepeatedField<global::SocketProto.BattleFrameSync> Frames {
+      get { return frames_; }
     }
 
     /// <summary>Field number for the "selfOperation" field.</summary>
@@ -2376,6 +2399,49 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "client_rtt_ms" field.</summary>
+    public const int ClientRttMsFieldNumber = 8;
+    private int clientRttMs_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int ClientRttMs {
+      get { return clientRttMs_; }
+      set {
+        clientRttMs_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "client_moves" field.</summary>
+    public const int ClientMovesFieldNumber = 9;
+    private static readonly pb::FieldCodec<global::SocketProto.ClientMove> _repeated_clientMoves_codec
+        = pb::FieldCodec.ForMessage(74, global::SocketProto.ClientMove.Parser);
+    private readonly pbc::RepeatedField<global::SocketProto.ClientMove> clientMoves_ = new pbc::RepeatedField<global::SocketProto.ClientMove>();
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public pbc::RepeatedField<global::SocketProto.ClientMove> ClientMoves {
+      get { return clientMoves_; }
+    }
+
+    /// <summary>Field number for the "acked_move_frame" field.</summary>
+    public const int AckedMoveFrameFieldNumber = 10;
+    private int ackedMoveFrame_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int AckedMoveFrame {
+      get { return ackedMoveFrame_; }
+      set {
+        ackedMoveFrame_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "move_ack" field.</summary>
+    public const int MoveAckFieldNumber = 11;
+    private global::SocketProto.MoveAckResult moveAck_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public global::SocketProto.MoveAckResult MoveAck {
+      get { return moveAck_; }
+      set {
+        moveAck_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as BattleInfo);
@@ -2392,10 +2458,14 @@ namespace SocketProto {
       if (OperationID != other.OperationID) return false;
       if (RandSeed != other.RandSeed) return false;
       if(!battleUserInfo_.Equals(other.battleUserInfo_)) return false;
-      if(!allPlayerOperation_.Equals(other.allPlayerOperation_)) return false;
+      if(!frames_.Equals(other.frames_)) return false;
       if (!object.Equals(SelfOperation, other.SelfOperation)) return false;
       if(!hitEvents_.Equals(other.hitEvents_)) return false;
       if (ClientAckedFrame != other.ClientAckedFrame) return false;
+      if (ClientRttMs != other.ClientRttMs) return false;
+      if(!clientMoves_.Equals(other.clientMoves_)) return false;
+      if (AckedMoveFrame != other.AckedMoveFrame) return false;
+      if (!object.Equals(MoveAck, other.MoveAck)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -2405,10 +2475,14 @@ namespace SocketProto {
       if (OperationID != 0) hash ^= OperationID.GetHashCode();
       if (RandSeed != 0) hash ^= RandSeed.GetHashCode();
       hash ^= battleUserInfo_.GetHashCode();
-      hash ^= allPlayerOperation_.GetHashCode();
+      hash ^= frames_.GetHashCode();
       if (selfOperation_ != null) hash ^= SelfOperation.GetHashCode();
       hash ^= hitEvents_.GetHashCode();
       if (ClientAckedFrame != 0) hash ^= ClientAckedFrame.GetHashCode();
+      if (ClientRttMs != 0) hash ^= ClientRttMs.GetHashCode();
+      hash ^= clientMoves_.GetHashCode();
+      if (AckedMoveFrame != 0) hash ^= AckedMoveFrame.GetHashCode();
+      if (moveAck_ != null) hash ^= MoveAck.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -2431,7 +2505,7 @@ namespace SocketProto {
         output.WriteInt32(RandSeed);
       }
       battleUserInfo_.WriteTo(output, _repeated_battleUserInfo_codec);
-      allPlayerOperation_.WriteTo(output, _repeated_allPlayerOperation_codec);
+      frames_.WriteTo(output, _repeated_frames_codec);
       if (selfOperation_ != null) {
         output.WriteRawTag(42);
         output.WriteMessage(SelfOperation);
@@ -2440,6 +2514,19 @@ namespace SocketProto {
       if (ClientAckedFrame != 0) {
         output.WriteRawTag(56);
         output.WriteInt32(ClientAckedFrame);
+      }
+      if (ClientRttMs != 0) {
+        output.WriteRawTag(64);
+        output.WriteInt32(ClientRttMs);
+      }
+      clientMoves_.WriteTo(output, _repeated_clientMoves_codec);
+      if (AckedMoveFrame != 0) {
+        output.WriteRawTag(80);
+        output.WriteInt32(AckedMoveFrame);
+      }
+      if (moveAck_ != null) {
+        output.WriteRawTag(90);
+        output.WriteMessage(MoveAck);
       }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
@@ -2456,13 +2543,23 @@ namespace SocketProto {
         size += 1 + pb::CodedOutputStream.ComputeInt32Size(RandSeed);
       }
       size += battleUserInfo_.CalculateSize(_repeated_battleUserInfo_codec);
-      size += allPlayerOperation_.CalculateSize(_repeated_allPlayerOperation_codec);
+      size += frames_.CalculateSize(_repeated_frames_codec);
       if (selfOperation_ != null) {
         size += 1 + pb::CodedOutputStream.ComputeMessageSize(SelfOperation);
       }
       size += hitEvents_.CalculateSize(_repeated_hitEvents_codec);
       if (ClientAckedFrame != 0) {
         size += 1 + pb::CodedOutputStream.ComputeInt32Size(ClientAckedFrame);
+      }
+      if (ClientRttMs != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(ClientRttMs);
+      }
+      size += clientMoves_.CalculateSize(_repeated_clientMoves_codec);
+      if (AckedMoveFrame != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(AckedMoveFrame);
+      }
+      if (moveAck_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(MoveAck);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -2482,7 +2579,7 @@ namespace SocketProto {
         RandSeed = other.RandSeed;
       }
       battleUserInfo_.Add(other.battleUserInfo_);
-      allPlayerOperation_.Add(other.allPlayerOperation_);
+      frames_.Add(other.frames_);
       if (other.selfOperation_ != null) {
         if (selfOperation_ == null) {
           SelfOperation = new global::SocketProto.PlayerOperation();
@@ -2492,6 +2589,19 @@ namespace SocketProto {
       hitEvents_.Add(other.hitEvents_);
       if (other.ClientAckedFrame != 0) {
         ClientAckedFrame = other.ClientAckedFrame;
+      }
+      if (other.ClientRttMs != 0) {
+        ClientRttMs = other.ClientRttMs;
+      }
+      clientMoves_.Add(other.clientMoves_);
+      if (other.AckedMoveFrame != 0) {
+        AckedMoveFrame = other.AckedMoveFrame;
+      }
+      if (other.moveAck_ != null) {
+        if (moveAck_ == null) {
+          MoveAck = new global::SocketProto.MoveAckResult();
+        }
+        MoveAck.MergeFrom(other.MoveAck);
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -2517,7 +2627,7 @@ namespace SocketProto {
             break;
           }
           case 34: {
-            allPlayerOperation_.AddEntriesFrom(input, _repeated_allPlayerOperation_codec);
+            frames_.AddEntriesFrom(input, _repeated_frames_codec);
             break;
           }
           case 42: {
@@ -2535,17 +2645,36 @@ namespace SocketProto {
             ClientAckedFrame = input.ReadInt32();
             break;
           }
+          case 64: {
+            ClientRttMs = input.ReadInt32();
+            break;
+          }
+          case 74: {
+            clientMoves_.AddEntriesFrom(input, _repeated_clientMoves_codec);
+            break;
+          }
+          case 80: {
+            AckedMoveFrame = input.ReadInt32();
+            break;
+          }
+          case 90: {
+            if (moveAck_ == null) {
+              MoveAck = new global::SocketProto.MoveAckResult();
+            }
+            input.ReadMessage(MoveAck);
+            break;
+          }
         }
       }
     }
 
   }
 
-  public sealed partial class AllPlayerOperation : pb::IMessage<AllPlayerOperation> {
-    private static readonly pb::MessageParser<AllPlayerOperation> _parser = new pb::MessageParser<AllPlayerOperation>(() => new AllPlayerOperation());
+  public sealed partial class BattleFrameSync : pb::IMessage<BattleFrameSync> {
+    private static readonly pb::MessageParser<BattleFrameSync> _parser = new pb::MessageParser<BattleFrameSync>(() => new BattleFrameSync());
     private pb::UnknownFieldSet _unknownFields;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
-    public static pb::MessageParser<AllPlayerOperation> Parser { get { return _parser; } }
+    public static pb::MessageParser<BattleFrameSync> Parser { get { return _parser; } }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
@@ -2558,14 +2687,14 @@ namespace SocketProto {
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
-    public AllPlayerOperation() {
+    public BattleFrameSync() {
       OnConstruction();
     }
 
     partial void OnConstruction();
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
-    public AllPlayerOperation(AllPlayerOperation other) : this() {
+    public BattleFrameSync(BattleFrameSync other) : this() {
       operations_ = other.operations_.Clone();
       frameid_ = other.frameid_;
       playerStates_ = other.playerStates_.Clone();
@@ -2573,8 +2702,8 @@ namespace SocketProto {
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
-    public AllPlayerOperation Clone() {
-      return new AllPlayerOperation(this);
+    public BattleFrameSync Clone() {
+      return new BattleFrameSync(this);
     }
 
     /// <summary>Field number for the "operations" field.</summary>
@@ -2610,11 +2739,11 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
-      return Equals(other as AllPlayerOperation);
+      return Equals(other as BattleFrameSync);
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
-    public bool Equals(AllPlayerOperation other) {
+    public bool Equals(BattleFrameSync other) {
       if (ReferenceEquals(other, null)) {
         return false;
       }
@@ -2672,7 +2801,7 @@ namespace SocketProto {
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
-    public void MergeFrom(AllPlayerOperation other) {
+    public void MergeFrom(BattleFrameSync other) {
       if (other == null) {
         return;
       }
@@ -3212,6 +3341,628 @@ namespace SocketProto {
 
   }
 
+  public sealed partial class ClientMove : pb::IMessage<ClientMove> {
+    private static readonly pb::MessageParser<ClientMove> _parser = new pb::MessageParser<ClientMove>(() => new ClientMove());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pb::MessageParser<ClientMove> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[12]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public ClientMove() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public ClientMove(ClientMove other) : this() {
+      moveFrame_ = other.moveFrame_;
+      moveX_ = other.moveX_;
+      moveY_ = other.moveY_;
+      predictedPosX_ = other.predictedPosX_;
+      predictedPosY_ = other.predictedPosY_;
+      predictedPosZ_ = other.predictedPosZ_;
+      moveType_ = other.moveType_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public ClientMove Clone() {
+      return new ClientMove(this);
+    }
+
+    /// <summary>Field number for the "move_frame" field.</summary>
+    public const int MoveFrameFieldNumber = 1;
+    private int moveFrame_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int MoveFrame {
+      get { return moveFrame_; }
+      set {
+        moveFrame_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "move_x" field.</summary>
+    public const int MoveXFieldNumber = 2;
+    private float moveX_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float MoveX {
+      get { return moveX_; }
+      set {
+        moveX_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "move_y" field.</summary>
+    public const int MoveYFieldNumber = 3;
+    private float moveY_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float MoveY {
+      get { return moveY_; }
+      set {
+        moveY_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "predicted_pos_x" field.</summary>
+    public const int PredictedPosXFieldNumber = 4;
+    private float predictedPosX_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float PredictedPosX {
+      get { return predictedPosX_; }
+      set {
+        predictedPosX_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "predicted_pos_y" field.</summary>
+    public const int PredictedPosYFieldNumber = 5;
+    private float predictedPosY_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float PredictedPosY {
+      get { return predictedPosY_; }
+      set {
+        predictedPosY_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "predicted_pos_z" field.</summary>
+    public const int PredictedPosZFieldNumber = 6;
+    private float predictedPosZ_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float PredictedPosZ {
+      get { return predictedPosZ_; }
+      set {
+        predictedPosZ_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "move_type" field.</summary>
+    public const int MoveTypeFieldNumber = 7;
+    private global::SocketProto.MoveType moveType_ = global::SocketProto.MoveType.NewMove;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public global::SocketProto.MoveType MoveType {
+      get { return moveType_; }
+      set {
+        moveType_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override bool Equals(object other) {
+      return Equals(other as ClientMove);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public bool Equals(ClientMove other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (MoveFrame != other.MoveFrame) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MoveX, other.MoveX)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MoveY, other.MoveY)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedPosX, other.PredictedPosX)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedPosY, other.PredictedPosY)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedPosZ, other.PredictedPosZ)) return false;
+      if (MoveType != other.MoveType) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (MoveFrame != 0) hash ^= MoveFrame.GetHashCode();
+      if (MoveX != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MoveX);
+      if (MoveY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MoveY);
+      if (PredictedPosX != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedPosX);
+      if (PredictedPosY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedPosY);
+      if (PredictedPosZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedPosZ);
+      if (MoveType != global::SocketProto.MoveType.NewMove) hash ^= MoveType.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void WriteTo(pb::CodedOutputStream output) {
+      if (MoveFrame != 0) {
+        output.WriteRawTag(8);
+        output.WriteInt32(MoveFrame);
+      }
+      if (MoveX != 0F) {
+        output.WriteRawTag(21);
+        output.WriteFloat(MoveX);
+      }
+      if (MoveY != 0F) {
+        output.WriteRawTag(29);
+        output.WriteFloat(MoveY);
+      }
+      if (PredictedPosX != 0F) {
+        output.WriteRawTag(37);
+        output.WriteFloat(PredictedPosX);
+      }
+      if (PredictedPosY != 0F) {
+        output.WriteRawTag(45);
+        output.WriteFloat(PredictedPosY);
+      }
+      if (PredictedPosZ != 0F) {
+        output.WriteRawTag(53);
+        output.WriteFloat(PredictedPosZ);
+      }
+      if (MoveType != global::SocketProto.MoveType.NewMove) {
+        output.WriteRawTag(56);
+        output.WriteEnum((int) MoveType);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int CalculateSize() {
+      int size = 0;
+      if (MoveFrame != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(MoveFrame);
+      }
+      if (MoveX != 0F) {
+        size += 1 + 4;
+      }
+      if (MoveY != 0F) {
+        size += 1 + 4;
+      }
+      if (PredictedPosX != 0F) {
+        size += 1 + 4;
+      }
+      if (PredictedPosY != 0F) {
+        size += 1 + 4;
+      }
+      if (PredictedPosZ != 0F) {
+        size += 1 + 4;
+      }
+      if (MoveType != global::SocketProto.MoveType.NewMove) {
+        size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) MoveType);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(ClientMove other) {
+      if (other == null) {
+        return;
+      }
+      if (other.MoveFrame != 0) {
+        MoveFrame = other.MoveFrame;
+      }
+      if (other.MoveX != 0F) {
+        MoveX = other.MoveX;
+      }
+      if (other.MoveY != 0F) {
+        MoveY = other.MoveY;
+      }
+      if (other.PredictedPosX != 0F) {
+        PredictedPosX = other.PredictedPosX;
+      }
+      if (other.PredictedPosY != 0F) {
+        PredictedPosY = other.PredictedPosY;
+      }
+      if (other.PredictedPosZ != 0F) {
+        PredictedPosZ = other.PredictedPosZ;
+      }
+      if (other.MoveType != global::SocketProto.MoveType.NewMove) {
+        MoveType = other.MoveType;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(pb::CodedInputStream input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+        switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            MoveFrame = input.ReadInt32();
+            break;
+          }
+          case 21: {
+            MoveX = input.ReadFloat();
+            break;
+          }
+          case 29: {
+            MoveY = input.ReadFloat();
+            break;
+          }
+          case 37: {
+            PredictedPosX = input.ReadFloat();
+            break;
+          }
+          case 45: {
+            PredictedPosY = input.ReadFloat();
+            break;
+          }
+          case 53: {
+            PredictedPosZ = input.ReadFloat();
+            break;
+          }
+          case 56: {
+            MoveType = (global::SocketProto.MoveType) input.ReadEnum();
+            break;
+          }
+        }
+      }
+    }
+
+  }
+
+  public sealed partial class MoveAckResult : pb::IMessage<MoveAckResult> {
+    private static readonly pb::MessageParser<MoveAckResult> _parser = new pb::MessageParser<MoveAckResult>(() => new MoveAckResult());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pb::MessageParser<MoveAckResult> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[13]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public MoveAckResult() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public MoveAckResult(MoveAckResult other) : this() {
+      battleId_ = other.battleId_;
+      ackedMoveFrame_ = other.ackedMoveFrame_;
+      ackGoodMove_ = other.ackGoodMove_;
+      correctPosX_ = other.correctPosX_;
+      correctPosY_ = other.correctPosY_;
+      correctPosZ_ = other.correctPosZ_;
+      frameDiscrepancy_ = other.frameDiscrepancy_;
+      resolvingFrameDiscrepancy_ = other.resolvingFrameDiscrepancy_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public MoveAckResult Clone() {
+      return new MoveAckResult(this);
+    }
+
+    /// <summary>Field number for the "battle_id" field.</summary>
+    public const int BattleIdFieldNumber = 1;
+    private int battleId_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int BattleId {
+      get { return battleId_; }
+      set {
+        battleId_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "acked_move_frame" field.</summary>
+    public const int AckedMoveFrameFieldNumber = 2;
+    private int ackedMoveFrame_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int AckedMoveFrame {
+      get { return ackedMoveFrame_; }
+      set {
+        ackedMoveFrame_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "ack_good_move" field.</summary>
+    public const int AckGoodMoveFieldNumber = 3;
+    private bool ackGoodMove_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public bool AckGoodMove {
+      get { return ackGoodMove_; }
+      set {
+        ackGoodMove_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "correct_pos_x" field.</summary>
+    public const int CorrectPosXFieldNumber = 4;
+    private float correctPosX_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float CorrectPosX {
+      get { return correctPosX_; }
+      set {
+        correctPosX_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "correct_pos_y" field.</summary>
+    public const int CorrectPosYFieldNumber = 5;
+    private float correctPosY_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float CorrectPosY {
+      get { return correctPosY_; }
+      set {
+        correctPosY_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "correct_pos_z" field.</summary>
+    public const int CorrectPosZFieldNumber = 6;
+    private float correctPosZ_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float CorrectPosZ {
+      get { return correctPosZ_; }
+      set {
+        correctPosZ_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "frame_discrepancy" field.</summary>
+    public const int FrameDiscrepancyFieldNumber = 7;
+    private int frameDiscrepancy_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int FrameDiscrepancy {
+      get { return frameDiscrepancy_; }
+      set {
+        frameDiscrepancy_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "resolving_frame_discrepancy" field.</summary>
+    public const int ResolvingFrameDiscrepancyFieldNumber = 8;
+    private bool resolvingFrameDiscrepancy_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public bool ResolvingFrameDiscrepancy {
+      get { return resolvingFrameDiscrepancy_; }
+      set {
+        resolvingFrameDiscrepancy_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override bool Equals(object other) {
+      return Equals(other as MoveAckResult);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public bool Equals(MoveAckResult other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (BattleId != other.BattleId) return false;
+      if (AckedMoveFrame != other.AckedMoveFrame) return false;
+      if (AckGoodMove != other.AckGoodMove) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(CorrectPosX, other.CorrectPosX)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(CorrectPosY, other.CorrectPosY)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(CorrectPosZ, other.CorrectPosZ)) return false;
+      if (FrameDiscrepancy != other.FrameDiscrepancy) return false;
+      if (ResolvingFrameDiscrepancy != other.ResolvingFrameDiscrepancy) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (BattleId != 0) hash ^= BattleId.GetHashCode();
+      if (AckedMoveFrame != 0) hash ^= AckedMoveFrame.GetHashCode();
+      if (AckGoodMove != false) hash ^= AckGoodMove.GetHashCode();
+      if (CorrectPosX != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(CorrectPosX);
+      if (CorrectPosY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(CorrectPosY);
+      if (CorrectPosZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(CorrectPosZ);
+      if (FrameDiscrepancy != 0) hash ^= FrameDiscrepancy.GetHashCode();
+      if (ResolvingFrameDiscrepancy != false) hash ^= ResolvingFrameDiscrepancy.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void WriteTo(pb::CodedOutputStream output) {
+      if (BattleId != 0) {
+        output.WriteRawTag(8);
+        output.WriteInt32(BattleId);
+      }
+      if (AckedMoveFrame != 0) {
+        output.WriteRawTag(16);
+        output.WriteInt32(AckedMoveFrame);
+      }
+      if (AckGoodMove != false) {
+        output.WriteRawTag(24);
+        output.WriteBool(AckGoodMove);
+      }
+      if (CorrectPosX != 0F) {
+        output.WriteRawTag(37);
+        output.WriteFloat(CorrectPosX);
+      }
+      if (CorrectPosY != 0F) {
+        output.WriteRawTag(45);
+        output.WriteFloat(CorrectPosY);
+      }
+      if (CorrectPosZ != 0F) {
+        output.WriteRawTag(53);
+        output.WriteFloat(CorrectPosZ);
+      }
+      if (FrameDiscrepancy != 0) {
+        output.WriteRawTag(56);
+        output.WriteInt32(FrameDiscrepancy);
+      }
+      if (ResolvingFrameDiscrepancy != false) {
+        output.WriteRawTag(64);
+        output.WriteBool(ResolvingFrameDiscrepancy);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int CalculateSize() {
+      int size = 0;
+      if (BattleId != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(BattleId);
+      }
+      if (AckedMoveFrame != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(AckedMoveFrame);
+      }
+      if (AckGoodMove != false) {
+        size += 1 + 1;
+      }
+      if (CorrectPosX != 0F) {
+        size += 1 + 4;
+      }
+      if (CorrectPosY != 0F) {
+        size += 1 + 4;
+      }
+      if (CorrectPosZ != 0F) {
+        size += 1 + 4;
+      }
+      if (FrameDiscrepancy != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(FrameDiscrepancy);
+      }
+      if (ResolvingFrameDiscrepancy != false) {
+        size += 1 + 1;
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(MoveAckResult other) {
+      if (other == null) {
+        return;
+      }
+      if (other.BattleId != 0) {
+        BattleId = other.BattleId;
+      }
+      if (other.AckedMoveFrame != 0) {
+        AckedMoveFrame = other.AckedMoveFrame;
+      }
+      if (other.AckGoodMove != false) {
+        AckGoodMove = other.AckGoodMove;
+      }
+      if (other.CorrectPosX != 0F) {
+        CorrectPosX = other.CorrectPosX;
+      }
+      if (other.CorrectPosY != 0F) {
+        CorrectPosY = other.CorrectPosY;
+      }
+      if (other.CorrectPosZ != 0F) {
+        CorrectPosZ = other.CorrectPosZ;
+      }
+      if (other.FrameDiscrepancy != 0) {
+        FrameDiscrepancy = other.FrameDiscrepancy;
+      }
+      if (other.ResolvingFrameDiscrepancy != false) {
+        ResolvingFrameDiscrepancy = other.ResolvingFrameDiscrepancy;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(pb::CodedInputStream input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+        switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            BattleId = input.ReadInt32();
+            break;
+          }
+          case 16: {
+            AckedMoveFrame = input.ReadInt32();
+            break;
+          }
+          case 24: {
+            AckGoodMove = input.ReadBool();
+            break;
+          }
+          case 37: {
+            CorrectPosX = input.ReadFloat();
+            break;
+          }
+          case 45: {
+            CorrectPosY = input.ReadFloat();
+            break;
+          }
+          case 53: {
+            CorrectPosZ = input.ReadFloat();
+            break;
+          }
+          case 56: {
+            FrameDiscrepancy = input.ReadInt32();
+            break;
+          }
+          case 64: {
+            ResolvingFrameDiscrepancy = input.ReadBool();
+            break;
+          }
+        }
+      }
+    }
+
+  }
+
   public sealed partial class HitEvent : pb::IMessage<HitEvent> {
     private static readonly pb::MessageParser<HitEvent> _parser = new pb::MessageParser<HitEvent>(() => new HitEvent());
     private pb::UnknownFieldSet _unknownFields;
@@ -3220,7 +3971,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[12]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[14]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3573,7 +4324,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[13]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[15]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]

@@ -1,3 +1,5 @@
+// 历史/工具链 proto 副本（非权威）。
+// 不作为客户端/服务端运行时代码的维护入口；运行时协议修改请改 `ProtobufAndNotepad/Protobuf/SocketProto.proto`。
 syntax="proto3";
 package SocketProto;
 

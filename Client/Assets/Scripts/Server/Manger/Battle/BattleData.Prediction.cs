@@ -1,4 +1,4 @@
-﻿/****************************************************
+/****************************************************
     BattleData.Prediction.cs  --  partial class: 预测历史 / 权威确认 / 输入重放
     从 BattleManger.cs 拆分，零逻辑变更
 *****************************************************/
@@ -27,26 +27,29 @@ namespace Manger
 
 *****************************************************/
         /// </summary>
-        public void RecordPredictedHistory(int frameId, PlayerOperation input)
+        public void RecordPredictedHistory(int frameId, PlayerOperation input, Vector3 startPosition, Vector3 predictedPosition)
         {
             if (!IsPredictionEnabled)
             {
                 return;
             }
 
-            PredictedFrameHistoryEntry entry = new PredictedFrameHistoryEntry()
+            SavedMove entry = new SavedMove()
             {
                 FrameId = frameId,
                 Input = ClonePlayerOperation(input),
+                StartPosition = startPosition,
+                PredictedPosition = predictedPosition,
             };
+            entry.ImportantReason = GetImportantMoveReason(entry, lastAckedMove);
 
-            if (predictionHistoryIndex.TryGetValue(frameId, out LinkedListNode<PredictedFrameHistoryEntry> existingNode))
+            if (predictionHistoryIndex.TryGetValue(frameId, out LinkedListNode<SavedMove> existingNode))
             {
                 existingNode.Value = entry;
                 return;
             }
 
-            LinkedListNode<PredictedFrameHistoryEntry> node = predictionHistory.AddLast(entry);
+            LinkedListNode<SavedMove> node = predictionHistory.AddLast(entry);
             predictionHistoryIndex[frameId] = node;
             TrimPredictionHistory();
         }
@@ -60,13 +63,239 @@ namespace Manger
         {
             while (predictionHistory.Count > Server.NetConfigValue.PredictionHistoryWindowSize)
             {
-                LinkedListNode<PredictedFrameHistoryEntry> oldest = predictionHistory.First;
+                LinkedListNode<SavedMove> oldest = predictionHistory.First;
                 if (oldest == null)
                 {
                     break;
                 }
+                if (pendingMove != null && pendingMove.FrameId == oldest.Value.FrameId)
+                {
+                    pendingMove = null;
+                }
                 predictionHistory.RemoveFirst();
                 predictionHistoryIndex.Remove(oldest.Value.FrameId);
+            }
+        }
+
+        public List<ClientMove> BuildClientMovesForSend(int newMoveFrame, bool flushPendingMove)
+        {
+            List<ClientMove> moves = new List<ClientMove>(3);
+            SavedMove newMove = null;
+            if (predictionHistoryIndex.TryGetValue(newMoveFrame, out LinkedListNode<SavedMove> newNode))
+            {
+                newMove = newNode.Value;
+            }
+
+            int pendingFrame = pendingMove != null ? pendingMove.FrameId : -1;
+            SavedMove oldMove = FindOldImportantMove(newMoveFrame, pendingFrame);
+            if (oldMove != null)
+            {
+                moves.Add(CreateClientMove(oldMove, MoveType.OldMove));
+            }
+
+            string mode = "none";
+            if (newMove == null)
+            {
+                Logging.HYLDDebug.FrameTrace($"[ClientMove][Build] new={newMoveFrame} missingSavedMove old={(oldMove != null ? oldMove.FrameId : -1)} count={moves.Count} saved={predictionHistory.Count} pending={pendingFrame} lastAck={(lastAckedMove != null ? lastAckedMove.FrameId : 0)}");
+                return moves;
+            }
+
+            if (pendingMove == null)
+            {
+                if (flushPendingMove)
+                {
+                    AddNewMoveForSend(moves, newMove);
+                    mode = "flush-single";
+                }
+                else
+                {
+                    pendingMove = newMove;
+                    mode = "hold-pending";
+                }
+            }
+            else if (pendingMove.FrameId == newMove.FrameId)
+            {
+                if (flushPendingMove)
+                {
+                    AddNewMoveForSend(moves, newMove);
+                    pendingMove = null;
+                    mode = "flush-pending-self";
+                }
+                else
+                {
+                    mode = "keep-pending";
+                }
+            }
+            else if (CanCombineSavedMoves(pendingMove, newMove) && !flushPendingMove)
+            {
+                AddNewMoveForSend(moves, newMove);
+                mode = "combine";
+                pendingMove = null;
+            }
+            else
+            {
+                AddNewMoveForSend(moves, pendingMove);
+                AddNewMoveForSend(moves, newMove);
+                mode = flushPendingMove ? "flush-dual" : "dual";
+                pendingMove = null;
+            }
+
+            Logging.HYLDDebug.FrameTrace($"[ClientMove][Build] new={newMoveFrame} old={(oldMove != null ? oldMove.FrameId : -1)} count={moves.Count} saved={predictionHistory.Count} pendingBefore={pendingFrame} pendingAfter={(pendingMove != null ? pendingMove.FrameId : -1)} mode={mode} flush={flushPendingMove} lastAck={(lastAckedMove != null ? lastAckedMove.FrameId : 0)}");
+            return moves;
+        }
+
+        private void AddNewMoveForSend(List<ClientMove> moves, SavedMove move)
+        {
+            moves.Add(CreateClientMove(move, MoveType.NewMove));
+            move.SentAsNewMove = true;
+        }
+
+        private SavedMove FindOldImportantMove(int newMoveFrame, int pendingFrame)
+        {
+            if (predictionHistory.Count <= 1)
+            {
+                return null;
+            }
+
+            LinkedListNode<SavedMove> node = predictionHistory.First;
+            SavedMove previous = lastAckedMove;
+            while (node != null && node.Next != null)
+            {
+                SavedMove entry = node.Value;
+                if (entry.FrameId != newMoveFrame
+                    && entry.FrameId != pendingFrame
+                    && IsImportantMove(entry, previous))
+                {
+                    return entry;
+                }
+                previous = entry;
+                node = node.Next;
+            }
+            return null;
+        }
+
+        private bool IsImportantMove(SavedMove current, SavedMove previous)
+        {
+            return !string.IsNullOrEmpty(GetImportantMoveReason(current, previous));
+        }
+
+        private string GetImportantMoveReason(SavedMove current, SavedMove previous)
+        {
+            float currX = current.Input.PlayerMoveX;
+            float currY = current.Input.PlayerMoveY;
+            float currMag = Mathf.Sqrt(currX * currX + currY * currY);
+            bool currZero = currMag <= 1e-6f;
+
+            if (previous == null)
+            {
+                return !currZero ? "initial-non-zero" : null;
+            }
+
+            float prevX = previous.Input.PlayerMoveX;
+            float prevY = previous.Input.PlayerMoveY;
+            float prevMag = Mathf.Sqrt(prevX * prevX + prevY * prevY);
+            bool prevZero = prevMag <= 1e-6f;
+            if (currZero != prevZero)
+            {
+                return currZero ? "stop" : "start";
+            }
+            if (Mathf.Abs(currMag - prevMag) > Server.NetConfigValue.moveMagnitudeThreshold)
+            {
+                return "magnitude";
+            }
+            if (!currZero && !prevZero)
+            {
+                float dot = ((currX / currMag) * (prevX / prevMag)) + ((currY / currMag) * (prevY / prevMag));
+                if (dot < Server.NetConfigValue.moveDotThreshold)
+                {
+                    return "direction";
+                }
+            }
+            return null;
+        }
+
+        private bool CanCombineSavedMoves(SavedMove pending, SavedMove current)
+        {
+            if (pending == null || current == null)
+            {
+                return false;
+            }
+            if (pending.ForceNoCombine || current.ForceNoCombine)
+            {
+                return false;
+            }
+            if (current.FrameId != pending.FrameId + 1)
+            {
+                return false;
+            }
+
+            float pendingX = pending.Input.PlayerMoveX;
+            float pendingY = pending.Input.PlayerMoveY;
+            float currentX = current.Input.PlayerMoveX;
+            float currentY = current.Input.PlayerMoveY;
+            float pendingMag = Mathf.Sqrt(pendingX * pendingX + pendingY * pendingY);
+            float currentMag = Mathf.Sqrt(currentX * currentX + currentY * currentY);
+            bool pendingZero = pendingMag <= 1e-6f;
+            bool currentZero = currentMag <= 1e-6f;
+            if (pendingZero || currentZero)
+            {
+                return pendingZero && currentZero;
+            }
+            if (Mathf.Abs(pendingMag - currentMag) > Server.NetConfigValue.moveCombineMagnitudeThreshold)
+            {
+                return false;
+            }
+
+            float dot = ((pendingX / pendingMag) * (currentX / currentMag)) + ((pendingY / pendingMag) * (currentY / currentMag));
+            return dot >= Server.NetConfigValue.moveCombineDotThreshold;
+        }
+
+        private ClientMove CreateClientMove(SavedMove entry, MoveType moveType)
+        {
+            float sign = GetClientToServerSign();
+            return new ClientMove
+            {
+                MoveFrame = entry.FrameId,
+                MoveX = entry.Input.PlayerMoveX,
+                MoveY = entry.Input.PlayerMoveY,
+                PredictedPosX = entry.PredictedPosition.x * sign,
+                PredictedPosY = entry.PredictedPosition.y,
+                PredictedPosZ = entry.PredictedPosition.z * sign,
+                MoveType = moveType,
+            };
+        }
+
+        private float GetClientToServerSign()
+        {
+            bool needFlip = HYLDStaticValue.Players.Count > 0
+                && HYLDStaticValue.playerSelfIDInServer < HYLDStaticValue.Players.Count
+                && HYLDStaticValue.Players[0].teamID != HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].teamID;
+            return needFlip ? -1f : 1f;
+        }
+
+        public void AcknowledgeMoveFrame(int ackedMoveFrame)
+        {
+            if (ackedMoveFrame <= 0)
+            {
+                return;
+            }
+
+            SavedMove lastRemoved = null;
+            while (predictionHistory.First != null && predictionHistory.First.Value.FrameId <= ackedMoveFrame)
+            {
+                LinkedListNode<SavedMove> oldest = predictionHistory.First;
+                lastRemoved = oldest.Value;
+                predictionHistory.RemoveFirst();
+                predictionHistoryIndex.Remove(oldest.Value.FrameId);
+            }
+            if (lastRemoved != null)
+            {
+                lastAckedMove = lastRemoved;
+                if (pendingMove != null && pendingMove.FrameId <= ackedMoveFrame)
+                {
+                    pendingMove = null;
+                }
+                Logging.HYLDDebug.FrameTrace($"[ClientMove][Ack] ackedMove={ackedMoveFrame} lastAcked={lastAckedMove.FrameId} remaining={predictionHistory.Count}");
             }
         }
 
@@ -76,7 +305,7 @@ namespace Manger
         /// 为什么只确认最新帧：因为服务端的攻击确认机制是基于"最大已处理AttackId"（MaxConfirmedId）的批量确认。
         /// 只要最新帧里包含了你的攻击操作，说明这个AttackId以及之前的攻击服务端都收到了，直接移除本地缓存即可。
         /// </summary>
-        private void RecordAuthorityConfirmation(int serverFrameId, int serverOperationId, int authorityBatchCount, AllPlayerOperation authorityFrame)
+        private void RecordAuthorityConfirmation(int serverFrameId, int serverOperationId, int authorityBatchCount, BattleFrameSync authorityFrame)
         {
             // 只做攻击确认，不再做输入匹配判定
             PlayerOperation selfAuthorityOperation = null;
@@ -93,7 +322,7 @@ namespace Manger
         /// <summary>
         /// 工具函数：拿到某一帧全场所有人的操作操作后，把主角自己的那一份抽离出来。
         /// 比如场上十个人推摇杆，我只找 battleID 跟我匹配的那一个。
-        private bool TryFindSelfAuthorityOperation(AllPlayerOperation authorityFrame, out PlayerOperation selfAuthorityOperation)
+        private bool TryFindSelfAuthorityOperation(BattleFrameSync authorityFrame, out PlayerOperation selfAuthorityOperation)
         {
             for (int i = 0; i < authorityFrame.Operations.Count; i++)
             {
@@ -111,12 +340,7 @@ namespace Manger
 
         private void TrimPredictionHistoryThroughFrame(int frameId)
         {
-            while (predictionHistory.First != null && predictionHistory.First.Value.FrameId <= frameId)
-            {
-                LinkedListNode<PredictedFrameHistoryEntry> oldest = predictionHistory.First;
-                predictionHistory.RemoveFirst();
-                predictionHistoryIndex.Remove(oldest.Value.FrameId);
-            }
+            AcknowledgeMoveFrame(frameId);
         }
 
         // ═══════ 权威快照历史（供视觉子弹生成位置查询） ═══════
@@ -199,35 +423,60 @@ namespace Manger
             // 以权威位置为起点
             Vector3 pos = lastAuthorityPosition;
             int replayedCount = 0;
+            int replayedZeroCount = 0;
+            int replayedNonZeroCount = 0;
+            int lastZeroFrame = -1;
+            int lastNonZeroFrame = -1;
+            Vector3 replayMoveDir = Vector3.zero;
+            float replayMoveMagnitude = 0f;
 
             // 遍历预测历史，重放 authorityFrameId+1 到 predicted_frameID 的输入
-            LinkedListNode<PredictedFrameHistoryEntry> node = predictionHistory.First;
+            LinkedListNode<SavedMove> node = predictionHistory.First;
             while (node != null)
             {
-                PredictedFrameHistoryEntry entry = node.Value;
-                if (entry.FrameId > authorityFrameId && entry.FrameId <= predicted_frameID)
+                SavedMove entry = node.Value;
+                if (entry.FrameId <= predicted_frameID)
                 {
                     // 取本地输入中的移动分量
                     float mx = entry.Input.PlayerMoveX;
                     float mz = entry.Input.PlayerMoveY;
+                    bool zeroInput = Mathf.Abs(mx) <= 1e-6f && Mathf.Abs(mz) <= 1e-6f;
 
                     // 移动公式与 HYLDPlayerManger.ApplyPlayerOperation 一致：
                     // dir = (-moveX, 0, moveY)  -> 经过 Fixed3 -> magnitude -> move = dir * 移动速度 * frameTime
                     LZJ.Fixed3 tempDir = new LZJ.Fixed3(-mx, 0f, mz);
+                    LZJ.Fixed moveMagnitude = tempDir.magnitude;
                     LZJ.Fixed3 move = tempDir * HYLDStaticValue.Players[selfPlayerIndex].移动速度 * Server.NetConfigValue.frameTime;
                     pos = (new LZJ.Fixed3(pos) + move).ToVector3();
+                    replayMoveMagnitude = moveMagnitude.ToFloat();
+                    replayMoveDir = replayMoveMagnitude < 0.001f ? Vector3.zero : tempDir.ToVector3();
                     replayedCount++;
+                    if (zeroInput)
+                    {
+                        replayedZeroCount++;
+                        lastZeroFrame = entry.FrameId;
+                    }
+                    else
+                    {
+                        replayedNonZeroCount++;
+                        lastNonZeroFrame = entry.FrameId;
+                    }
                 }
                 node = node.Next;
             }
 
-            // 将重放后的位置写回
+            // 将重放后的位置与最后一次重放输入对应的朝向状态一起写回，避免位置已追回到“现在”但朝向仍停留在旧权威帧。
             HYLDStaticValue.Players[selfPlayerIndex].playerPositon = pos;
-
-            // 验证日志（每 60 帧打印一次）
-            if (authorityFrameId % 60 == 0)
+            if (replayedCount > 0)
             {
-                Logging.HYLDDebug.FrameTrace($"[Replay] authorityFrame={authorityFrameId} predicted={predicted_frameID} replayedCount={replayedCount} startPos=({lastAuthorityPosition.x:F2},{lastAuthorityPosition.y:F2},{lastAuthorityPosition.z:F2}) endPos=({pos.x:F2},{pos.y:F2},{pos.z:F2})");
+                HYLDStaticValue.Players[selfPlayerIndex].playerMoveDir = replayMoveDir;
+                HYLDStaticValue.Players[selfPlayerIndex].playerMoveMagnitude = replayMoveMagnitude;
+            }
+
+            bool replayContainsZeroAfterNonZero = lastZeroFrame > 0 && lastNonZeroFrame > 0 && lastZeroFrame > lastNonZeroFrame;
+            if (replayedZeroCount > 0 || replayContainsZeroAfterNonZero || authorityFrameId % 60 == 0)
+            {
+                Logging.HYLDDebug.FrameTrace($"[Replay] authorityFrame={authorityFrameId} predicted={predicted_frameID} replayedCount={replayedCount} zeroCount={replayedZeroCount} nonZeroCount={replayedNonZeroCount} lastZeroFrame={lastZeroFrame} lastNonZeroFrame={lastNonZeroFrame} zeroAfterNonZero={replayContainsZeroAfterNonZero} startPos=({lastAuthorityPosition.x:F2},{lastAuthorityPosition.y:F2},{lastAuthorityPosition.z:F2}) endPos=({pos.x:F2},{pos.y:F2},{pos.z:F2})");
             }
         }
     }

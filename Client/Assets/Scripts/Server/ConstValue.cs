@@ -1,4 +1,4 @@
-﻿/****************************************************
+/****************************************************
     Author:            龙之介
     CreatTime:    2021/9/22 18:36:42
     Description:     静态类
@@ -30,6 +30,7 @@ namespace Server
         public static readonly float pingIntervalMs = 200f;
         public static readonly int maxCatchupPerUpdate = 3;
         public static readonly int inputBufferSize = 4;
+        public static readonly int targetFrameSafetyFrames = 1;
         public static readonly float adjustRate = 0.04f;
         public static readonly float minSpeedFactor = 0.88f;
         public static readonly float maxSpeedFactor = 1.10f;
@@ -38,5 +39,9 @@ namespace Server
         public static readonly int maxJitterBufferFrames = 6;
         public static readonly int severeLeadPauseFrames = 8;
         public static readonly float pauseAccumulatorRetainFactor = 0.35f;
+        public static readonly float moveMagnitudeThreshold = 0.1f;
+        public static readonly float moveDotThreshold = 0.9f;
+        public static readonly float moveCombineMagnitudeThreshold = 0.01f;
+        public static readonly float moveCombineDotThreshold = 0.996f;
     }
 }

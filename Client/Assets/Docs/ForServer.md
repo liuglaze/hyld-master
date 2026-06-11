@@ -32,20 +32,27 @@
     - AddCommad_Attack 以离散命令形式缓存（分配唯一 AttackID）。
   - **动态 Tick 驱动（已变更为累加器 + 动态追帧）**：Assets/Scripts/Server/Manger/Battle/BattleManger.cs
     - 节拍：已从 InvokeRepeating 改为 Update 累加器驱动，`currentTickInterval = 0.016f / actualSpeedFactor`（动态调节），每帧最多 3 次 BattleTick()
-    - 顺序：DrainAndDispatch → Ping 调度 → CalcTargetFrame + AdjustTickInterval → 累加器循环（BattleTick: ResetOperation → CommandManger.Execute → SendOperation）
-    - 上行 `uploadOperationId = predicted_frameID + 1`（动态追帧下可能远大于服务端 frameid），服务端通过 Input Buffer 缓存超前操作、通过 Ack 钳位安全处理
+    - 顺序：DrainAndDispatch → Ping 调度 → RTT/权威帧就绪检查 → CalcTargetFrame + AdjustTickInterval → 累加器循环（BattleTick: ResetOperation → CommandManger.Execute → SendOperation）
+    - 上行 `uploadOperationId = nextFrame`，严格表示“客户端当前真实推进并上报的本地逻辑帧”。`targetFrame` 仅用于调节 Tick 频率；当客户端落后目标帧时，依靠加快 BattleTick 真实地产出更多连续帧来追赶，而不是篡改上行帧号
+    - 每个 BattleTick 生成项目内 `SavedMove`，记录移动输入、预测起点和预测终点。
+    - 客户端维护 `pendingMove`：普通帧先挂起当前 SavedMove，下一帧若输入连续且足够接近则合并成一个 `NewMove`；不可合并时同包按顺序发送 pending + current 两个 `NewMove`，等价于 DualMove，不新增 proto 字段。
+    - 停步边沿或新增攻击属于关键输入，会立即 flush pending，并沿用同帧 burst-send。
     - **开局握手语义**：客户端初始化后每 200ms 重发一次 `BattleReady`；收到 `BattleStart` 后才停止重发并开启 `_battleTickActive`。若首次 `BattleStart` 丢失，服务端会在后续 `BattleReady` 到达时对该客户端单播补发 `BattleStart`，且不会重复执行 `BeginBattle`
   - **攻击重发与超时**：
     - 客户端每帧重发所有未确认攻击（pendingAttacks），`ClientFrameId` 在入队时锁定不变。
     - 客户端超时清理：帧龄 `(predicted_frameID - ClientFrameId) > 10` 的攻击自动移除。
-    - 服务端通过 `dic_lastProcessedAttackId` 去重 + `MaxAcceptableAttackDelay=6` 拒绝过期攻击。
+    - 服务端通过 `dic_lastProcessedAttackId` 去重 + `MaxAcceptableAttackDelay=8` 拒绝过期攻击。
+  - **关键输入同帧 burst-send**：
+    - 若本地 BattleTick 发生“停步边沿”（non-zero -> zero）或本帧新增攻击，则客户端会在同一逻辑帧内把同一份 `BattleInfo` 连发 3 次。
+    - 3 次发送复用相同 `OperationID`、`ClientAckedFrame`、`ClientMoveFrame`、移动值与 `AttackId` 集合，不引入新协议字段。
+    - 服务端保持现有幂等语义：重复 `ClientMoveFrame` 会被 `[ClientMove][STALE]` 丢弃，重复攻击仍由 `AttackId` 去重。
 
   ### 3.2 权威帧消费与伤害判定
 
   - 收包入口：Assets/Scripts/Server/Manger/Battle/BattleManger.cs 的 HandleMessage（主线程，由 DrainAndDispatch 调用）。
   - 主处理：BattleData.OnLogicUpdate_sync_FrameIdCheck(...)
     - 先做帧序合法性检查（过旧帧丢弃、空批次推进 sync_frameID）。
-    - 预测模式：执行无条件批次和解（回滚 → 批量应用权威帧 → 记录快照 → 重放预测）。
+    - 预测模式：远端玩家直接应用权威位置；本地玩家只消费服务端 `BattleInfo.move_ack`。`ack_good_move=true` 只解链，`ack_good_move=false` 使用 `correct_pos_x/y/z` 校正并重放未确认 SavedMove。
     - 权威帧处理后生成**视觉子弹**（SpawnVisualBullet，仅表现，不判伤害）。
   - **伤害判定（服务端权威）**：
     - 服务端 BattleController 每帧做服务端子弹模拟（ServerBullet）。
@@ -68,15 +75,16 @@
   - frameTime = 0.016f **（当前基准逻辑帧长 16ms，动态追帧下实际 tick 间隔可变）**
   - PredictionHistoryWindowSize = 20
   - EnablePredictionReconciliationPipeline = true
-  - ReconciliationPositionThreshold = 0.6f （仅监控日志）
+  - ReconciliationPositionThreshold = 0.6f （历史参数；当前本地玩家是否校正由服务端 `move_ack.ack_good_move` 决定）
   - VisualSmoothingWindowSeconds = 0.1f
-  - inputBufferSize = 2 （客户端目标前置缓冲参数；不再等同于服务端移动输入窗口大小）
+  - inputBufferSize = 4 （历史参数，当前仅保留为兼容配置项，不再直接参与 targetFrame 公式）
+  - targetFrameSafetyFrames = 1 （RTT 初始化后的安全余量）
   - adjustRate = 0.05f、minSpeedFactor = 0.85f、maxSpeedFactor = 1.15f
   - pingIntervalMs = 200f （Ping 发送间隔）
 
   ## 4. 当前和解策略（authority-state-snapshot 模型）
 
-  - **无条件批次和解**：预测管线开启时，每次收到权威帧都执行完整和解，不再基于状态偏差做条件判定。
+  - **服务端 MoveAck 驱动本地校正**：远端玩家始终应用服务端权威位置；本地玩家收到 `move_ack.ack_good_move=false` 才拉回到 `correct_pos_x/y/z` 并 replay。
   - **权威状态快照锚点**：和解回滚目标为 lastAuthorityStateSnapshot（上次权威帧应用后的世界状态）。首帧无权威快照时退化到预测 bootstrap 锚点。
   - **彻底剥离渲染与逻辑**（子线程崩溃修复）：HandleMessage 通过 DrainAndDispatch 在主线程执行，视觉子弹生成（SpawnVisualBullet）、ApplyHitEvents 和 ApplyAuthoritativeHpAndDeath 均在主线程直接调用，无需 AddAction。
   - **子弹与和解**：
@@ -91,15 +99,21 @@
   ## 5. 协作检查清单（服务端联调时）
 
   1. **帧与操作ID语义**
-     - server_sync_frameid、上行 OperationID（= predicted_frameID + 1，动态追帧下可能超前服务端多帧）、客户端 sync_frameID 的关系。
+     - ServerFrame：服务端 `frameid`，下行 `BattleInfo.OperationID` 与 `BattleFrameSync.frameid`。
+     - ClientMoveFrame：客户端本地预测 tick，写入 `ClientMove.move_frame`。
+     - ClientAckedFrame：客户端已应用的最新 ServerFrame，写入 `BattleInfo.client_acked_frame`。
+     - MoveAck：服务端已处理的最新 ClientMoveFrame 与确认/修正结果，下行 `BattleInfo.move_ack`。
+     - AckedMoveFrame：兼容字段，值与 `move_ack.acked_move_frame` 同步。
   2. **发包频率期望**
-     - 客户端 tick 频率动态可变（0.85x ~ 1.15x 基准 60fps），服务端需适应不均匀的上行频率。超前输入通过 Input Buffer 缓存消费。
-  3. **目标前置缓冲 vs 服务端移动窗口**
-     - 客户端 `inputBufferSize`（ConstValue.cs）用于 `CalcTargetFrame()` 的目标前置缓冲；服务端移动输入窗口由 `Battle.cs` 中 `InputBufferSize=4`、`InputFutureLeadTolerance=6` 单独控制，二者语义已分离，联调时不要再按“必须相等”处理。
+     - 客户端 BattleStart 后先按固定 `frameTime` 发送移动，RTT 与首个权威帧就绪后 tick 频率动态可变。上行移动以 `ClientMove` 单调排序，服务端在接收合法 move 时推进权威位置。
+  3. **目标帧余量 vs ClientMoveFrame**
+     - 客户端 `CalcTargetFrame()` 只调节本地 tick 速度，不决定服务端移动消费帧。
+     - RTT 和首个权威帧未初始化时，客户端不计算目标帧，仍按固定 tick 生成真实 ClientMoveFrame。
+     - `inputBufferSize` 是历史兼容配置项，服务端不再按 Input Buffer 消费移动。
   4. **同帧输入一致性**
      - 重点核对客户端自玩家 Battleid 对应的 PlayerOperation。
-  5. **权威批次完整性**
-     - 当收到权威包 batchCount < requiredHistoryCount 时，客户端会走降级/等待路径，请确认服务端的补帧/全量快照策略。
+  5. **权威批次完整性 / 当前帧重复下发**
+     - 服务端已从“按 `ClientAckedFrame` 组织最近窗口补帧”切换为“每个权威帧只下发当前帧，但在同一帧内重复发送多次”。客户端应支持 `BattleInfo.Frames` 长期仅含 1 个当前帧元素，并正确处理同一当前帧的重复到达。
   6. **结束包边界**
      - 客户端进入 GameOver 后会丢弃大部分战斗包（保留 BattlePushDowmGameOver）。
 
@@ -111,7 +125,11 @@
     - ActionCode（含新增 Ping=41, Pong=42）
     - MainPack.timestamp（int64，UDP Ping/Pong 时间戳）
     - BattleInfo.OperationID
-    - BattleInfo.AllPlayerOperation
+    - BattleInfo.frames
+    - BattleInfo.client_moves
+    - BattleInfo.client_acked_frame
+    - BattleInfo.acked_move_frame（兼容字段）
+    - BattleInfo.move_ack（MoveAckResult：acked_move_frame / ack_good_move / correct_pos_x/y/z / frame_discrepancy / resolving_frame_discrepancy）
     - PlayerOperation.Battleid
     - AttackOperation.client_frame_id（客户端预测帧号，供服务端 V2 延迟补偿）
     - AttackOperation.spawn_pos_x/y/z（服务端回填的攻击者历史位置，供客户端半空推进）
@@ -152,25 +170,27 @@
 
   **关键点**：服务端必须同时做 X 轴取反（对应客户端 `dir.x *= -1`）和队伍镜像翻转（对应客户端 `sign=-1`），与移动方向的 teamSign 逻辑一致。
 
-  ## 8. 服务端移动输入窗口（dynamic-tick-adjustment）
+  ## 8. 服务端 ClientMove 移动时间轴（CMC-style）
 
-  动态追帧下客户端 `uploadOperationId` 可能超前服务端当前 `frameid` 若干帧。服务端现已改为**按 `SyncFrameId` 升序推进的滑动窗口**，不再使用旧的“按 `% inputBufferSize` 写环形 slot”模型：
+  服务端不再使用移动 Input Buffer。客户端上行移动写入 `BattleInfo.client_moves`，服务端按 ClientMoveFrame 单调处理，并在接收合法 Move 时按 `moveFrame` 差值做权威重模拟。
 
-  - **数据结构**：`Dictionary<int, List<BufferedMoveInput>> dic_movementInputBuffer`，并配套 `dic_lastConsumedMoveFrame`、`dic_lastValidMove`、`dic_consecutiveMissedFrames`（`Battle.cs:49`，`Battle.cs:51`）
-  - **窗口参数**：`InputBufferSize=4`、`InputFutureLeadTolerance=6`（`Battle.cs:49-50`）
-  - **入队**（`UpdatePlayerOperation`，`BattleController.Network.cs:87`）：
-    - 先按客户端显式上报的 `ClientAckedFrame` 清理 `SyncFrameId <= clientAckedFrame - 2` 的旧输入
-    - 若 `syncFrameId <= lastConsumedMoveFrame`，直接拒绝并记录 `REJECT_STALE`
-    - 同帧输入覆盖更新；新帧插入后按 `SyncFrameId` 升序排序
-    - 缓冲超过 4 条时淘汰最小帧号，并记录 `EVICT_OLDEST_ON_FULL`
-  - **消费**（`CollectAndBroadcastCurrentFrame`，`Battle.cs:244`）：
-    - 优先消费 `lastConsumedMoveFrame + 1`
-    - 若下一帧缺失，则取 `> lastConsumedMoveFrame` 且 `<= frameid + 6` 的最小合法帧，并记录 `SKIP_GAP_ACCEPT`
-    - 命中严格下一帧时记录 `ACCEPT_IN_ORDER`
-    - 成功消费后推进 `lastConsumedMoveFrame`，并移除该输入及其之前更老的输入
-  - **缺帧补偿**：没有合法新输入时，继续沿用 `lastValidMove` 做短时惯性，但不推进已消费进度；攻击仍独立走 `dic_pendingAttacks`
-  - **Ack 语义**：服务端不再用 `syncFrameId - 1` 反推 ack，而是直接使用客户端显式上报的 `BattleInfo.ClientAckedFrame` 更新 `dic_playerAckedFrameId`（`BattleController.Network.cs:92-105`）
-  - **清理**：`HandleBattleEnd` 释放 movement buffer、lastConsumedMoveFrame、lastValidMove、miss 计数（`BattleController.Network.cs:187`）
+  - **数据结构**：每个玩家维护 `dic_lastProcessedMoveFrame`、`dic_lastProcessedMoveServerFrame`、`dic_lastProcessedMoveInput`、帧差异累计状态与最新 `MoveAckResult`。
+  - **接收**（`UpdatePlayerOperation` / `ProcessClientMove`）：
+    - 先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。客户端 DualMove 用两个顺序 `NewMove` 表达，服务端无需新增协议枚举。
+    - `moveFrame <= lastProcessedMoveFrame` 直接丢弃并记录 `[ClientMove][STALE]`。
+    - `moveFrame > serverFrame + MaxClientMoveFrameLead` 直接拒绝并记录 `[ClientMove][REJECT_FUTURE]`。
+    - 合法 move 按 `moveFrame - lastProcessedMoveFrame` 推进服务端 `playerPositions`。
+    - `OldMove` 只重模拟并推进服务端权威状态；`NewMove` 比较重模拟位置与 `ClientMove.predicted_pos_x/y/z`，生成 `MoveAckResult`。
+    - 客户端 MoveFrame 增量长期大于服务端帧增量时累计 `frame_discrepancy`，超阈值后服务端按帧偿还，减少本次可模拟帧数。
+  - **消费**（`CollectAndBroadcastCurrentFrame`）：
+    - 每个 ServerFrame 将当前移动意图打包进权威帧，供客户端动画使用。
+    - BattleLoop 不再额外按最新移动意图推进位置。
+    - `RecordPositionSnapshot(frameid)` 记录当前服务端权威位置历史。
+  - **Ack 语义**：
+    - 服务端使用客户端上行 `ClientAckedFrame` 更新下行权威帧确认统计。
+    - 服务端下行 `MoveAckResult`，客户端据此删除已确认 SavedMove。
+    - `ack_good_move=true`：客户端只解链。
+    - `ack_good_move=false`：客户端校正到 `correct_pos_x/y/z`，再重放剩余 SavedMove。
 
   ## 9. UDP Ping/Pong 路由（dynamic-tick-adjustment）
 
@@ -180,6 +200,11 @@
   - **服务端 Pong 路由**（`ClientUdp.cs`）：在 UDP 包路由中识别 `ActionCode.Ping`，构造 Pong 包（`ActionCode.Pong`，`timestamp` 原样回传）。**Pong 发送经过 NetSim**：`LZJUDP` 类持有 `SimDropRate/SimDelayMinMs/SimDelayMaxMs` 公共静态字段，由 `BattleController.BeginBattle` 写入、`HandleBattleEnd` 清零。战斗期间 Pong 与战斗帧共享相同的丢包/延迟模拟参数，确保客户端 RTT 测量反映真实模拟延迟
   - **非战斗 endpoint**：若 endpoint 未关联活跃战斗，忽略 Ping（不回复、不报错）
   - **Proto 扩展**：`MainPack` 新增 `int64 timestamp = 14`，`ActionCode` 新增 `Ping=41`、`Pong=42`
+
+  - **当前帧重复下发**：
+    - 服务端 `BattleController.Network.SendUnsyncedFrames` 不再按 `ClientAckedFrame` 组织最近窗口补帧，而是每个权威帧只发送当前 `frameid`。
+    - 同一当前帧会在服务端侧按可调参数重复发送（当前实现默认 `CurrentFrameRepeatSendCount = 3`，可调 1~N，建议压测区间 3~5）。
+    - `BattleInfo.HitEvents` 与 `PlayerStates` 会随当前帧一起重复到达；客户端继续依赖既有去重与幂等消费逻辑处理。
 
   ## 10. 文档联动约定
 

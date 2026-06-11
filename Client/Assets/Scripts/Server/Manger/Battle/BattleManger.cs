@@ -1,4 +1,4 @@
-﻿
+
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -31,6 +31,9 @@ namespace Manger
         private bool _battleTickActive;
         // ── 动态追帧（Task 6） ──
         private float _actualSpeedFactor = 1.0f;
+        private int _lastComputedTargetFrame;
+        private bool _lastBattleTickMoveWasZero = true;
+        private const int CriticalInputBurstSendCount = 3;
         // 客户端允许相对 targetFrame 的最大超前量；超过后不再继续生成新的 predicted tick。
         private const int MaxPredictedLeadBeyondTarget = 6;
         public Toolbox toolbox;
@@ -87,6 +90,8 @@ namespace Manger
                 return;
             }
 
+            Manger.BattleData.Instance.cachedMainThreadTime = Time.time;
+
             // ── 管线步骤 1: 消费 UDP 队列中的权威帧 ──
             Server.UDPSocketManger.Instance.DrainAndDispatch();
 
@@ -102,20 +107,35 @@ namespace Manger
             }
 
             // ── 管线步骤 3: 目标帧号计算 + tick 调节 ──
-            int targetFrame = CalcTargetFrame();
-            AdjustTickInterval(targetFrame);
+            // RTT / 首个权威帧只决定是否启用动态追帧，不能阻断 ClientMove 上行。
+            // BattleStart 后先用固定 tick 发送移动；RTT 与权威帧就绪后再切到动态 tick。
+            bool hasDynamicTarget = TryCalcTargetFrame(out int targetFrame);
+            if (hasDynamicTarget)
+            {
+                _lastComputedTargetFrame = targetFrame;
+                AdjustTickInterval(targetFrame);
+            }
+            else
+            {
+                _lastComputedTargetFrame = 0;
+                currentTickInterval = Server.NetConfigValue.frameTime;
+                _actualSpeedFactor = 1.0f;
+            }
 
             // ── 管线步骤 4: 累加器循环 ──
             //如果已经超过预留的目标帧号上限，说明客户端已经超前太多了
             //但如果累加器里已经积攒了足够的时间可以推进一帧了，就先推进一帧，避免完全停掉。
-            int predictedLeadBeyondTarget = Manger.BattleData.Instance.predicted_frameID - targetFrame;
-            if (predictedLeadBeyondTarget > MaxPredictedLeadBeyondTarget)
+            if (hasDynamicTarget)
             {
-                if (_tickAccumulator > currentTickInterval)
+                int predictedLeadBeyondTarget = Manger.BattleData.Instance.predicted_frameID - targetFrame;
+                if (predictedLeadBeyondTarget > MaxPredictedLeadBeyondTarget)
                 {
-                    _tickAccumulator = currentTickInterval;
+                    if (_tickAccumulator > currentTickInterval)
+                    {
+                        _tickAccumulator = currentTickInterval;
+                    }
+                    Logging.HYLDDebug.FrameTrace($"[TickAdj] SOFT_CAP predicted={Manger.BattleData.Instance.predicted_frameID} target={targetFrame} sync={Manger.BattleData.Instance.sync_frameID} lead={predictedLeadBeyondTarget} cap={MaxPredictedLeadBeyondTarget}");
                 }
-                Logging.HYLDDebug.FrameTrace($"[TickAdj] SOFT_CAP predicted={Manger.BattleData.Instance.predicted_frameID} target={targetFrame} sync={Manger.BattleData.Instance.sync_frameID} lead={predictedLeadBeyondTarget} cap={MaxPredictedLeadBeyondTarget}");
             }
 
             _tickAccumulator += Time.deltaTime;
@@ -187,32 +207,35 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
         /// <summary>
         /// 6.2: 计算客户端应达到的目标帧号。
-        /// 公式: targetFrame = sync_frameID + ceil(rttFrames/2) + inputBufferSize + jitterBufferFrames
-        /// RTT 未初始化时使用默认超前量 inputBufferSize。
+        /// 公式: targetFrame = estimatedServerFrame + ceil(halfRTTFrames) + jitterBufferFrames + safetyFrames
+        /// RTT 和权威帧未初始化前不计算目标帧；BattleStart 后仍按固定 tick 发送 ClientMove。
         /// 在高抖动/高丢包下，为 RTT 方差增加一个有限的抖动缓冲，避免 target 偏低导致频繁“超前暂停”。
         /// </summary>
-        private int CalcTargetFrame()
+        private bool TryCalcTargetFrame(out int targetFrame)
         {
-            int syncFrame = Manger.BattleData.Instance.sync_frameID;
-            int inputBuf = Server.NetConfigValue.inputBufferSize;
+            targetFrame = 0;
 
-            if (!Manger.BattleData.Instance.IsRttInitialized)
+            if (!Manger.BattleData.Instance.IsRttInitialized || Manger.BattleData.Instance.lastReceivedAuthorityFrame <= 0)
             {
-                // RTT 未初始化，用默认超前量
-                return syncFrame + inputBuf;
+                Logging.HYLDDebug.FrameTrace($"[TargetFrame] WAIT rttReady={Manger.BattleData.Instance.IsRttInitialized} lastAuthority={Manger.BattleData.Instance.lastReceivedAuthorityFrame} sync={Manger.BattleData.Instance.sync_frameID}");
+                return false;
             }
+
+            int estimatedServerFrame = Manger.BattleData.Instance.EstimateServerFrameNow();
+            int safetyFrames = Server.NetConfigValue.targetFrameSafetyFrames;
 
             float rttMs = Manger.BattleData.Instance.smoothedRTT;
             float varianceMs = Manger.BattleData.Instance.rttVariance;
             float frameTimeMs = Server.NetConfigValue.frameTime * 1000f; // 16ms
-            float rttFrames = rttMs / frameTimeMs;
-            int halfRttFrames = Mathf.CeilToInt(rttFrames / 2f);
+            int uploadLeadFrames = Mathf.CeilToInt((rttMs * 0.5f) / frameTimeMs);
             int jitterBufferFrames = Mathf.Clamp(
                 Mathf.CeilToInt((varianceMs / frameTimeMs) * Server.NetConfigValue.jitterBufferRatio),
                 0,
                 Server.NetConfigValue.maxJitterBufferFrames);
+            targetFrame = estimatedServerFrame + uploadLeadFrames + jitterBufferFrames + safetyFrames;
 
-            return syncFrame + halfRttFrames + inputBuf + jitterBufferFrames;
+            Logging.HYLDDebug.FrameTrace($"[TargetFrame] CALC estimatedServer={estimatedServerFrame} target={targetFrame} uploadLead={uploadLeadFrames} jitter={jitterBufferFrames} safety={safetyFrames} rttMs={rttMs:F1} varianceMs={varianceMs:F1}");
+            return true;
         }
 
         /// <summary>
@@ -275,13 +298,15 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             // ★ 开帧：给这一帧的本地推进打日志锚点。
             Logging.HYLDDebug.FrameLog_BeginFrame(nextFrame);
 
-            // 上报帧号直接等于本次要推进的逻辑帧号。
-            // 这样动态追帧时，即使 predicted_frameID 暂时跑在服务端前面，服务端也能把输入放进对应 frame slot。
+            // 上报帧号必须严格绑定到当前本地真实推进的逻辑帧。
+            // targetFrame 只用于调节 BattleTick 频率，不再参与伪造上行帧号。
             int uploadOperationId = nextFrame;
 
             // “先把本帧待发包里的移动槽位清零，但保留待确认攻击队列。
             //到时候从commandmanager里读新的
             Manger.BattleData.Instance.ResetOperation();
+            int queuedAttackCommandsBeforeExecute = CommandManger.Instance.QueuedAttackCommandCount;
+            int lastEnqueuedAttackIdBeforeExecute = Manger.BattleData.Instance.LastEnqueuedAttackId;
             // 再从 CommandManger 把“这一发送帧”要上传的移动/攻击写回 selfOperation。
             // 注意：selfOperation 是客户端本地即将上报给服务端的 PlayerOperation，不是服务端回填对象。
             // 其中移动量直接写入 selfOperation；攻击则先进入 pendingAttacks，
@@ -322,10 +347,21 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
             if (predictionPipelineEnabled)
             {
-                // 先记录“推进前快照 + 本帧输入”，这样后续收到权威帧后才能做裁剪/重放。
-                Manger.BattleData.Instance.RecordPredictedHistory(nextFrame, Manger.BattleData.Instance.selfOperation);
                 // 当前本地预测路径只消费自己的 selfOperation，不再额外包一层单元素操作列表。
+                Vector3 startPosition = Vector3.zero;
+                int selfIdxForMove = HYLDStaticValue.playerSelfIDInServer;
+                if (selfIdxForMove >= 0 && selfIdxForMove < HYLDStaticValue.Players.Count)
+                {
+                    startPosition = HYLDStaticValue.Players[selfIdxForMove].playerPositon;
+                }
                 ApplyLocalPredictedInputAndRefreshAllObjects(Manger.BattleData.Instance.selfOperation);
+                Vector3 predictedPosition = Vector3.zero;
+                if (selfIdxForMove >= 0 && selfIdxForMove < HYLDStaticValue.Players.Count)
+                {
+                    predictedPosition = HYLDStaticValue.Players[selfIdxForMove].playerPositon;
+                }
+                // 记录“本帧输入 + 预测起点/终点”，用于 SavedMove、OldMove 和服务端误差校验。
+                Manger.BattleData.Instance.RecordPredictedHistory(nextFrame, Manger.BattleData.Instance.selfOperation, startPosition, predictedPosition);
                 // 推进完成后提交 predicted_frameID，表示客户端已经走到了 nextFrame。
                 Manger.BattleData.Instance.CommitPredictedFrame(nextFrame);
             }
@@ -333,15 +369,43 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             // 子模式逐逻辑帧扩展点：挂在当前真实 BattleTick 主链路上，不再依赖失效的 ApplyFullFrame 链。
             OnBattleLogicTick(nextFrame);
 
+            bool zeroMoveThisTick = Mathf.Abs(Manger.BattleData.Instance.selfOperation.PlayerMoveX) <= 1e-6f
+                && Mathf.Abs(Manger.BattleData.Instance.selfOperation.PlayerMoveY) <= 1e-6f;
+            bool stopTransitionThisTick = !_lastBattleTickMoveWasZero && zeroMoveThisTick;
+            bool newAttackThisTick = queuedAttackCommandsBeforeExecute > 0
+                && Manger.BattleData.Instance.selfOperation.AttackOperations.Count > 0
+                && Manger.BattleData.Instance.LastEnqueuedAttackId > lastEnqueuedAttackIdBeforeExecute;
+            bool criticalInputThisTick = stopTransitionThisTick || newAttackThisTick;
+            int sendRepeatCount = criticalInputThisTick ? CriticalInputBurstSendCount : 1;
+            string burstReason = stopTransitionThisTick && newAttackThisTick
+                ? "stop+attack"
+                : (stopTransitionThisTick ? "stop" : (newAttackThisTick ? "attack" : "none"));
+            if (zeroMoveThisTick)
+            {
+                Logging.HYLDDebug.FrameTrace(
+                    $"[StopInput][BattleTick] next={nextFrame} upload={uploadOperationId} target={_lastComputedTargetFrame} sync={Manger.BattleData.Instance.sync_frameID} " +
+                    $"predictedBeforeCommit={Manger.BattleData.Instance.predicted_frameID} history={Manger.BattleData.Instance.PredictionHistoryCount} " +
+                    $"move=({Manger.BattleData.Instance.selfOperation.PlayerMoveX:F4},{Manger.BattleData.Instance.selfOperation.PlayerMoveY:F4}) stopTransition={stopTransitionThisTick}");
+            }
+            if (criticalInputThisTick)
+            {
+                Logging.HYLDDebug.FrameTrace(
+                    $"[CriticalInput][BurstSend] next={nextFrame} upload={uploadOperationId} target={_lastComputedTargetFrame} sync={Manger.BattleData.Instance.sync_frameID} " +
+                    $"reason={burstReason} repeats={sendRepeatCount} lastAttackId={Manger.BattleData.Instance.LastEnqueuedAttackId} attackCount={Manger.BattleData.Instance.selfOperation.AttackOperations.Count} " +
+                    $"move=({Manger.BattleData.Instance.selfOperation.PlayerMoveX:F4},{Manger.BattleData.Instance.selfOperation.PlayerMoveY:F4})");
+            }
+
             // ★ 输入摘要：记录“这一帧到底上传了什么输入”。
             Logging.HYLDDebug.FrameLog_Authority(
-                $"input upload={uploadOperationId} sync={Manger.BattleData.Instance.sync_frameID} " +
+                $"input upload={uploadOperationId} target={_lastComputedTargetFrame} sync={Manger.BattleData.Instance.sync_frameID} " +
                 $"move=({Manger.BattleData.Instance.selfOperation.PlayerMoveX},{Manger.BattleData.Instance.selfOperation.PlayerMoveY}) " +
                 $"attackCount={Manger.BattleData.Instance.selfOperation.AttackOperations.Count} " +
-                $"predict={predictionPipelineEnabled}");
+                $"predict={predictionPipelineEnabled} zeroMove={zeroMoveThisTick} stopTransition={stopTransitionThisTick} criticalInput={criticalInputThisTick} burstReason={burstReason} repeats={sendRepeatCount}");
 
             // 把本帧输入发给服务端；服务端稍后会在对应权威帧里消费并回传结果。
-            Server.UDPSocketManger.Instance.SendOperation(uploadOperationId);
+            List<ClientMove> clientMoves = Manger.BattleData.Instance.BuildClientMovesForSend(uploadOperationId, criticalInputThisTick);
+            Server.UDPSocketManger.Instance.SendOperation(uploadOperationId, sendRepeatCount, criticalInputThisTick, burstReason, clientMoves);
+            _lastBattleTickMoveWasZero = zeroMoveThisTick;
 
             // ★ 结帧：这里只能输出“本地推进结束”的状态。
             // 此时还没收到新的权威帧，因此 opCount 仍然填 0，真正的权威结果要等 HandleMessage 路径更新。
@@ -456,7 +520,7 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
         private void HandleAuthorityFrames(MainPack pack)
         {
-            Logging.HYLDDebug.FrameTrace($"[Baseline][AuthorityFrameRecv] serverFrame={pack.BattleInfo.OperationID} batchCount={pack.BattleInfo.AllPlayerOperation.Count} localSyncBefore={BattleData.Instance.sync_frameID}");
+            Logging.HYLDDebug.FrameTrace($"[Baseline][AuthorityFrameRecv] serverFrame={pack.BattleInfo.OperationID} batchCount={pack.BattleInfo.Frames.Count} localSyncBefore={BattleData.Instance.sync_frameID}");
 
             // BattleManager 在这里不再编排“主状态 / HitEvent / HPDeath”的内部顺序，
             // 而是把整包 BattleInfo 直接交给 BattleData 统一消费。

@@ -148,8 +148,8 @@ namespace Server
             }
             catch (Exception EX)
             {
-                Logging.Debug.Log(EX+"离谱");
-                Close();
+                Logging.Debug.Log($"[TCP_CLOSE][ReceiveMessage] uid={UID} remote={_socket?.RemoteEndPoint} local={_socket?.LocalEndPoint} ex={EX}");
+                Close("ReceiveMessage exception", EX);
             }
         }
         private void ReceiveCallBack(IAsyncResult iar)
@@ -163,17 +163,18 @@ namespace Server
                 if (len == 0)
                 {
                     //这个0在tcp里意思就是对方关闭连接
-                    Logging.Debug.Log("接收数据为0");
-                    Close();
+                    Logging.Debug.Log($"[TCP_CLOSE][ReceiveCallBack] uid={UID} remote={_socket?.RemoteEndPoint} local={_socket?.LocalEndPoint} len=0 reason=remote_closed");
+                    Close("ReceiveCallBack len=0 (remote closed)");
                     return;
                 }
                 //处理存好的数据
                 _message.ReadBuffer(len, HandleRequest);
                 ReceiveMessage();
             }
-            catch
+            catch (Exception ex)
             {
-                Close();
+                Logging.Debug.Log($"[TCP_CLOSE][ReceiveCallBack] uid={UID} remote={_socket?.RemoteEndPoint} local={_socket?.LocalEndPoint} ex={ex}");
+                Close("ReceiveCallBack exception", ex);
             }
         }
         /// <summary>
@@ -205,29 +206,37 @@ namespace Server
         }
         private void SendBackCall(IAsyncResult ar)
         {
-            Socket socket = (Socket)ar.AsyncState;
-            int count = socket.EndSend(ar);
-            ByteArray ba;
-            lock (writeQueue)
+            try
             {
-                ba = writeQueue.Peek();
-            }
-            ba.ReadIdx += count;
-            ///完整发送了消息
-            if (ba.Length == 0)
-            {
+                Socket socket = (Socket)ar.AsyncState;
+                int count = socket.EndSend(ar);
+                ByteArray ba;
                 lock (writeQueue)
                 {
-                    ba = null;
-                    writeQueue.Dequeue();
-                    if (writeQueue.Count != 0)
-                        ba = writeQueue.Peek();
+                    ba = writeQueue.Peek();
+                }
+                ba.ReadIdx += count;
+                ///完整发送了消息
+                if (ba.Length == 0)
+                {
+                    lock (writeQueue)
+                    {
+                        ba = null;
+                        writeQueue.Dequeue();
+                        if (writeQueue.Count != 0)
+                            ba = writeQueue.Peek();
+                    }
+                }
+
+                if (ba != null)
+                {
+                    socket.BeginSend(ba.bytes, ba.ReadIdx, ba.Length, 0, SendBackCall, socket);
                 }
             }
-
-            if (ba != null)
+            catch (Exception ex)
             {
-                socket.BeginSend(ba.bytes, ba.ReadIdx, ba.Length, 0, SendBackCall, socket);
+                Logging.Debug.Log($"[TCP_CLOSE][SendBackCall] uid={UID} remote={_socket?.RemoteEndPoint} local={_socket?.LocalEndPoint} ex={ex}");
+                Close("SendBackCall exception", ex);
             }
 
         }
@@ -310,11 +319,22 @@ namespace Server
         private int _closeStarted = 0;
         public void Close()
         {
+            Close("Close()", null);
+        }
+
+        public void Close(string reason)
+        {
+            Close(reason, null);
+        }
+
+        public void Close(string reason, Exception ex)
+        {
             if (Interlocked.Exchange(ref _closeStarted, 1) == 1)
             {
                 return;
             }
 
+            Logging.Debug.Log($"[TCP_CLOSE][Close] uid={UID} user={PlayerName} remote={_socket?.RemoteEndPoint} local={_socket?.LocalEndPoint} reason={reason} ex={(ex != null ? ex.ToString() : "null")}");
             Logging.Debug.Log("client  Close||||!!!!!!!!!");
             try
             {
@@ -324,18 +344,18 @@ namespace Server
                     BattleManage.Instance.HandleClientDisconnect(_server, UID);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex2)
             {
-                Logging.Debug.Log(ex);
+                Logging.Debug.Log(ex2);
             }
 
             try
             {
                 _userdata.BordCaseToFriendLogout(_mysqlConnection, _server, this, UpdateActiveFriendInfo);
             }
-            catch (Exception ex)
+            catch (Exception ex2)
             {
-                Logging.Debug.Log(ex);
+                Logging.Debug.Log(ex2);
             }
 
             _server.RemoveClient(this);

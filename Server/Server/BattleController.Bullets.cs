@@ -9,7 +9,7 @@ namespace Server
 	{
 		// ==================== 子弹生成 ====================
 
-		private void SpawnBulletsFromOperations(AllPlayerOperation frameOp)
+		private void SpawnBulletsFromOperations(BattleFrameSync frameOp)
 		{
 			foreach (PlayerOperation op in frameOp.Operations)
 			{

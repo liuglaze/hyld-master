@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using System;
@@ -122,7 +122,7 @@ namespace Server
             }
         }
 
-        public void SendOperation(int operationFrameId)
+        public void SendOperation(int operationFrameId, int repeatCount = 1, bool isCriticalInput = false, string criticalReason = null, IList<ClientMove> clientMoves = null)
         {
             MainPack pack = new MainPack();
             pack.Requestcode = RequestCode.Battle;
@@ -131,7 +131,26 @@ namespace Server
             pack.BattleInfo.SelfOperation = Manger.BattleData.Instance.selfOperation;
             pack.BattleInfo.OperationID = operationFrameId;
             pack.BattleInfo.ClientAckedFrame = Manger.BattleData.Instance.sync_frameID;
-            Send(pack);
+            pack.BattleInfo.ClientRttMs = Manger.BattleData.Instance.IsRttInitialized
+                ? Mathf.RoundToInt(Manger.BattleData.Instance.smoothedRTT)
+                : 0;
+            if (clientMoves != null)
+            {
+                for (int i = 0; i < clientMoves.Count; i++)
+                {
+                    pack.BattleInfo.ClientMoves.Add(clientMoves[i]);
+                }
+            }
+
+            int normalizedRepeatCount = Mathf.Max(1, repeatCount);
+            for (int sendIndex = 0; sendIndex < normalizedRepeatCount; sendIndex++)
+            {
+                if (isCriticalInput)
+                {
+                    Logging.HYLDDebug.FrameTrace($"[CriticalInput][Send] op={operationFrameId} repeat={sendIndex + 1}/{normalizedRepeatCount} reason={criticalReason ?? "unknown"} ack={pack.BattleInfo.ClientAckedFrame} move=({pack.BattleInfo.SelfOperation.PlayerMoveX:F4},{pack.BattleInfo.SelfOperation.PlayerMoveY:F4}) clientMoves={pack.BattleInfo.ClientMoves.Count} attackCount={pack.BattleInfo.SelfOperation.AttackOperations.Count}");
+                }
+                Send(pack);
+            }
         }
 
         public void Send(MainPack pack)

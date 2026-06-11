@@ -52,6 +52,12 @@ namespace Manger
 
         private readonly List<PendingAttack> pendingAttacks = new List<PendingAttack>();
         private int nextAttackId = 0;
+        private int _lastEnqueuedAttackId = 0;
+
+        public int LastEnqueuedAttackId
+        {
+            get { return _lastEnqueuedAttackId; }
+        }
 
         public class PendingAttack
         {
@@ -84,6 +90,7 @@ namespace Manger
                 ClientFrameId = predicted_frameID,
             };
             pendingAttacks.Add(attack);
+            _lastEnqueuedAttackId = attack.AttackId;
             Logging.HYLDDebug.FrameTrace($"[AttackPipeline] EnqueueAttack id={nextAttackId} toward=({towardx:F4},{towardy:F4}) clientFrame={predicted_frameID} pendingCount={pendingAttacks.Count}");
             return attack;
         }
@@ -157,6 +164,7 @@ namespace Manger
         {
             pendingAttacks.Clear();
             nextAttackId = 0;
+            _lastEnqueuedAttackId = 0;
         }
     }
 }

@@ -29,29 +29,33 @@ namespace Server
 		private readonly int maxCatchupFrame = 5;
 		private const float FrameTimeSec = 16 / 1000f;  // = ServerConfig.frameTime / 1000f = 0.016f
 
-		private sealed class BufferedMoveInput
+		private sealed class LastProcessedMoveInput
 		{
-			public int SyncFrameId;
+			public int MoveFrame;
 			public float MoveX;
 			public float MoveY;
-			public int ReceivedServerFrame;
+			public MoveType MoveType;
 		}
 
 		// 战斗状态
 		private int playerCount;
 		private int frameid;
-		private Dictionary<int, AllPlayerOperation> dic_historyFrames;
+		private Dictionary<int, BattleFrameSync> dic_historyFrames;
 		private Dictionary<int, PlayerOperation> dic_pendingAttacks;
 		private Dictionary<int, int> dic_playerAckedFrameId;
 		private Dictionary<int, int> dic_lastProcessedAttackId;
 		private Dictionary<int, bool> dic_playerGameOver;
-		// ── Input Buffer（动态追帧系统） ──
-		private const int InputBufferSize = 4;
-		private const int InputFutureLeadTolerance = 6;
-		private Dictionary<int, List<BufferedMoveInput>> dic_movementInputBuffer;
-		private Dictionary<int, int> dic_lastConsumedMoveFrame;
-		private Dictionary<int, (float moveX, float moveY)> dic_lastValidMove;
-		private Dictionary<int, int> dic_consecutiveMissedFrames;
+		// ── CMC-style Move Timeline（客户端 SavedMove 时间轴） ──
+		private const int MaxClientMoveFrameLead = 30;
+		private const float MoveCorrectionThreshold = 0.6f;
+		private const int FrameDiscrepancyMaxMargin = 8;
+		private const int FrameDiscrepancyPaybackPerMove = 1;
+		private Dictionary<int, int> dic_lastProcessedMoveFrame;
+		private Dictionary<int, int> dic_lastProcessedMoveServerFrame;
+		private Dictionary<int, LastProcessedMoveInput> dic_lastProcessedMoveInput;
+		private Dictionary<int, int> dic_accumulatedFrameDiscrepancy;
+		private Dictionary<int, bool> dic_resolvingFrameDiscrepancy;
+		private Dictionary<int, MoveAckResult> dic_lastMoveAck;
 		private bool isAllReady;
 		private bool _battleStarted;
 		private bool _isRun;
@@ -85,9 +89,11 @@ namespace Server
 
 		// ---- 网络模拟（测试用，发布前设为 0） ----
 		private const float SimDropRate = 0.3f;
-		private const int SimDelayMinMs = 75;
-		private const int SimDelayMaxMs = 100;
+		private const int SimDelayMinMs = 50;
+		private const int SimDelayMaxMs = 75;
 		private const int MaxAcceptableAttackDelay = 8;
+		private const int AckGapRepeatThreshold = 3;
+		private const int CurrentFrameRepeatSendCount = 3;
 		private readonly Random _simRandom = new Random();
 
 		// ==================== 构造 / 初始化 ====================
@@ -147,6 +153,7 @@ namespace Server
 		{
 			if (!TryGetBattlePlayerId(uid, out int battlePlayerId))
 			{
+				Logging.Debug.Log($"[BattleDisconnect][ControllerSkip] battleId={battleId} uid={uid} reason=battle_player_not_found");
 				return;
 			}
 
@@ -162,6 +169,7 @@ namespace Server
 					dic_playerGameOver[battlePlayerId] = true;
 				}
 
+				Logging.Debug.Log($"[BattleDisconnect][ControllerMark] battleId={battleId} uid={uid} battlePlayerId={battlePlayerId} hasEnded={_hasEnded} isRun={_isRun} readyCount={dic_battleReady.Count} endpointCount={battlePlayerIdToIp.Count}");
 				if (!_hasEnded)
 				{
 					hasAnyPlayerDied = true;
@@ -169,6 +177,7 @@ namespace Server
 					isWaitingClientConfirm = false;
 					gameOverConfirmTimeoutMs = 0;
 					shouldEndBattle = true;
+					Logging.Debug.Log($"[BattleDisconnect][ControllerEndBattle] battleId={battleId} uid={uid} battlePlayerId={battlePlayerId} reason=client_disconnect_sets_gameover");
 				}
 			}
 
@@ -266,16 +275,18 @@ namespace Server
 				isWaitingClientConfirm = false;
 				gameOverConfirmTimeoutMs = 0;
 				_hasEnded = false;
-				dic_historyFrames = new Dictionary<int, AllPlayerOperation>();
+				dic_historyFrames = new Dictionary<int, BattleFrameSync>();
 				dic_pendingAttacks = new Dictionary<int, PlayerOperation>();
 				dic_playerAckedFrameId = new Dictionary<int, int>();
 				dic_playerGameOver = new Dictionary<int, bool>();
 				dic_lastProcessedAttackId = new Dictionary<int, int>();
-				// ── Input Buffer 初始化 ──
-				dic_movementInputBuffer = new Dictionary<int, List<BufferedMoveInput>>();
-				dic_lastConsumedMoveFrame = new Dictionary<int, int>();
-				dic_lastValidMove = new Dictionary<int, (float moveX, float moveY)>();
-				dic_consecutiveMissedFrames = new Dictionary<int, int>();
+				// ── CMC-style Move Timeline 初始化 ──
+				dic_lastProcessedMoveFrame = new Dictionary<int, int>();
+				dic_lastProcessedMoveServerFrame = new Dictionary<int, int>();
+				dic_lastProcessedMoveInput = new Dictionary<int, LastProcessedMoveInput>();
+				dic_accumulatedFrameDiscrepancy = new Dictionary<int, int>();
+				dic_resolvingFrameDiscrepancy = new Dictionary<int, bool>();
+				dic_lastMoveAck = new Dictionary<int, MoveAckResult>();
 
 				// ---- 初始化伤害判定系统 ----
 				playerPositions = new Dictionary<int, ServerVector3>();
@@ -332,10 +343,17 @@ namespace Server
 					dic_playerAckedFrameId[battlePlayerId] = 0;
 					dic_playerGameOver[battlePlayerId] = false;
 					dic_lastProcessedAttackId[battlePlayerId] = 0;
-					dic_movementInputBuffer[battlePlayerId] = new List<BufferedMoveInput>(InputBufferSize);
-					dic_lastConsumedMoveFrame[battlePlayerId] = 0;
-					dic_lastValidMove[battlePlayerId] = (0f, 0f);
-					dic_consecutiveMissedFrames[battlePlayerId] = 0;
+					dic_lastProcessedMoveFrame[battlePlayerId] = 0;
+					dic_lastProcessedMoveServerFrame[battlePlayerId] = 0;
+					dic_accumulatedFrameDiscrepancy[battlePlayerId] = 0;
+					dic_resolvingFrameDiscrepancy[battlePlayerId] = false;
+					dic_lastProcessedMoveInput[battlePlayerId] = new LastProcessedMoveInput
+					{
+						MoveFrame = 0,
+						MoveX = 0f,
+						MoveY = 0f,
+						MoveType = MoveType.NewMove,
+					};
 				}
 			}
 			// ---- 网络模拟启动日志 ----
@@ -423,118 +441,30 @@ namespace Server
 		}
 
 		// ==================== 帧收集与广播 ====================
-		// 当前语义（2026-03）：
-		// 1. 移动输入不再按旧的环形 slot / frame%buffer 直接消费。
-		// 2. 现在每个玩家维护一个按 SyncFrameId 升序的滑动窗口（dic_movementInputBuffer）。
-		// 3. 每个服务端帧优先消费 lastConsumedMoveFrame + 1；若该帧缺失，则接受窗口内“最小的更大合法帧”。
-		// 4. 一旦接受更大的输入帧，说明服务端消费进度已经前推，之后迟到的旧帧会在接收阶段被拒绝（REJECT_STALE）。
-		// 5. 如果当前没有合法新输入，则沿用 lastValidMove 做短时惯性，但不推进 lastConsumedMoveFrame。
-		// 6. 攻击不走该移动窗口，而是独立缓存在 dic_pendingAttacks 中，并在这里合并进当前权威帧。
+		// 帧号语义：
+		// 1. frameid 是服务端权威帧，只由 BattleLoop 每 16ms 推进一次。
+		// 2. ClientMove.MoveFrame 是客户端本地预测移动帧，只用于上行移动排序与确认。
+		// 3. 合法 ClientMove 在 UDP 接收阶段按 MoveFrame 差值重模拟，并直接推进 playerPositions。
+		// 4. 本函数只组织当前 ServerFrame 的广播、位置历史、攻击、子弹、HP 与死亡状态。
 		private void CollectAndBroadcastCurrentFrame()
 		{
 			// nextFrameOp 表示“本次服务端权威帧最终采用的所有玩家操作集合”，
-			// 后续会继续用于：位置推进 -> 子弹生成/碰撞 -> PlayerStates 打包 -> 下行广播。
-			AllPlayerOperation nextFrameOp = new AllPlayerOperation();
+			// 后续会继续用于：子弹生成/碰撞 -> PlayerStates 打包 -> 下行广播。
+			BattleFrameSync nextFrameOp = new BattleFrameSync();
 			try
 			{
 				foreach (int battlePlayerId in uidToBattlePlayerId.Values)
 				{
-					// frameOp 是“当前服务端帧最终决定采用”的这个玩家操作：
-					// - 可能来自新消费到的移动输入
-					// - 也可能只有惯性移动
-					// - 也可能本来无移动，但后面会因攻击而被创建
 					PlayerOperation frameOp = null;
 
-					// ── 按序消费移动输入：优先 nextExpected，缺失则跳到最小更大合法帧 ──
-					if (dic_movementInputBuffer.TryGetValue(battlePlayerId, out List<BufferedMoveInput> pendingInputs))
+					if (dic_lastProcessedMoveInput.TryGetValue(battlePlayerId, out LastProcessedMoveInput lastMove))
 					{
-						// chosenInput = 本帧真正要消费的输入；chosenIndex 用于后续把“已被越过/已被消费”的旧输入一起删掉。
-						BufferedMoveInput chosenInput = null;
-						int chosenIndex = -1;
-						int lastConsumedMoveFrame = dic_lastConsumedMoveFrame.TryGetValue(battlePlayerId, out int consumedMoveFrame)
-							? consumedMoveFrame
-							: 0;
-						int nextExpectedFrame = lastConsumedMoveFrame + 1;
-						int maxAllowedFrame = frameid + InputFutureLeadTolerance;
-
-						// 扫描顺序依赖 pendingInputs 已按 SyncFrameId 升序排列：
-						// - 优先找严格下一帧 nextExpectedFrame
-						// - 若找不到，则保留第一个“比 lastConsumed 更大且不超前过多”的候选
-						for (int i = 0; i < pendingInputs.Count; i++)
-						{
-							BufferedMoveInput candidate = pendingInputs[i];
-							if (candidate.SyncFrameId <= lastConsumedMoveFrame)
-							{
-								// 理论上旧输入大多会在接收阶段被拒绝；这里再次防守式跳过，避免消费倒退。
-								continue;
-							}
-							if (candidate.SyncFrameId > maxAllowedFrame)
-							{
-								// 列表已升序；后面的帧只会更大，因此可以直接停止扫描。
-								break;
-							}
-							if (candidate.SyncFrameId == nextExpectedFrame)
-							{
-								chosenInput = candidate;
-								chosenIndex = i;
-								break;
-							}
-							if (chosenInput == null)
-							{
-								chosenInput = candidate;
-								chosenIndex = i;
-							}
-						}
-
-						if (chosenInput != null)
-						{
-							// 命中新输入：
-							// 1) 用该输入构造本帧移动
-							// 2) 更新 lastValidMove，供后续缺帧时做惯性补偿
-							// 3) 推进 lastConsumedMoveFrame，表示服务端已正式前进到 chosenInput.SyncFrameId
-							frameOp = new PlayerOperation { Battleid = battlePlayerId };
-							frameOp.PlayerMoveX = chosenInput.MoveX;
-							frameOp.PlayerMoveY = chosenInput.MoveY;
-							dic_consecutiveMissedFrames[battlePlayerId] = 0;
-							dic_lastValidMove[battlePlayerId] = (frameOp.PlayerMoveX, frameOp.PlayerMoveY);
-							dic_lastConsumedMoveFrame[battlePlayerId] = chosenInput.SyncFrameId;
-
-							if (chosenInput.SyncFrameId == nextExpectedFrame)
-							{
-								Logging.Debug.Log($"[MoveBuffer][ACCEPT_IN_ORDER] bp={battlePlayerId} " +
-									$"frame={frameid} consumed={chosenInput.SyncFrameId} " +
-									$"nextExpected={nextExpectedFrame} pending={pendingInputs.Count}");
-							}
-							else
-							{
-								Logging.Debug.Log($"[MoveBuffer][SKIP_GAP_ACCEPT] bp={battlePlayerId} " +
-									$"frame={frameid} consumed={chosenInput.SyncFrameId} expected={nextExpectedFrame} " +
-									$"pending={pendingInputs.Count}");
-							}
-
-							if (chosenIndex >= 0)
-							{
-								// 这里会把“被真正消费的输入”以及它之前所有更老输入一起删掉。
-								// 含义：一旦服务端前进到更大的 SyncFrameId，旧帧就失去回灌意义，不允许再倒退消费。
-								pendingInputs.RemoveRange(0, chosenIndex + 1);
-							}
-						}
-						else
-						{
-							// 没有合法新输入时：
-							// - 不消费未来输入
-							// - 不推进 lastConsumedMoveFrame
-							// - 仅沿用 lastValidMove 做短时惯性，避免角色因瞬时缺包立刻停住
-							int missCount = dic_consecutiveMissedFrames.TryGetValue(battlePlayerId, out int mc) ? mc + 1 : 1;
-							dic_consecutiveMissedFrames[battlePlayerId] = missCount;
-							var lastMove = dic_lastValidMove.TryGetValue(battlePlayerId, out var lm) ? lm : (0f, 0f);
-							frameOp = new PlayerOperation { Battleid = battlePlayerId };
-							frameOp.PlayerMoveX = lastMove.Item1;
-							frameOp.PlayerMoveY = lastMove.Item2;
-						}
+						frameOp = new PlayerOperation { Battleid = battlePlayerId };
+						frameOp.PlayerMoveX = lastMove.MoveX;
+						frameOp.PlayerMoveY = lastMove.MoveY;
 					}
 
-                    // 攻击与移动窗口解耦：
+                    // 攻击与移动意图解耦：
                     // pendingAttacks 在网络接收阶段完成去重/超时过滤，这里只负责把“当前仍有效”的攻击并入本帧权威操作。
 					//playeroperation只是装攻击的容器，只是拿这个方便用不用另外定义别的
                     if (dic_pendingAttacks.TryGetValue(battlePlayerId, out PlayerOperation pendingAttackOp)
@@ -553,10 +483,10 @@ namespace Server
                         }
                     }
 
-                    if (frameOp != null)
+					if (frameOp != null)
 					{
 						// 只有本帧最终确实产出了“可广播的该玩家操作”才加入 nextFrameOp。
-						// 这里的操作可能包含：新移动、惯性移动、攻击，或它们的组合。
+						// 这里的操作可能包含：当前移动意图、攻击，或它们的组合。
 						nextFrameOp.Operations.Add(frameOp);
 					}
 				}
@@ -564,15 +494,14 @@ namespace Server
 			catch (Exception ex)
 			{
 				Logging.Debug.Log(ex);
-				nextFrameOp = new AllPlayerOperation();
+				nextFrameOp = new BattleFrameSync();
 			}
-            //上面都只是拿输入，下面才是把输入真正应用到游戏状态，并生成对客户端的反馈：
+            //上面只是组织本帧要广播/结算的操作，下面按服务端权威帧推进位置。
 
+			// 1. 玩家位置已在 ProcessClientMove 中按 ClientMoveFrame 重模拟推进；
+			// BattleLoop 只消费当前权威位置并组织本 ServerFrame 的广播/伤害判定。
 
-            // 1. 根据 nextFrameOp 中最终选定的移动输入/惯性移动推进玩家权威位置
-            UpdatePlayerPositions(nextFrameOp);
-
-			// 2. 记录本帧推进后的权威位置，供延迟补偿子弹按历史帧回溯
+			// 2. 记录本帧权威位置，供延迟补偿子弹按历史帧回溯
 			RecordPositionSnapshot(frameid);
 
 			// 3. 处理本帧攻击，生成新的服务端子弹（攻击来自上面合并进 nextFrameOp 的 AttackOperations）
@@ -582,13 +511,13 @@ namespace Server
             pendingHitEvents = new List<HitEvent>();
             TickServerBullets(frameid, pendingHitEvents);
 
-			// 5. 最后再打包 PlayerStates，保证下发的是“本帧位置推进 + 子弹结算”后的最终权威状态
+			// 5. 最后再打包 PlayerStates，保证下发的是“服务端帧移动推进 + 子弹结算”后的最终权威状态
 			PackPlayerStates(nextFrameOp, frameid);
 
 			nextFrameOp.Frameid = frameid;
 			dic_historyFrames[frameid] = nextFrameOp;
 
-			// 6. 向所有尚未确认 GameOver 的客户端发送补帧包；包内会带上最新帧和本帧 HitEvent
+			// 6. 向所有尚未确认 GameOver 的客户端发送当前权威帧；包内会带上本帧 HitEvent
 			foreach (var item in battlePlayerIdToIp)
 			{
 				if (!dic_playerGameOver.TryGetValue(item.Key, out bool isGameOver) || !isGameOver)
@@ -602,7 +531,7 @@ namespace Server
 
 		// ==================== 服务端位置追踪 ====================
 
-		private void UpdatePlayerPositions(AllPlayerOperation frameOp)
+		private void UpdatePlayerPositions(BattleFrameSync frameOp)
 		{
 			foreach (PlayerOperation op in frameOp.Operations)
 			{

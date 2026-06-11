@@ -47,10 +47,16 @@ public class TouchLogic : MonoBehaviour
 		if (Toolbox.是否游戏结束) return;
 		if (move.joystickName == "PlayerMove")
 		{
+			float prevMoveX = _lastLoggedMoveX;
+			float prevMoveY = _lastLoggedMoveY;
 			isMoveInputActive = false;
 			HYLDStaticValue.PlayerMoveX  = Fixed.Zero;
 			HYLDStaticValue.PlayerMoveY  = Fixed.Zero;
 			CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
+			Logging.HYLDDebug.FrameTrace($"[StopInput][JoystickRelease] axis=(0.0000,0.0000) prevMove=({prevMoveX:F4},{prevMoveY:F4}) startDz={MoveStartDeadZone:F2} stopDz={MoveStopDeadZone:F2}");
+			_lastLoggedMoveZero = true;
+			_lastLoggedMoveX = 0f;
+			_lastLoggedMoveY = 0f;
 		}
 		if (move.joystickName == "FireNormal"||move.joystickName=="FireSuper")
 		{
@@ -79,6 +85,9 @@ public class TouchLogic : MonoBehaviour
 	private const float MoveStartDeadZone = 0.18f;
 	private const float MoveStopDeadZone = 0.12f;
 	private bool isMoveInputActive = false;
+	private bool _lastLoggedMoveZero = true;
+	private float _lastLoggedMoveX = 0f;
+	private float _lastLoggedMoveY = 0f;
 
 	private float shootDistance;
 	private float launchAngle;
@@ -183,6 +192,7 @@ public class TouchLogic : MonoBehaviour
 			float magnitudeSqr = axisX * axisX + axisY * axisY;
 			float startDeadZoneSqr = MoveStartDeadZone * MoveStartDeadZone;
 			float stopDeadZoneSqr = MoveStopDeadZone * MoveStopDeadZone;
+			bool wasMoveInputActive = isMoveInputActive;
 
 			if (isMoveInputActive)
 			{
@@ -201,6 +211,13 @@ public class TouchLogic : MonoBehaviour
 				HYLDStaticValue.PlayerMoveX = Fixed.Zero;
 				HYLDStaticValue.PlayerMoveY = Fixed.Zero;
 				CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
+				if (!_lastLoggedMoveZero)
+				{
+					Logging.HYLDDebug.FrameTrace($"[StopInput][DeadZoneZero] axis=({axisX:F4},{axisY:F4}) magSqr={magnitudeSqr:F4} prevMove=({_lastLoggedMoveX:F4},{_lastLoggedMoveY:F4}) wasActive={wasMoveInputActive} startDz={MoveStartDeadZone:F2} stopDz={MoveStopDeadZone:F2}");
+				}
+				_lastLoggedMoveZero = true;
+				_lastLoggedMoveX = 0f;
+				_lastLoggedMoveY = 0f;
 				return;
 			}
 
@@ -221,6 +238,15 @@ public class TouchLogic : MonoBehaviour
 			}
 
 			CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
+			float currentMoveX = HYLDStaticValue.PlayerMoveX.ToFloat();
+			float currentMoveY = HYLDStaticValue.PlayerMoveY.ToFloat();
+			if (_lastLoggedMoveZero)
+			{
+				Logging.HYLDDebug.FrameTrace($"[StopInput][ResumeMove] axis=({axisX:F4},{axisY:F4}) normMove=({currentMoveX:F4},{currentMoveY:F4}) mag={mag:F4} startDz={MoveStartDeadZone:F2} stopDz={MoveStopDeadZone:F2}");
+			}
+			_lastLoggedMoveZero = false;
+			_lastLoggedMoveX = currentMoveX;
+			_lastLoggedMoveY = currentMoveY;
 		}
 		
 	}

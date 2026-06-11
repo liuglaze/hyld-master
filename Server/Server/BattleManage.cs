@@ -169,6 +169,7 @@ namespace Server
 		{
 			if (uid <= 0)
 			{
+				Logging.Debug.Log($"[BattleDisconnect][ManagerSkip] uid={uid} reason=invalid_uid");
 				return;
 			}
 
@@ -177,18 +178,24 @@ namespace Server
 			{
 				if (!_uidToBattleIds.TryGetValue(uid, out int battleId) || !_battleContexts.TryGetValue(battleId, out battleContext))
 				{
+					Logging.Debug.Log($"[BattleDisconnect][ManagerSkip] uid={uid} reason=not_in_active_battle");
 					return;
 				}
 			}
 
+			Logging.Debug.Log($"[BattleDisconnect][ManagerForward] uid={uid} battleId={battleContext.BattleId} hasController={battleContext.Controller != null}");
 			Logging.Debug.Log($"HandleClientDisconnect 检测到战斗中玩家断线，uid={uid}, battleId={battleContext.BattleId}");
 			if (TryGetController(battleContext.BattleId, out BattleController battleController))
 			{
 				battleController.HandlePlayerDisconnect(uid);
 			}
+			else
+			{
+				Logging.Debug.Log($"[BattleDisconnect][ManagerSkip] uid={uid} battleId={battleContext.BattleId} reason=controller_missing");
+			}
 		}
 
-		public void FinishBattle(int battleId, Dictionary<int, AllPlayerOperation> frameHistory)
+		public void FinishBattle(int battleId, Dictionary<int, BattleFrameSync> frameHistory)
 		{
 			BattleContext battleContext;
 			lock (_manageLock)
@@ -219,9 +226,9 @@ namespace Server
 				battleInfo.BattleUserInfo.Add(battleUser);
 			}
 
-			foreach (AllPlayerOperation allPlayerOperation in frameHistory.Values)
+			foreach (BattleFrameSync frame in frameHistory.Values)
 			{
-				battleInfo.AllPlayerOperation.Add(allPlayerOperation);
+				battleInfo.Frames.Add(frame);
 			}
 
 			mainPack.Str = ((int)battleContext.FightPattern).ToString();

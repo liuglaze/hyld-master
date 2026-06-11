@@ -1,4 +1,4 @@
-﻿/****************************************************
+/****************************************************
     BattleData.cs  --  partial class: 核心数据 / 单例 / 初始化 / 帧号 / 清理
     从 BattleManger.cs 拆分，零逻辑变更
 *****************************************************/
@@ -15,11 +15,16 @@ namespace Manger
         private static BattleData instance;
 
         // ═══════ 内部数据类型 ═══════
-        //记录客户端已经本地执行过、但还未得到服务端确认的预测帧数据。
-        public class PredictedFrameHistoryEntry
+        // 客户端已经本地执行过、但还未得到服务端确认的移动快照。
+        public class SavedMove
         {
             public int FrameId;
             public PlayerOperation Input;
+            public Vector3 StartPosition;
+            public Vector3 PredictedPosition;
+            public bool ForceNoCombine;
+            public bool SentAsNewMove;
+            public string ImportantReason;
         }
 
         //记录客户端收到的、已经被服务端确认过的每一帧快照元数据。
@@ -35,8 +40,10 @@ namespace Manger
 
         // ═══════ 核心集合 ═══════
 
-        private readonly LinkedList<PredictedFrameHistoryEntry> predictionHistory = new LinkedList<PredictedFrameHistoryEntry>();
-        private readonly Dictionary<int, LinkedListNode<PredictedFrameHistoryEntry>> predictionHistoryIndex = new Dictionary<int, LinkedListNode<PredictedFrameHistoryEntry>>();
+        private readonly LinkedList<SavedMove> predictionHistory = new LinkedList<SavedMove>();
+        private readonly Dictionary<int, LinkedListNode<SavedMove>> predictionHistoryIndex = new Dictionary<int, LinkedListNode<SavedMove>>();
+        private SavedMove lastAckedMove;
+        private SavedMove pendingMove;
         private readonly List<int> playerIndexBattleIds = new List<int>();
 
         // ═══════ 权威位置校正（CSP 模式） ═══════
@@ -66,6 +73,8 @@ namespace Manger
         public List<BattlePlayerPack> list_battleUsers { get; private set; }
         public int sync_frameID { get; private set; }
         public int predicted_frameID { get; private set; }
+        public int lastReceivedAuthorityFrame { get; private set; }
+        public float lastAuthorityReceiveTime { get; private set; }
 
         private BattleData()
         {
@@ -128,6 +137,29 @@ namespace Manger
             }
         }
 
+        public void RecordAuthorityFrameTiming(int authorityFrameId)
+        {
+            if (authorityFrameId >= lastReceivedAuthorityFrame)
+            {
+                lastReceivedAuthorityFrame = authorityFrameId;
+                lastAuthorityReceiveTime = cachedMainThreadTime;
+            }
+        }
+
+        public int EstimateServerFrameNow()
+        {
+            if (lastReceivedAuthorityFrame <= 0)
+            {
+                return sync_frameID;
+            }
+
+            float halfRttMs = IsRttInitialized ? smoothedRTT * 0.5f : 0f;
+            float elapsedMs = Mathf.Max(0f, (cachedMainThreadTime - lastAuthorityReceiveTime) * 1000f);
+            float frameTimeMs = Server.NetConfigValue.frameTime * 1000f;
+            int estimatedAdvancedFrames = Mathf.CeilToInt((halfRttMs + elapsedMs) / frameTimeMs);
+            return lastReceivedAuthorityFrame + estimatedAdvancedFrames;
+        }
+
         // ═══════ 初始化 / 清理 ═══════
 
         public void ClearPredictionRuntimeState()
@@ -139,8 +171,12 @@ namespace Manger
 
             sync_frameID = 0;
             predicted_frameID = 0;
+            lastReceivedAuthorityFrame = 0;
+            lastAuthorityReceiveTime = 0f;
             predictionHistory.Clear();
             predictionHistoryIndex.Clear();
+            lastAckedMove = null;
+            pendingMove = null;
             playerIndexBattleIds.Clear();
             lastAuthorityPosition = Vector3.zero;
             authoritySnapshotHistory.Clear();

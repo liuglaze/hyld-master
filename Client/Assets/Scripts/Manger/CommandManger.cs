@@ -42,6 +42,18 @@ public class CommandManger
     private readonly List<Commad> allCommad = new List<Commad>();
     private float latestMoveX = 0f;
     private float latestMoveY = 0f;
+    private bool _lastMoveWasZero = true;
+    private int queuedAttackCommandCount = 0;
+
+    public bool HasQueuedAttackCommands
+    {
+        get { return queuedAttackCommandCount > 0; }
+    }
+
+    public int QueuedAttackCommandCount
+    {
+        get { return queuedAttackCommandCount; }
+    }
 
     /// <summary>
     /// 攻击命令：入队到 BattleData 的待确认攻击队列
@@ -67,6 +79,7 @@ public class CommandManger
     public void AddCommad_Attack(float dx, float dy)
     {
         allCommad.Add(new AttackCommad(dx, dy));
+        queuedAttackCommandCount++;
     }
 
     /// <summary>
@@ -76,6 +89,13 @@ public class CommandManger
     {
         latestMoveX = dx;
         latestMoveY = dy;
+
+        bool isZero = Mathf.Abs(dx) <= 1e-6f && Mathf.Abs(dy) <= 1e-6f;
+        if (isZero != _lastMoveWasZero)
+        {
+            Logging.HYLDDebug.FrameTrace($"[MoveCommand] state={(isZero ? "ZERO" : "NON_ZERO")} move=({dx:F4},{dy:F4}) queuedAttackCount={allCommad.Count}");
+            _lastMoveWasZero = isZero;
+        }
     }
 
     public void AddCommad_Move(LZJ.Fixed dx, LZJ.Fixed dy)
@@ -98,6 +118,7 @@ public class CommandManger
 
         // 离散指令只生效一帧
         allCommad.Clear();
+        queuedAttackCommandCount = 0;
 
         // ★ 把所有待确认攻击（含本帧新增的 + 之前丢包未确认的）写入 selfOperation
         Manger.BattleData.Instance.FlushPendingAttacksToOperation();

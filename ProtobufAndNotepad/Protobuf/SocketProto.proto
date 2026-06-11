@@ -1,3 +1,5 @@
+// 唯一权威 proto 源：客户端与服务端运行时 `SocketProto.cs` 必须从本文件生成。
+// 生成命令见同目录 `build.bat`。修改协议字段时只改这一份，不要并行修改其他 `SocketProto.proto` 副本。
 syntax="proto3";
 package SocketProto;
 
@@ -108,10 +110,18 @@ enum Hero
     RuiKe=19;
 }
 
+
+
 enum FightPattern
 {
     BaoShiZhengBa=0;
     Sheji=1;
+}
+
+enum MoveType
+{
+    NewMove=0;
+    OldMove=1;
 }
 
 message MainPack
@@ -195,13 +205,17 @@ message BattleInfo
     int32 operationID=1;
     int32 randSeed=2;
     repeated BattlePlayerPack battleUserInfo=3;
-    repeated AllPlayerOperation allPlayerOperation=4;
+    repeated BattleFrameSync frames=4;
     PlayerOperation selfOperation=5;
     repeated HitEvent hit_events=6;
     int32 client_acked_frame=7;
+    int32 client_rtt_ms=8;
+    repeated ClientMove client_moves=9;
+    int32 acked_move_frame=10;
+    MoveAckResult move_ack=11;
 }
 
-message AllPlayerOperation
+message BattleFrameSync
 {
     repeated PlayerOperation operations=1;
     int32 frameid=2;
@@ -219,12 +233,37 @@ message AttackOperation
     float spawn_pos_z=7;
 }
 
+
+
 message PlayerOperation
 {
     int32 battleid=1;
     float playerMoveX=2;
     float playerMoveY=3;
     repeated AttackOperation attack_operations=4;
+}
+
+message ClientMove
+{
+    int32 move_frame=1;
+    float move_x=2;
+    float move_y=3;
+    float predicted_pos_x=4;
+    float predicted_pos_y=5;
+    float predicted_pos_z=6;
+    MoveType move_type=7;
+}
+
+message MoveAckResult
+{
+    int32 battle_id=1;
+    int32 acked_move_frame=2;
+    bool ack_good_move=3;
+    float correct_pos_x=4;
+    float correct_pos_y=5;
+    float correct_pos_z=6;
+    int32 frame_discrepancy=7;
+    bool resolving_frame_discrepancy=8;
 }
 
 message HitEvent

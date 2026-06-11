@@ -24,17 +24,19 @@
 ### 3.1 战斗系统（拆分后 7 文件）
 
 **Server/Battle.cs**（549 行） — BattleController 主文件：字段 + 生命周期 + 帧循环 + 位置追踪
+
 - `BattleController`:84 — 构造：注册 UDP 回调、TCP 下发 StartEnterBattle
 - `Handle`:173 — UDP 消息路由：BattleReady / BattlePushDowmPlayerOpeartions / ClientSendGameOver
-- `BeginBattle`:224 — 初始化所有战斗状态、HP、出生位置、Input Buffer、启动 BattleLoop 线程
+- `BeginBattle`:224 — 初始化所有战斗状态、HP、出生位置、ClientMove 时间轴、启动 BattleLoop 线程
 - `BattleLoop`:320 — 帧循环：累加器驱动 + 每帧 CollectAndBroadcastCurrentFrame + GameOver 检测
-- `CollectAndBroadcastCurrentFrame`:393 — 按 `lastConsumedMoveFrame + 1` 优先、否则取最小更大合法帧来消费 Input Buffer → 推进位置 → 记录快照 → 打包权威状态 → 生成子弹 → 碰撞检测 → 广播
-- `UpdatePlayerPositions`:497 — 根据移动输入推进服务端玩家位置
+- `CollectAndBroadcastCurrentFrame`:393 — 读取最新合法 ClientMove 移动意图/攻击 → 记录位置快照 → 打包权威状态 → 生成子弹 → 碰撞检测 → 广播
+- `UpdatePlayerPositions`:497 — 历史保留函数；当前 CMC-style 移动位置推进发生在 `ProcessClientMove`
 - `RecordPositionSnapshot`:526 — 记录位置到环形历史缓冲区（V2 延迟补偿）
 - `TryGetPositionSnapshot`:543 — 按帧号查询历史位置快照
 - `HandlePlayerDisconnect`:135 — 玩家断线：标记断线、触发 GameOver
 
 **Server/BattleController.Bullets.cs**（299 行） — 子弹生成 / 碰撞 / 追帧 / HP
+
 - `SpawnBulletsFromOperations`:12 — 遍历帧操作中的 AttackOperation，逐攻击生成子弹 + 追帧
 - `SpawnServerBullets`:70 — 按英雄配置生成子弹列表（支持散弹扇形），V2 历史位置回溯
 - `CreateServerBullet`:137 — 创建单颗 ServerBullet 数据对象
@@ -43,14 +45,16 @@
 - `TickServerBullets`:265 — 每帧推进活跃子弹 + 碰撞检测 + 超距清除
 
 **Server/BattleController.Network.cs**（253 行） — 网络收发 / 权威状态
+
 - `PackPlayerStates`:18 — 打包所有玩家权威状态（位置/HP/IsDead）到帧数据
-- `SendUnsyncedFrames`:50 — 帧下行广播（含 NetSim 丢包/延迟模拟，含 HitEvent 搭载）
-- `UpdatePlayerOperation`:103 — 接收客户端操作：Ack 钳位 + 移动写入 Input Buffer + 攻击去重/超时
+- `SendUnsyncedFrames`:50 — 只下发当前权威帧，并按 `CurrentFrameRepeatSendCount` 重复发送（含 HitEvent 搭载）
+- `UpdatePlayerOperation`:103 — 接收客户端操作：ClientAckedFrame 单调更新 + ClientMoveFrame 单调处理 + 攻击去重/超时
 - `HandleBattleEnd`:183 — 战斗结束：停循环、清理资源、清 NetSim、注销 UDP、发送 FinishBattle
 - `SendFinishBattle`:224 — 发送 GameOver 包（含 winnerTeamId）
 - `UpdatePlayerGameOver`:235 — 处理客户端上报 GameOver
 
 **Server/BattleManage.cs**（243 行） — 战斗管理单例
+
 - `TryBeginBattle`:106 — 创建 BattleContext + BattleController，注册 uid 映射
 - `FinishBattle`:191 — 清理映射、构造回放包、TCP 下发 BattleReview
 - `HandleClientDisconnect`:168 — 检测战斗中玩家断线，转发到 BattleController
@@ -59,18 +63,22 @@
 - `TryGetController`:75 — battleId → BattleController
 
 **Server/BattleContext.cs**（37 行） — 战斗元数据
+
 - 属性：BattleId, FightPattern, MatchUsers, PlayerUids, UidToBattlePlayerId, Controller
 - `AttachController`:31 — 关联 BattleController 实例
 
 **Server/ServerVector3.cs**（26 行） — 服务端三维向量（避免依赖 Unity）
+
 - 运算符 `+` / `*`、`Distance`、`Magnitude`、`Normalized`
 
 **Server/ServerBullet.cs**（19 行） — 服务端子弹纯数据
+
 - 字段：AttackId, OwnerBattleId, OwnerTeamId, Position, Direction, Speed, MaxDistance, TraveledDistance, Damage, ClientFrameId
 
 ### 3.2 网络层
 
 **Server/Server.cs**（234 行） — TCP 服务器
+
 - `Server`:32 — 构造：监听 7778、初始化 UDP、启动监听/心跳线程
 - `HandleRequest`:157 — 转发 TCP 消息到 ControllerManger
 - `ListenClientConnect`:174 — 后台阻塞等待新连接
@@ -78,6 +86,7 @@
 - `GetActiveClient`:59 — uid → Client
 
 **Server/Client.cs**（350 行） — 单 TCP 连接
+
 - `Client`:110 — 构造：MySQL 连接、启动异步接收
 - `ReceiveCallBack`:155 — 收包 → 解析 → HandleRequest
 - `Send`:182 — 序列化 + 异步发送
@@ -85,6 +94,7 @@
 - `Close`:310 — 幂等关闭：清理状态、通知好友、关闭 Socket/DB
 
 **Server/ClientUdp.cs**（339 行，LZJUDP 类） — UDP 单例
+
 - `RegisterBattle`:42 — 按 battleID 注册回调
 - `UnregisterBattle`:54 — 注销回调 + 清理端点路由
 - `TryResolveBattleID`:166 — BattleReady 建映射、后续包按端点路由
@@ -94,10 +104,12 @@
 ### 3.3 业务控制器
 
 **Controller/ControllerManger.cs**（78 行） — 请求路由
+
 - `HandleRequest`:51 — RequestCode → Controller → 反射 ActionCode 方法
 - `CloseClient`:43 — 广播下线事件给所有 Controller
 
 **Controller/Controllers.cs**（1141 行） — 6 个控制器
+
 - `UserController.Login`:1044 — 登录
 - `FindPlayerInfo`:1078 — 拉取玩家信息
 - `FriendController`:979 — 好友系统
@@ -107,13 +119,16 @@
 ### 3.4 配置与工具
 
 **Server/HeroConfig.cs**（108 行） — 英雄配置（静态）
+
 - `Get`:64 — 按英雄枚举返回 BulletParams（速度/射程/伤害/散弹数/扇形角/碰撞半径）
 - `GetHp`:103 — 按英雄枚举返回最大 HP（当前为原值约 1/5）
 
 **Server/ServerConfig.cs**（14 行） — 常量
+
 - TCPservePort=7778, UDPservePort=7777, frameTime=16ms
 
 **Server/FriendRoom.cs**（208 行） — 房间状态
+
 - `Join`:101 — 加入房间
 - `Exit`:115 — 退出房间（游戏中/等待中两种路径）
 - `BroadCastTCP`:79 — 排除自身广播
@@ -161,14 +176,13 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
       if (oneGameOver) → HandleBattleEnd → return
       else:
         CollectAndBroadcastCurrentFrame (Battle.cs:393):
-          1. 从 inputBuffer 按帧号消费操作（缺帧 → lastConsumedMove 补偿）
+          1. 读取每个玩家最新合法 ClientMove 移动意图
           2. 合并攻击操作（从 dic_currentFrameOperationBuffer）
-          3. UpdatePlayerPositions (Battle.cs:497) — 推进逻辑位置
-          4. RecordPositionSnapshot (Battle.cs:526) — 环形缓冲区
-          5. PackPlayerStates (Network.cs:18) — HP/IsDead/位置 打包
-          6. SpawnBulletsFromOperations (Bullets.cs:12) — 生成子弹 + V2 追帧
-          7. TickServerBullets (Bullets.cs:265) — 推进 + 碰撞 + HitEvent
-          8. SendUnsyncedFrames (Network.cs:50) — 帧下行广播（含 NetSim）
+          3. RecordPositionSnapshot (Battle.cs:526) — 环形缓冲区
+          4. SpawnBulletsFromOperations (Bullets.cs:12) — 生成子弹 + V2 追帧
+          5. TickServerBullets (Bullets.cs:265) — 推进 + 碰撞 + HitEvent
+          6. PackPlayerStates (Network.cs:18) — HP/IsDead/位置 打包
+          7. SendUnsyncedFrames (Network.cs:50) — 只组织当前权威帧，并按 `CurrentFrameRepeatSendCount` 重复下发
         frameid++
 ```
 
@@ -178,10 +192,11 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
 客户端 UDP 上行 → LZJUDP.RecvThread → TryResolveBattleID → BattleController.Handle
   → case BattlePushDowmPlayerOpeartions:
     → UpdatePlayerOperation (Network.cs:103):
-      1. Ack 钳位（不超 frameid-1）
-      2. 移动写入 Input Buffer（clientFrameId % 2）
-      3. 攻击去重（dic_lastProcessedAttackId）
-      4. 攻击超时（frameDelay > MaxAcceptableAttackDelay=6 → REJECT）
+      1. ClientAckedFrame 单调更新（客户端已应用的最新 ServerFrame）
+      2. ClientMove 按 moveFrame 单调处理：先处理 OldMove，再按包内顺序处理所有非 OldMove；旧帧丢弃，超前过多拒绝
+      3. 合法 ClientMove 按帧差重模拟并直接推进 playerPositions，同时保存当前移动意图供权威帧广播
+      4. 攻击去重（dic_lastProcessedAttackId）
+      5. 攻击超时（frameDelay > MaxAcceptableAttackDelay=8 → REJECT）
 ```
 
 ### 4.5 伤害判定链路
@@ -214,7 +229,7 @@ TickServerBullets (Bullets.cs:265):
 oneGameOver = true（来源：击杀 / 断线）
 → BattleLoop 检测到 → HandleBattleEnd (Network.cs:183):
   1. _hasEnded = true, _isRun = false
-  2. 清理子弹/历史/Input Buffer
+  2. 清理子弹/历史/ClientMove 状态
   3. 清零 LZJUDP NetSim 参数
   4. LZJUDP.UnregisterBattle
   5. SendFinishBattle (Network.cs:224) → UDP 广播 GameOver（winnerTeamId）
@@ -225,23 +240,28 @@ oneGameOver = true（来源：击杀 / 断线）
 
 ## 5. 动态追帧系统（服务端部分）
 
-### 5.1 Input Buffer
+### 5.1 CMC-style ClientMove 时间轴
 
-- 数据结构（Battle.cs:49-54）：`Dictionary<int, List<BufferedMoveInput>> dic_movementInputBuffer` + `dic_lastConsumedMoveFrame` + `dic_lastValidMove` + `dic_consecutiveMissedFrames`
-- 窗口参数：`InputBufferSize=4`、`InputFutureLeadTolerance=6`
-- 入队（Network.cs:87 `UpdatePlayerOperation`）：
-  - 先按客户端 ack 清理 `SyncFrameId <= clientAckedFrame - 2` 的旧输入
-  - 若 `syncFrameId <= lastConsumedMoveFrame`，直接拒绝入缓冲并打印 `REJECT_STALE`
-  - 同 `SyncFrameId` 输入覆盖更新，不同帧输入插入后按 `SyncFrameId` 排序
-  - 缓冲满时淘汰最小 `SyncFrameId`，打印 `EVICT_OLDEST_ON_FULL`，仅保留最近 `InputBufferSize=4` 条移动输入
-- 消费（Battle.cs:366 `CollectAndBroadcastCurrentFrame`）：
-  - 优先消费 `lastConsumedMoveFrame + 1`
-  - 若目标帧缺失，则取 `SyncFrameId > lastConsumedMoveFrame` 且 `<= frameid + InputFutureLeadTolerance` 的最小合法帧，并打印 `SKIP_GAP_ACCEPT`
-  - 命中严格下一帧时打印 `ACCEPT_IN_ORDER`
-  - 成功消费后推进 `lastConsumedMoveFrame`，并移除该输入及其之前更老的输入
-  - 未命中新输入时，沿用 `dic_lastValidMove` 做短时惯性，且不推进消费进度；攻击仍独立走 `dic_pendingAttacks`
-- 语义：移动输入按 `SyncFrameId` 升序推进；缺帧不等待，但一旦跳过更大帧，后续迟到旧帧会在接收阶段被拒绝
-- Ack 钳位：使用客户端显式上报的 `ClientAckedFrame` 更新 `dic_playerAckedFrameId`
+- 帧号语义：
+  - `ServerFrame`：服务端 `frameid`，只由 BattleLoop 每 16ms 推进；下行 `BattleInfo.OperationID` 与 `BattleFrameSync.frameid` 都是 ServerFrame。
+  - `ClientMoveFrame`：客户端本地预测 tick，写在 `ClientMove.move_frame`；只用于移动上行排序、OldMove 去重、SavedMove 确认。
+  - `ClientAckedFrame`：客户端上行 `BattleInfo.client_acked_frame`，表示客户端已应用到的最新 ServerFrame。
+  - `AckedMoveFrame`：服务端下行兼容字段，等同于 `BattleInfo.move_ack.acked_move_frame`。
+- 协议字段：`BattleInfo.client_moves` 携带 `ClientMove`；`BattleInfo.move_ack` 携带服务端对本地玩家 Move 的确认/修正结果。
+- 客户端每个预测 tick 生成 SavedMove；普通帧可先挂起为 `pendingMove`，下一帧若可合并则只发 current `NewMove`，不可合并则同包按顺序发送 pending + current 两个 `NewMove`（DualMove）。上行包可附带一个最旧的重要 `OldMove`。
+- 服务端状态（Battle.cs）：`dic_lastProcessedMoveFrame`、`dic_lastProcessedMoveServerFrame`、`dic_lastProcessedMoveInput`、`dic_accumulatedFrameDiscrepancy`、`dic_resolvingFrameDiscrepancy`、`dic_lastMoveAck`。
+- 接收（BattleController.Network.cs `UpdatePlayerOperation` / `ProcessClientMove`）：
+  - 先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`；客户端 DualMove 用两个顺序 `NewMove` 表达。
+  - `moveFrame <= lastProcessedMoveFrame` 直接丢弃并打印 `[ClientMove][STALE]`。
+  - `moveFrame > frameid + MaxClientMoveFrameLead` 直接拒绝并打印 `[ClientMove][REJECT_FUTURE]`。
+  - 合法 move 按 `moveFrame - lastProcessedMoveFrame` 做服务端权威重模拟，直接推进 `playerPositions`。
+  - `OldMove` 只重模拟并推进服务端权威状态；`NewMove` 比较重模拟位置与 `ClientMove.predicted_pos_x/y/z`，误差小于阈值下发 `ack_good_move=true`，否则下发 `ack_good_move=false + correct_pos_x/y/z`。
+  - 服务端用 `ClientMoveFrame` 增量与 `ServerFrame` 增量累计 `frame_discrepancy`，超过阈值后进入按帧偿还模式，限制本次可模拟帧数。
+- 消费（Battle.cs `CollectAndBroadcastCurrentFrame`）：
+  - 每个 ServerFrame 读取当前移动意图用于权威帧广播和动画参数。
+  - 不再在 BattleLoop 中按最新移动意图额外推进位置。
+  - `RecordPositionSnapshot(frameid)` 记录当前服务端权威位置历史。
+- Ack：`ClientAckedFrame` 表示客户端已消费到的服务端权威帧；移动确认/修正单独使用 `MoveAckResult`，`AckedMoveFrame` 只保持兼容同步。
 
 ### 5.2 Ping/Pong
 
@@ -252,8 +272,8 @@ oneGameOver = true（来源：击杀 / 断线）
 
 ## 6. 网络模拟（NetSim，测试用）
 
-- 常量位于 `Server/Server/Battle.cs:85-87`：当前压测档为 `SimDropRate=0.10f`, `SimDelayMinMs=80`, `SimDelayMaxMs=120`
-- 战斗期 UDP 统一经 `LZJUDP` battle-scoped NetSim 入口处理；`SendUnsyncedFrames` 只负责组织权威帧内容，不再单独做局部丢包/延迟
+- 常量位于 `Server/Server/Battle.cs:87-91`：当前压测档为 `SimDropRate=0.10f`, `SimDelayMinMs=80`, `SimDelayMaxMs=120`；当前帧重复下发参数为 `CurrentFrameRepeatSendCount=3`
+- 战斗期 UDP 统一经 `LZJUDP` battle-scoped NetSim 入口处理；`SendUnsyncedFrames` 只负责组织当前权威帧内容并重复发送，不再按 `ClientAckedFrame` 组织最近窗口补帧
 - `Ping/Pong`、上行操作、下行权威帧共享同一套战斗期 NetSim 参数；`BattleStart/GameOver` 也进入统一框架但采用控制包策略
 - `ClientUdp.cs` 已从“每包 `ThreadPool + Sleep`”改为“单独调度线程 + 延迟队列”，避免 ThreadPool 排队抖动污染 RTT 测量
 - 当前实测：在 `8% + 70~100ms` 与 `10% + 80~120ms` 两档下，战斗整体仍保持可演示的顺滑度，说明早期“前期爆卡、后期突然顺滑”的主因已不再是 NetSim 调度污染
@@ -262,8 +282,8 @@ oneGameOver = true（来源：击杀 / 断线）
 ## 7. 状态所有权
 
 - **服务端权威**：帧状态（frameid）、玩家 HP（playerHp）、死亡（playerIsDead）、击杀判定、GameOver、胜负结果
-- **服务端维护**：playerPositions、positionHistory、activeBullets、inputBuffer
-- **客户端上报**：移动输入（PlayerMoveX/Y）、攻击操作（AttackOperation）、BattleReady、ClientSendGameOver
+- **服务端维护**：playerPositions、positionHistory、activeBullets、ClientMove 处理进度
+- **客户端上报**：移动 SavedMove（ClientMove）、攻击操作（AttackOperation）、BattleReady、ClientSendGameOver
 
 ## 8. 日志系统
 
@@ -274,17 +294,17 @@ oneGameOver = true（来源：击杀 / 断线）
 
 ## 9. 场景速查
 
-| 场景 | 先看哪里 | 关键入口 |
-|---|---|---|
-| 登录失败/重复登录 | Controllers.cs | `UserController.Login`:1044 |
-| 好友申请异常 | Controllers.cs | `FriendController`:979 |
-| 创建/进房异常 | Controllers.cs + FriendRoom.cs | `CreateRoom`:717 / `JoinFriendRoom`:861 |
-| 匹配未开局 | Controllers.cs | `AddMatchingPlayer`:417 |
-| 开局不进战斗 | BattleManage.cs | `TryBeginBattle`:106 |
-| 帧不同步/丢包 | ClientUdp.cs + Battle.cs | `TryResolveBattleID`:166 / `Handle`:173 |
-| 子弹未命中/方向错 | BattleController.Bullets.cs | `SpawnServerBullets`:70 / `CheckBulletCollision`:163 |
-| HP 不扣/死亡不触发 | BattleController.Bullets.cs | `CheckBulletCollision`:163（HP 扣减 + 击杀判定） |
-| GameOver 未发送 | BattleController.Network.cs | `HandleBattleEnd`:183 / `SendFinishBattle`:224 |
+| 场景               | 先看哪里                       | 关键入口                                             |
+| ------------------ | ------------------------------ | ---------------------------------------------------- |
+| 登录失败/重复登录  | Controllers.cs                 | `UserController.Login`:1044                          |
+| 好友申请异常       | Controllers.cs                 | `FriendController`:979                               |
+| 创建/进房异常      | Controllers.cs + FriendRoom.cs | `CreateRoom`:717 / `JoinFriendRoom`:861              |
+| 匹配未开局         | Controllers.cs                 | `AddMatchingPlayer`:417                              |
+| 开局不进战斗       | BattleManage.cs                | `TryBeginBattle`:106                                 |
+| 帧不同步/丢包      | ClientUdp.cs + Battle.cs       | `TryResolveBattleID`:166 / `Handle`:173              |
+| 子弹未命中/方向错  | BattleController.Bullets.cs    | `SpawnServerBullets`:70 / `CheckBulletCollision`:163 |
+| HP 不扣/死亡不触发 | BattleController.Bullets.cs    | `CheckBulletCollision`:163（HP 扣减 + 击杀判定）     |
+| GameOver 未发送    | BattleController.Network.cs    | `HandleBattleEnd`:183 / `SendFinishBattle`:224       |
 
 ## 10. 协作约定
 
@@ -296,13 +316,24 @@ oneGameOver = true（来源：击杀 / 断线）
 ## 11. 文档同步约束
 
 每次代码变动后必须检查：
-- `CLAUDE.md`（本文件）
+
+- `AGENTS.md`（本文件）
 - `Docs/ForClient.md`（客户端联调链路）
 - `D:\unity\hyld-master\hyld-master\BothSide.md`（两端交互变更）
 
 判定标准：改动影响"入口、路由、协议、状态流、联调步骤、跨端行为"时必须更新。
 
-## 12. 注意
+## 12. 协议来源与生成约定
+
+- **唯一权威 proto 源**：`D:\unity\hyld-master\hyld-master\ProtobufAndNotepad\Protobuf\SocketProto.proto`
+- **服务端运行时生成产物**：`Server/Server/SocketProto.cs`
+- **客户端运行时对应产物**：`D:\unity\hyld-master\hyld-master\Client\Assets\Scripts\Server\SocketProto.cs`
+- **生成脚本**：`D:\unity\hyld-master\hyld-master\ProtobufAndNotepad\Protobuf\build.bat`
+- **非权威历史文件**：`D:\unity\hyld-master\hyld-master\Client\SocketProto.proto`、`D:\unity\hyld-master\hyld-master\ProtobufAndNotepad\Protobuf\Proto\SocketProto.proto`
+- **维护要求**：需要改协议字段时，只改权威 proto 源并重新生成客户端/服务端运行时 `SocketProto.cs`；不要把工具目录或历史 proto 副本当成并行维护入口。
+
+
+## 13. 注意
 
 - `ActionCode` 与控制器方法名强绑定（反射）：改名必须同步，否则"没有找到指定事件处理"
 - `HeroConfig._hpConfig` 当前为测试值（约原值 1/5），后续需恢复

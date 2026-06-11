@@ -1,8 +1,4 @@
-## Purpose
-
-TBD: 定义服务端移动输入缓冲在乱序网络下的严格当前帧消费、迟到旧帧拒绝、满缓冲淘汰与惯性兜底语义。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Server consumes movement inputs only on the matching authoritative frame
 The server MUST consume a buffered movement input for a player only when the input's `SyncFrameId` exactly matches the current authoritative `frameid`. If the current authoritative frame has no matching buffered movement input, the server MUST NOT consume any larger future movement frame during that tick.

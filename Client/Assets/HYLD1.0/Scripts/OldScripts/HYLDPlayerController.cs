@@ -30,6 +30,7 @@ public class HYLDPlayerController : MonoBehaviour
 
 	private Vector3 _lastLogicPos;
 	private int _doubleStepCount = 0;
+	private bool _lastSelfRenderDeltaWasLarge = false;
 
 	void Start()
 	{
@@ -52,6 +53,19 @@ public class HYLDPlayerController : MonoBehaviour
 		{
 			// ★ 本地玩家：MoveTowards 匀速追赶逻辑位置
 			Vector3 logicPos = player.playerPositon;
+			float renderDeltaBefore = Vector3.Distance(selfTransform.position, logicPos);
+			if (renderDeltaBefore >= Manger.BattleData.LocalPositionJumpTraceThreshold)
+			{
+				if (!_lastSelfRenderDeltaWasLarge)
+				{
+					Logging.HYLDDebug.FrameTrace($"[LocalPosJump][SelfRenderBefore] playerID={playerID} delta={renderDeltaBefore:F3} render=({selfTransform.position.x:F2},{selfTransform.position.y:F2},{selfTransform.position.z:F2}) logic=({logicPos.x:F2},{logicPos.y:F2},{logicPos.z:F2}) smoothSpeed={selfSmoothSpeed:F2}");
+				}
+				_lastSelfRenderDeltaWasLarge = true;
+			}
+			else
+			{
+				_lastSelfRenderDeltaWasLarge = false;
+			}
 			float maxStep = selfSmoothSpeed * Time.deltaTime;
 			selfTransform.position = Vector3.MoveTowards(selfTransform.position, logicPos, maxStep);
 			Vector3 moveDir = player.playerMoveDir;

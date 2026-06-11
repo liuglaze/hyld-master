@@ -37,6 +37,16 @@ namespace Server
 			public MoveType MoveType;
 		}
 
+		private sealed class PendingMoveSegment
+		{
+			public int MoveFrame;
+			public int RemainingFrames;
+			public float MoveX;
+			public float MoveY;
+			public MoveType MoveType;
+			public ServerVector3 PredictedPosition;
+		}
+
 		// 战斗状态
 		private int playerCount;
 		private int frameid;
@@ -46,15 +56,13 @@ namespace Server
 		private Dictionary<int, int> dic_lastProcessedAttackId;
 		private Dictionary<int, bool> dic_playerGameOver;
 		// ── CMC-style Move Timeline（客户端 SavedMove 时间轴） ──
-		private const int MaxClientMoveFrameLead = 30;
+		private const int MaxClientMoveFrameLead = 2;
+		private const int MaxMoveApplyFramesPerServerFrame = 3;
 		private const float MoveCorrectionThreshold = 0.6f;
-		private const int FrameDiscrepancyMaxMargin = 8;
-		private const int FrameDiscrepancyPaybackPerMove = 1;
-		private Dictionary<int, int> dic_lastProcessedMoveFrame;
-		private Dictionary<int, int> dic_lastProcessedMoveServerFrame;
+		private Dictionary<int, int> dic_lastAcceptedMoveFrame;
+		private Dictionary<int, int> dic_lastSimulatedMoveFrame;
+		private Dictionary<int, Queue<PendingMoveSegment>> dic_pendingMoveSegments;
 		private Dictionary<int, LastProcessedMoveInput> dic_lastProcessedMoveInput;
-		private Dictionary<int, int> dic_accumulatedFrameDiscrepancy;
-		private Dictionary<int, bool> dic_resolvingFrameDiscrepancy;
 		private Dictionary<int, MoveAckResult> dic_lastMoveAck;
 		private bool isAllReady;
 		private bool _battleStarted;
@@ -281,11 +289,10 @@ namespace Server
 				dic_playerGameOver = new Dictionary<int, bool>();
 				dic_lastProcessedAttackId = new Dictionary<int, int>();
 				// ── CMC-style Move Timeline 初始化 ──
-				dic_lastProcessedMoveFrame = new Dictionary<int, int>();
-				dic_lastProcessedMoveServerFrame = new Dictionary<int, int>();
+				dic_lastAcceptedMoveFrame = new Dictionary<int, int>();
+				dic_lastSimulatedMoveFrame = new Dictionary<int, int>();
+				dic_pendingMoveSegments = new Dictionary<int, Queue<PendingMoveSegment>>();
 				dic_lastProcessedMoveInput = new Dictionary<int, LastProcessedMoveInput>();
-				dic_accumulatedFrameDiscrepancy = new Dictionary<int, int>();
-				dic_resolvingFrameDiscrepancy = new Dictionary<int, bool>();
 				dic_lastMoveAck = new Dictionary<int, MoveAckResult>();
 
 				// ---- 初始化伤害判定系统 ----
@@ -343,10 +350,9 @@ namespace Server
 					dic_playerAckedFrameId[battlePlayerId] = 0;
 					dic_playerGameOver[battlePlayerId] = false;
 					dic_lastProcessedAttackId[battlePlayerId] = 0;
-					dic_lastProcessedMoveFrame[battlePlayerId] = 0;
-					dic_lastProcessedMoveServerFrame[battlePlayerId] = 0;
-					dic_accumulatedFrameDiscrepancy[battlePlayerId] = 0;
-					dic_resolvingFrameDiscrepancy[battlePlayerId] = false;
+					dic_lastAcceptedMoveFrame[battlePlayerId] = 0;
+					dic_lastSimulatedMoveFrame[battlePlayerId] = 0;
+					dic_pendingMoveSegments[battlePlayerId] = new Queue<PendingMoveSegment>();
 					dic_lastProcessedMoveInput[battlePlayerId] = new LastProcessedMoveInput
 					{
 						MoveFrame = 0,
@@ -444,10 +450,12 @@ namespace Server
 		// 帧号语义：
 		// 1. frameid 是服务端权威帧，只由 BattleLoop 每 16ms 推进一次。
 		// 2. ClientMove.MoveFrame 是客户端本地预测移动帧，只用于上行移动排序与确认。
-		// 3. 合法 ClientMove 在 UDP 接收阶段按 MoveFrame 差值重模拟，并直接推进 playerPositions。
-		// 4. 本函数只组织当前 ServerFrame 的广播、位置历史、攻击、子弹、HP 与死亡状态。
+		// 3. 合法 ClientMove 在 UDP 接收阶段只入队；BattleLoop 每帧按预算消化 pending move 并推进 playerPositions。
+		// 4. 本函数组织当前 ServerFrame 的移动消化、广播、位置历史、攻击、子弹、HP 与死亡状态。
 		private void CollectAndBroadcastCurrentFrame()
 		{
+			ApplyPendingMoveSegments();
+
 			// nextFrameOp 表示“本次服务端权威帧最终采用的所有玩家操作集合”，
 			// 后续会继续用于：子弹生成/碰撞 -> PlayerStates 打包 -> 下行广播。
 			BattleFrame nextFrameOp = new BattleFrame();
@@ -498,26 +506,28 @@ namespace Server
 			}
             //上面只是组织本帧要广播/结算的操作，下面按服务端权威帧推进位置。
 
-			// 1. 玩家位置已在 ProcessClientMove 中按 ClientMoveFrame 重模拟推进；
-			// BattleLoop 只消费当前权威位置并组织本 ServerFrame 的广播/伤害判定。
+			// 1. 玩家位置已在 ApplyPendingMoveSegments 中按固定预算慢消化；
+			// BattleLoop 后续只消费当前权威位置并组织本 ServerFrame 的广播/伤害判定。
 
-			// 2. 记录本帧权威位置，供延迟补偿子弹按历史帧回溯
+			// 2. 创建本帧 HitEvent 列表。追帧命中和正常 Tick 命中都写入同一个列表。
+			pendingHitEvents = new List<HitEvent>();
+
+			// 3. 记录本帧权威位置，供延迟补偿子弹按历史帧回溯
 			RecordPositionSnapshot(frameid);
 
-			// 3. 处理本帧攻击，生成新的服务端子弹（攻击来自上面合并进 nextFrameOp 的 AttackOperations）
+			// 4. 处理本帧攻击，生成新的服务端子弹（攻击来自上面合并进 nextFrameOp 的 AttackOperations）
 			SpawnBulletsFromOperations(nextFrameOp);
 
-            // 4. 推进所有活跃子弹并收集本帧 HitEvent；这一步可能修改 HP / IsDead
-            pendingHitEvents = new List<HitEvent>();
+            // 5. 推进所有活跃子弹并收集本帧 HitEvent；这一步可能修改 HP / IsDead
             TickServerBullets(frameid, pendingHitEvents);
 
-			// 5. 最后再打包 PlayerStates，保证下发的是“服务端帧移动推进 + 子弹结算”后的最终权威状态
+			// 6. 最后再打包 PlayerStates，保证下发的是“服务端帧移动推进 + 子弹结算”后的最终权威状态
 			PackPlayerStates(nextFrameOp, frameid);
 
 			nextFrameOp.ServerFrame = frameid;
 			dic_historyFrames[frameid] = nextFrameOp;
 
-			// 6. 向所有尚未确认 GameOver 的客户端发送当前权威帧；包内会带上本帧 HitEvent
+			// 7. 向所有尚未确认 GameOver 的客户端发送当前权威帧；包内会带上本帧 HitEvent
 			foreach (var item in battlePlayerIdToIp)
 			{
 				if (!dic_playerGameOver.TryGetValue(item.Key, out bool isGameOver) || !isGameOver)
@@ -525,7 +535,7 @@ namespace Server
 					SendUnsyncedFrames(item.Value, item.Key, pendingHitEvents);
 				}
 			}
-			// 7. 当前帧的攻击已经被并入并广播，清空待攻击缓存，等待后续网络线程写入新攻击
+			// 8. 当前帧的攻击已经被并入并广播，清空待攻击缓存，等待后续网络线程写入新攻击
 			dic_pendingAttacks.Clear();
 		}
 

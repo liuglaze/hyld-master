@@ -29,6 +29,7 @@ namespace Server
 					{
 						Logging.Debug.Log($"[LagComp] CLAMP clientFrame={clientFrameId} -> {frameid} bp={bpId} attackId={atk.AttackId}");
 						clientFrameId = frameid;
+						atk.AttackMoveFrame = clientFrameId;
 					}
 
 					// 按攻击独立解析出生点：优先使用 clientFrameId 对应的历史快照，缺失时回退到当前权威位置。

@@ -22,7 +22,9 @@ public class 移动型大招 : MonoBehaviour
 
             {
                 transform.Translate((transform.position - 子弹位置).normalized * Time.deltaTime * 1, Space.World);
+                Vector3 before = HYLDStaticValue.Players[playerid].playerPositon;
                 HYLDStaticValue.Players[playerid].playerPositon = transform.position;
+                LogSelfPositionJump("MovementSuperXueLi", before, transform.position);
             }
             if (当前英雄 == HeroName.GeEr)
             {
@@ -42,8 +44,10 @@ public class 移动型大招 : MonoBehaviour
                 {
                     Vector3 temp = 格尔子弹.transform.position;
                     //temp -= new Vector3(0, 1, 0);
+                    Vector3 before = HYLDStaticValue.Players[playerid].playerPositon;
                     transform.position = temp;
                     HYLDStaticValue.Players[playerid].playerPositon = transform.position;
+                    LogSelfPositionJump("MovementSuperGeEr", before, transform.position);
                     //transform.Translate((transform.position - temp).normalized * Time.deltaTime * 1, Space.World);
                 }
 
@@ -57,6 +61,22 @@ public class 移动型大招 : MonoBehaviour
                 playerid = -1;
             }
         }
+    }
+
+    private void LogSelfPositionJump(string source, Vector3 before, Vector3 after)
+    {
+        if (playerid != HYLDStaticValue.playerSelfIDInServer)
+        {
+            return;
+        }
+
+        float delta = Vector3.Distance(before, after);
+        if (delta < Manger.BattleData.LocalPositionJumpTraceThreshold)
+        {
+            return;
+        }
+
+        Logging.HYLDDebug.FrameTrace($"[LocalPosJump][{source}] playerID={playerid} hero={当前英雄} delta={delta:F3} before=({before.x:F2},{before.y:F2},{before.z:F2}) after=({after.x:F2},{after.y:F2},{after.z:F2})");
     }
     private void OnTriggerEnter(Collider other)
     {

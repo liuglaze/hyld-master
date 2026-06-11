@@ -75,11 +75,11 @@ namespace Manger
         /// 【函数作用】：将玩家最新的一次攻击操作加入待发送队列。
         /// 【核心逻辑】：
         /// 1. 分配一个递增且唯一的 AttackId。
-        /// 2. 锁定并记录当前客户端的预测帧号（ClientFrameId = predicted_frameID）。
+        /// 2. 锁定并记录本次真实推进的客户端预测帧号。
         ///    - 这是为了告诉服务器：“我是在哪一帧开的火”。
         ///    - 锁定后即使因为网络丢包导致这笔攻击重复发送，它的 ClientFrameId 永远不变。
         /// </summary>
-        public PendingAttack EnqueueAttack(float towardx, float towardy)
+        public PendingAttack EnqueueAttack(float towardx, float towardy, int attackFrameId)
         {
             nextAttackId++;
             PendingAttack attack = new PendingAttack()
@@ -87,11 +87,11 @@ namespace Manger
                 AttackId = nextAttackId,
                 Towardx = towardx,
                 Towardy = towardy,
-                ClientFrameId = predicted_frameID,
+                ClientFrameId = attackFrameId,
             };
             pendingAttacks.Add(attack);
             _lastEnqueuedAttackId = attack.AttackId;
-            Logging.HYLDDebug.FrameTrace($"[AttackPipeline] EnqueueAttack id={nextAttackId} toward=({towardx:F4},{towardy:F4}) clientFrame={predicted_frameID} pendingCount={pendingAttacks.Count}");
+            Logging.HYLDDebug.FrameTrace($"[AttackPipeline] EnqueueAttack id={nextAttackId} toward=({towardx:F4},{towardy:F4}) clientFrame={attackFrameId} predicted={predicted_frameID} pendingCount={pendingAttacks.Count}");
             return attack;
         }
 
@@ -107,8 +107,8 @@ namespace Manger
         public void FlushPendingAttacksToOperation()
         {
             // 超时清理：移除帧龄超过阈值的攻击（服务端也会 REJECT，这里减少无效重发带宽）
-            // 阈值与服务端 MaxAcceptableAttackDelay=10 对齐
-            const int MaxClientAttackAge = 10;
+            // 阈值与服务端 MaxAcceptableAttackDelay=8 对齐
+            const int MaxClientAttackAge = 8;
             int removedCount = pendingAttacks.RemoveAll(a =>
                 a.ClientFrameId > 0 && (predicted_frameID - a.ClientFrameId) > MaxClientAttackAge);
             if (removedCount > 0)

@@ -11,6 +11,8 @@ namespace Manger
 {
     public partial class BattleData
     {
+        private const int MaxOldImportantMovesPerPacket = 4;
+
         /****************************************************
     BattleData.Prediction.cs  --  partial class: 预测历史 / 权威确认 / 输入重放
     
@@ -79,7 +81,7 @@ namespace Manger
 
         public List<ClientMove> BuildClientMovesForSend(int newMoveFrame, bool flushPendingMove)
         {
-            List<ClientMove> moves = new List<ClientMove>(3);
+            List<ClientMove> moves = new List<ClientMove>(MaxOldImportantMovesPerPacket + 2);
             SavedMove newMove = null;
             if (predictionHistoryIndex.TryGetValue(newMoveFrame, out LinkedListNode<SavedMove> newNode))
             {
@@ -87,16 +89,16 @@ namespace Manger
             }
 
             int pendingFrame = pendingMove != null ? pendingMove.FrameId : -1;
-            SavedMove oldMove = FindOldImportantMove(newMoveFrame, pendingFrame);
-            if (oldMove != null)
+            List<SavedMove> oldMoves = CollectOldImportantMoves(newMoveFrame, pendingFrame);
+            for (int i = 0; i < oldMoves.Count; i++)
             {
-                moves.Add(CreateClientMove(oldMove, MoveType.OldMove));
+                moves.Add(CreateClientMove(oldMoves[i], MoveType.OldMove));
             }
 
             string mode = "none";
             if (newMove == null)
             {
-                Logging.HYLDDebug.FrameTrace($"[ClientMove][Build] new={newMoveFrame} missingSavedMove old={(oldMove != null ? oldMove.FrameId : -1)} count={moves.Count} saved={predictionHistory.Count} pending={pendingFrame} lastAck={(lastAckedMove != null ? lastAckedMove.FrameId : 0)}");
+                Logging.HYLDDebug.FrameTrace($"[ClientMove][Build] new={newMoveFrame} missingSavedMove old=[{FormatOldMoveFrames(oldMoves)}] count={moves.Count} saved={predictionHistory.Count} pending={pendingFrame} lastAck={(lastAckedMove != null ? lastAckedMove.FrameId : 0)}");
                 return moves;
             }
 
@@ -140,7 +142,7 @@ namespace Manger
                 pendingMove = null;
             }
 
-            Logging.HYLDDebug.FrameTrace($"[ClientMove][Build] new={newMoveFrame} old={(oldMove != null ? oldMove.FrameId : -1)} count={moves.Count} saved={predictionHistory.Count} pendingBefore={pendingFrame} pendingAfter={(pendingMove != null ? pendingMove.FrameId : -1)} mode={mode} flush={flushPendingMove} lastAck={(lastAckedMove != null ? lastAckedMove.FrameId : 0)}");
+            Logging.HYLDDebug.FrameTrace($"[ClientMove][Build] new={newMoveFrame} old=[{FormatOldMoveFrames(oldMoves)}] count={moves.Count} saved={predictionHistory.Count} pendingBefore={pendingFrame} pendingAfter={(pendingMove != null ? pendingMove.FrameId : -1)} mode={mode} flush={flushPendingMove} lastAck={(lastAckedMove != null ? lastAckedMove.FrameId : 0)}");
             return moves;
         }
 
@@ -150,28 +152,44 @@ namespace Manger
             move.SentAsNewMove = true;
         }
 
-        private SavedMove FindOldImportantMove(int newMoveFrame, int pendingFrame)
+        private List<SavedMove> CollectOldImportantMoves(int newMoveFrame, int pendingFrame)
         {
+            List<SavedMove> oldMoves = new List<SavedMove>(MaxOldImportantMovesPerPacket);
             if (predictionHistory.Count <= 1)
             {
-                return null;
+                return oldMoves;
             }
 
             LinkedListNode<SavedMove> node = predictionHistory.First;
             SavedMove previous = lastAckedMove;
-            while (node != null && node.Next != null)
+            while (node != null && node.Next != null && oldMoves.Count < MaxOldImportantMovesPerPacket)
             {
                 SavedMove entry = node.Value;
                 if (entry.FrameId != newMoveFrame
                     && entry.FrameId != pendingFrame
                     && IsImportantMove(entry, previous))
                 {
-                    return entry;
+                    oldMoves.Add(entry);
                 }
                 previous = entry;
                 node = node.Next;
             }
-            return null;
+            return oldMoves;
+        }
+
+        private string FormatOldMoveFrames(List<SavedMove> oldMoves)
+        {
+            if (oldMoves == null || oldMoves.Count == 0)
+            {
+                return "";
+            }
+
+            string result = oldMoves[0].FrameId.ToString();
+            for (int i = 1; i < oldMoves.Count; i++)
+            {
+                result += "," + oldMoves[i].FrameId;
+            }
+            return result;
         }
 
         private bool IsImportantMove(SavedMove current, SavedMove previous)
@@ -465,6 +483,10 @@ namespace Manger
                 node = node.Next;
             }
 
+            Vector3 beforeReplayWrite = HYLDStaticValue.Players[selfPlayerIndex].playerPositon;
+            float replayStartToEndDelta = Vector3.Distance(lastAuthorityPosition, pos);
+            float replayWriteDelta = Vector3.Distance(beforeReplayWrite, pos);
+
             // 将重放后的位置与最后一次重放输入对应的朝向状态一起写回，避免位置已追回到“现在”但朝向仍停留在旧权威帧。
             HYLDStaticValue.Players[selfPlayerIndex].playerPositon = pos;
             if (replayedCount > 0)
@@ -476,7 +498,11 @@ namespace Manger
             bool replayContainsZeroAfterNonZero = lastZeroFrame > 0 && lastNonZeroFrame > 0 && lastZeroFrame > lastNonZeroFrame;
             if (replayedZeroCount > 0 || replayContainsZeroAfterNonZero || authorityFrameId % 60 == 0)
             {
-                Logging.HYLDDebug.FrameTrace($"[Replay] authorityFrame={authorityFrameId} predicted={predicted_frameID} replayedCount={replayedCount} zeroCount={replayedZeroCount} nonZeroCount={replayedNonZeroCount} lastZeroFrame={lastZeroFrame} lastNonZeroFrame={lastNonZeroFrame} zeroAfterNonZero={replayContainsZeroAfterNonZero} startPos=({lastAuthorityPosition.x:F2},{lastAuthorityPosition.y:F2},{lastAuthorityPosition.z:F2}) endPos=({pos.x:F2},{pos.y:F2},{pos.z:F2})");
+                Logging.HYLDDebug.FrameTrace($"[Replay] authorityFrame={authorityFrameId} predicted={predicted_frameID} replayedCount={replayedCount} zeroCount={replayedZeroCount} nonZeroCount={replayedNonZeroCount} lastZeroFrame={lastZeroFrame} lastNonZeroFrame={lastNonZeroFrame} zeroAfterNonZero={replayContainsZeroAfterNonZero} startToEndDelta={replayStartToEndDelta:F3} writeDelta={replayWriteDelta:F3} startPos=({lastAuthorityPosition.x:F2},{lastAuthorityPosition.y:F2},{lastAuthorityPosition.z:F2}) beforeWrite=({beforeReplayWrite.x:F2},{beforeReplayWrite.y:F2},{beforeReplayWrite.z:F2}) endPos=({pos.x:F2},{pos.y:F2},{pos.z:F2})");
+            }
+            if (replayWriteDelta >= LocalPositionJumpTraceThreshold)
+            {
+                Logging.HYLDDebug.FrameTrace($"[LocalPosJump][Replay] playerIndex={selfPlayerIndex} authorityFrame={authorityFrameId} predicted={predicted_frameID} replayedCount={replayedCount} startToEndDelta={replayStartToEndDelta:F3} writeDelta={replayWriteDelta:F3} beforeWrite=({beforeReplayWrite.x:F2},{beforeReplayWrite.y:F2},{beforeReplayWrite.z:F2}) endPos=({pos.x:F2},{pos.y:F2},{pos.z:F2})");
             }
         }
     }

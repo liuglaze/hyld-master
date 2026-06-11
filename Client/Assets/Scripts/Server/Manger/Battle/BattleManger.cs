@@ -34,8 +34,8 @@ namespace Manger
         private int _lastComputedTargetFrame;
         private bool _lastBattleTickMoveWasZero = true;
         private const int CriticalInputBurstSendCount = 3;
-        // 客户端允许相对 targetFrame 的最大超前量；超过后不再继续生成新的 predicted tick。
-        private const int MaxPredictedLeadBeyondTarget = 6;
+        // 客户端允许相对 targetFrame 的最大超前量；达到后不再继续生成新的 predicted tick。
+        private const int MaxPredictedLeadBeyondTarget = 1;
         public Toolbox toolbox;
         public bool EnableDebugGameOverHotkey = true;
         public KeyCode DebugGameOverHotkey = KeyCode.F10;
@@ -123,20 +123,7 @@ namespace Manger
             }
 
             // ── 管线步骤 4: 累加器循环 ──
-            //如果已经超过预留的目标帧号上限，说明客户端已经超前太多了
-            //但如果累加器里已经积攒了足够的时间可以推进一帧了，就先推进一帧，避免完全停掉。
-            if (hasDynamicTarget)
-            {
-                int predictedLeadBeyondTarget = Manger.BattleData.Instance.predicted_frameID - targetFrame;
-                if (predictedLeadBeyondTarget > MaxPredictedLeadBeyondTarget)
-                {
-                    if (_tickAccumulator > currentTickInterval)
-                    {
-                        _tickAccumulator = currentTickInterval;
-                    }
-                    Logging.HYLDDebug.FrameTrace($"[TickAdj] SOFT_CAP predicted={Manger.BattleData.Instance.predicted_frameID} target={targetFrame} sync={Manger.BattleData.Instance.sync_frameID} lead={predictedLeadBeyondTarget} cap={MaxPredictedLeadBeyondTarget}");
-                }
-            }
+            // predicted_frameID 已达到 targetFrame + 1 时，本帧不再生成新的预测 tick。
 
             _tickAccumulator += Time.deltaTime;
 
@@ -149,6 +136,14 @@ namespace Manger
 
             while (_tickAccumulator >= currentTickInterval)
             {
+                if (hasDynamicTarget
+                    && Manger.BattleData.Instance.predicted_frameID >= targetFrame + MaxPredictedLeadBeyondTarget)
+                {
+                    _tickAccumulator = Mathf.Min(_tickAccumulator, currentTickInterval);
+                    Logging.HYLDDebug.FrameTrace($"[TickAdj] HARD_CAP predicted={Manger.BattleData.Instance.predicted_frameID} target={targetFrame} sync={Manger.BattleData.Instance.sync_frameID} cap={MaxPredictedLeadBeyondTarget}");
+                    break;
+                }
+
                 BattleTick();
                 _tickAccumulator -= currentTickInterval;
             }
@@ -207,9 +202,8 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
         /// <summary>
         /// 6.2: 计算客户端应达到的目标帧号。
-        /// 公式: targetFrame = estimatedServerFrame + ceil(halfRTTFrames) + jitterBufferFrames + safetyFrames
+        /// 公式: targetFrame = estimatedServerFrameNow
         /// RTT 和权威帧未初始化前不计算目标帧；BattleStart 后仍按固定 tick 发送 ClientMove。
-        /// 在高抖动/高丢包下，为 RTT 方差增加一个有限的抖动缓冲，避免 target 偏低导致频繁“超前暂停”。
         /// </summary>
         private bool TryCalcTargetFrame(out int targetFrame)
         {
@@ -221,20 +215,9 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                 return false;
             }
 
-            int estimatedServerFrame = Manger.BattleData.Instance.EstimateServerFrameNow();
-            int safetyFrames = Server.NetConfigValue.targetFrameSafetyFrames;
+            targetFrame = Manger.BattleData.Instance.EstimateServerFrameNow();
 
-            float rttMs = Manger.BattleData.Instance.smoothedRTT;
-            float varianceMs = Manger.BattleData.Instance.rttVariance;
-            float frameTimeMs = Server.NetConfigValue.frameTime * 1000f; // 16ms
-            int uploadLeadFrames = Mathf.CeilToInt((rttMs * 0.5f) / frameTimeMs);
-            int jitterBufferFrames = Mathf.Clamp(
-                Mathf.CeilToInt((varianceMs / frameTimeMs) * Server.NetConfigValue.jitterBufferRatio),
-                0,
-                Server.NetConfigValue.maxJitterBufferFrames);
-            targetFrame = estimatedServerFrame + uploadLeadFrames + jitterBufferFrames + safetyFrames;
-
-            Logging.HYLDDebug.FrameTrace($"[TargetFrame] CALC estimatedServer={estimatedServerFrame} target={targetFrame} uploadLead={uploadLeadFrames} jitter={jitterBufferFrames} safety={safetyFrames} rttMs={rttMs:F1} varianceMs={varianceMs:F1}");
+            Logging.HYLDDebug.FrameTrace($"[TargetFrame] CALC serverNow={targetFrame} sync={Manger.BattleData.Instance.sync_frameID} rttMs={Manger.BattleData.Instance.smoothedRTT:F1} varianceMs={Manger.BattleData.Instance.rttVariance:F1}");
             return true;
         }
 
@@ -311,7 +294,7 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             // 注意：selfOperation 是客户端本地即将上报给服务端的 PlayerOperation，不是服务端回填对象。
             // 其中移动量直接写入 selfOperation；攻击则先进入 pendingAttacks，
             // 再由 FlushPendingAttacksToOperation 刷进 selfOperation.AttackOperations。
-            CommandManger.Instance.Execute();
+            CommandManger.Instance.Execute(nextFrame);
 
             // ★ 本地预测子弹：只要本帧 selfOperation 里有攻击，就立刻先出表现，不等待服务端回包。
             // 注意：这里的 selfOperation.AttackOperations 并不等于“仅本帧新攻击”，

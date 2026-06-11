@@ -101,7 +101,7 @@ Program.cs -> Server/Server.cs -> Server/Client.cs -> Controller/ControllerMange
 7. 战斗已开始后若某客户端继续重发 `BattleReady`，服务端会视为其可能漏收首个 `BattleStart`，并对该 endpoint **单播补发** `BattleStart`（不重复 `BeginBattle`）：`Server/Battle.cs:196`
 8. 帧下发与补帧：`Server/BattleController.Network.cs:50`（`SendUnsyncedFrames`）
 9. **Pong 路由**：`Server/ClientUdp.cs:250`（Ping 识别 → Pong 构造）。Pong 发送**经过 NetSim**（`LZJUDP.SimDropRate/SimDelayMinMs/SimDelayMaxMs`），确保客户端 RTT 测量反映真实模拟延迟。NetSim 参数由 `BattleController.BeginBattle`（Battle.cs:224）写入、`HandleBattleEnd`（BattleController.Network.cs:183）清零
-10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_input.moves` 上报 `OldMove + NewMove`，攻击通过 `BattleInfo.client_input.attacks` 独立上报。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastProcessedMoveFrame` 的旧包丢弃，合法 move 会按帧差在接收阶段做服务端权威重模拟并推进 `playerPositions`。`OldMove` 只重模拟，不产生最终确认；`NewMove` 生成下行 `BattleInfo.server_update.move_ack`，用于客户端裁剪 SavedMove；`ack_good_move=false` 时客户端使用 `correct_pos_x/y/z` 拉回并重放未确认 SavedMove。
+10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_input.moves` 上报 `OldMove + NewMove`，攻击通过 `BattleInfo.client_input.attacks` 独立上报。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；每包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序排列。服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastAcceptedMoveFrame` 的旧包丢弃，`moveFrame > serverFrame + 2` 直接拒绝；合法 move 只入队为 pending segment。BattleLoop 每个 ServerFrame 对每个玩家最多消化 3 帧 pending move 并推进 `playerPositions`。下行 `BattleInfo.server_update.move_ack.acked_move_frame` 等于 `lastSimulatedMoveFrame`，客户端只裁剪已经被服务端权威位置实际模拟过的 SavedMove；`ack_good_move=false` 时客户端使用 `correct_pos_x/y/z` 拉回并重放未确认 SavedMove。
 
 > 关键前提：客户端必须先成功发 `BattleReady`，否则后续 UDP 包无法命中 battle 路由。
 >
@@ -259,7 +259,7 @@ dir.z *= sign
 - **服务端写入**：`PackPlayerStates`（BattleController.Network.cs:18）将 `playerHp[battleId]` 和 `playerIsDead[battleId]` 写入帧数据
 - **客户端消费**：`ApplyAuthoritativeHpAndDeath` 取批次最后一帧的 `PlayerStates` 覆写 `playerBloodValue`
 - **帧序保护**：`_lastAuthHpFrameId` 跳过乱序到达的旧批次（UDP 包乱序时防止 HP 回弹）
-- **攻击超时**：服务端 `MaxAcceptableAttackDelay=6`，超过此帧数的延迟攻击被 REJECT
+- **攻击超时**：服务端 `MaxAcceptableAttackDelay=8`，超过此帧数的延迟攻击被 REJECT
 
 ---
 

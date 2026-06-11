@@ -13,7 +13,7 @@ using System.Linq;
 
 interface Commad
 {
-    void Execute();
+    void Execute(int commandFrameId);
 }
 
 /// <summary>
@@ -69,10 +69,10 @@ public class CommandManger
             dy = y;
         }
 
-        public void Execute()
+        public void Execute(int commandFrameId)
         {
             // 入队待确认攻击队列，分配唯一 AttackId
-            Manger.BattleData.Instance.EnqueueAttack(dx, dy);
+            Manger.BattleData.Instance.EnqueueAttack(dx, dy, commandFrameId);
         }
     }
 
@@ -104,7 +104,7 @@ public class CommandManger
         latestMoveY = dy.ToFloat();
     }
 
-    public void Execute()
+    public void Execute(int commandFrameId)
     {
         // 每个发送帧都先应用最新移动输入（避免摇杆事件频率影响）
         Manger.BattleData.Instance.selfOperation.MoveX = latestMoveX;
@@ -113,7 +113,7 @@ public class CommandManger
         // 再消费这一帧的离散指令（如攻击 → 入队 pendingAttacks）
         for (int i = 0; i < allCommad.Count; i++)
         {
-            allCommad[i].Execute();
+            allCommad[i].Execute(commandFrameId);
         }
 
         // 离散指令只生效一帧

@@ -12,6 +12,8 @@ namespace Manger
 {
     public partial class BattleData
     {
+        public const float LocalPositionJumpTraceThreshold = 0.8f;
+
         private static BattleData instance;
 
         // ═══════ 内部数据类型 ═══════
@@ -56,6 +58,9 @@ namespace Manger
 
         // ═══════ 权威位置校正（CSP 模式） ═══════
         private Vector3 lastAuthorityPosition;
+        private bool hasAppliedMoveCorrection;
+        private int lastAppliedCorrectionMoveFrame;
+        private Vector3 lastAppliedCorrectionPosition;
 
         /// <summary>
         /// [AHS-4] 每个玩家的 HP 上限（首次从服务端 PlayerStates.Hp 初始化）。
@@ -187,6 +192,9 @@ namespace Manger
             pendingMove = null;
             playerIndexBattleIds.Clear();
             lastAuthorityPosition = Vector3.zero;
+            hasAppliedMoveCorrection = false;
+            lastAppliedCorrectionMoveFrame = 0;
+            lastAppliedCorrectionPosition = Vector3.zero;
             authoritySnapshotHistory.Clear();
             ClearPendingAttacks();
             ClearHitEventState();

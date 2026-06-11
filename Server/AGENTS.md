@@ -30,7 +30,7 @@
 - `BeginBattle`:224 — 初始化所有战斗状态、HP、出生位置、ClientMove 时间轴、启动 BattleLoop 线程
 - `BattleLoop`:320 — 帧循环：累加器驱动 + 每帧 CollectAndBroadcastCurrentFrame + GameOver 检测
 - `CollectAndBroadcastCurrentFrame`:393 — 读取最新合法 ClientMove 移动意图/攻击 → 记录位置快照 → 打包权威状态 → 生成子弹 → 碰撞检测 → 广播
-- `UpdatePlayerPositions`:497 — 历史保留函数；当前 CMC-style 移动位置推进发生在 `ProcessClientMove`
+- `UpdatePlayerPositions`:497 — 历史保留函数；当前 CMC-style 移动位置推进发生在 `ApplyPendingMoveSegments`
 - `RecordPositionSnapshot`:526 — 记录位置到环形历史缓冲区（V2 延迟补偿）
 - `TryGetPositionSnapshot`:543 — 按帧号查询历史位置快照
 - `HandlePlayerDisconnect`:135 — 玩家断线：标记断线、触发 GameOver
@@ -178,11 +178,12 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
         CollectAndBroadcastCurrentFrame (Battle.cs:393):
           1. 读取每个玩家最新合法 ClientMove 移动意图
           2. 合并攻击操作（从 dic_currentFrameOperationBuffer）
-          3. RecordPositionSnapshot (Battle.cs:526) — 环形缓冲区
-          4. SpawnBulletsFromOperations (Bullets.cs:12) — 生成子弹 + V2 追帧
-          5. TickServerBullets (Bullets.cs:265) — 推进 + 碰撞 + HitEvent
-          6. PackPlayerStates (Network.cs:18) — HP/IsDead/位置 打包
-          7. SendUnsyncedFrames (Network.cs:50) — 只组织当前权威帧，并按 `CurrentFrameRepeatSendCount` 重复下发
+          3. 初始化本帧 HitEvent 列表
+          4. RecordPositionSnapshot (Battle.cs:526) — 环形缓冲区
+          5. SpawnBulletsFromOperations (Bullets.cs:12) — 生成子弹 + V2 追帧，追帧命中写入同一 HitEvent 列表
+          6. TickServerBullets (Bullets.cs:265) — 推进 + 碰撞 + HitEvent
+          7. PackPlayerStates (Network.cs:18) — HP/IsDead/位置 打包
+          8. SendUnsyncedFrames (Network.cs:50) — 只组织当前权威帧，并按 `CurrentFrameRepeatSendCount` 重复下发
         frameid++
 ```
 
@@ -194,7 +195,7 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
     → UpdatePlayerOperation (Network.cs:103):
       1. ClientAckedFrame 单调更新（客户端已应用的最新 ServerFrame）
       2. ClientMove 按 moveFrame 单调处理：先处理 OldMove，再按包内顺序处理所有非 OldMove；旧帧丢弃，超前过多拒绝
-      3. 合法 ClientMove 按帧差重模拟并直接推进 playerPositions，同时保存当前移动意图供权威帧广播
+      3. 合法 ClientMove 按帧差入队为 pending move segment，同时保存当前移动意图供权威帧广播
       4. 攻击去重（dic_lastProcessedAttackId）
       5. 攻击超时（frameDelay > MaxAcceptableAttackDelay=8 → REJECT）
 ```
@@ -246,22 +247,22 @@ oneGameOver = true（来源：击杀 / 断线）
   - `ServerFrame`：服务端 `frameid`，只由 BattleLoop 每 16ms 推进；下行 `BattleInfo.server_frame` 与 `BattleFrame.server_frame` 都是 ServerFrame。
   - `ClientMoveFrame`：客户端本地预测 tick，写在 `ClientMove.move_frame`；只用于移动上行排序、OldMove 去重、SavedMove 确认。
   - `AckedServerFrame`：客户端上行 `BattleInfo.client_input.acked_server_frame`，表示客户端已应用到的最新 ServerFrame。
-  - `AckedMoveFrame`：服务端下行 `BattleInfo.server_update.move_ack.acked_move_frame`。
+  - `AckedMoveFrame`：服务端下行 `BattleInfo.server_update.move_ack.acked_move_frame`，表示权威位置已实际模拟到的 ClientMoveFrame。
 - 协议字段：`BattleInfo.client_input.moves` 携带 `ClientMove`；`BattleInfo.client_input.attacks` 携带 `ClientAttack`；`BattleInfo.server_update.move_ack` 携带服务端对本地玩家 Move 的确认/修正结果。
-- 客户端每个预测 tick 生成 SavedMove；普通帧可先挂起为 `pendingMove`，下一帧若可合并则只发 current `NewMove`，不可合并则同包按顺序发送 pending + current 两个 `NewMove`（DualMove）。上行包可附带一个最旧的重要 `OldMove`。
-- 服务端状态（Battle.cs）：`dic_lastProcessedMoveFrame`、`dic_lastProcessedMoveServerFrame`、`dic_lastProcessedMoveInput`、`dic_accumulatedFrameDiscrepancy`、`dic_resolvingFrameDiscrepancy`、`dic_lastMoveAck`。
+- 客户端每个预测 tick 生成 SavedMove；普通帧可先挂起为 `pendingMove`，下一帧若可合并则只发 current `NewMove`，不可合并则同包按顺序发送 pending + current 两个 `NewMove`（DualMove）。每个上行包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序发送。
+- 服务端状态（Battle.cs）：`dic_lastAcceptedMoveFrame`、`dic_lastSimulatedMoveFrame`、`dic_pendingMoveSegments`、`dic_lastProcessedMoveInput`、`dic_lastMoveAck`。
 - 接收（BattleController.Network.cs `UpdatePlayerOperation` / `ProcessClientMove`）：
   - 先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`；客户端 DualMove 用两个顺序 `NewMove` 表达。
-  - `moveFrame <= lastProcessedMoveFrame` 直接丢弃并打印 `[ClientMove][STALE]`。
-  - `moveFrame > frameid + MaxClientMoveFrameLead` 直接拒绝并打印 `[ClientMove][REJECT_FUTURE]`。
-  - 合法 move 按 `moveFrame - lastProcessedMoveFrame` 做服务端权威重模拟，直接推进 `playerPositions`。
-  - `OldMove` 只重模拟并推进服务端权威状态；`NewMove` 比较重模拟位置与 `ClientMove.predicted_pos_x/y/z`，误差小于阈值下发 `ack_good_move=true`，否则下发 `ack_good_move=false + correct_pos_x/y/z`。
-  - 服务端用 `ClientMoveFrame` 增量与 `ServerFrame` 增量累计 `frame_discrepancy`，超过阈值后进入按帧偿还模式，限制本次可模拟帧数。
+  - `moveFrame <= lastAcceptedMoveFrame` 直接丢弃并打印 `[ClientMove][STALE]`。
+  - `moveFrame > frameid + 2` 直接拒绝并打印 `[ClientMove][REJECT_FUTURE]`。
+  - 合法 move 按 `moveFrame - lastAcceptedMoveFrame` 入队为 pending segment，并更新 `lastAcceptedMoveFrame`。
+  - BattleLoop 每个 ServerFrame 对每个玩家最多消化 3 帧 pending move，推进 `playerPositions` 与 `lastSimulatedMoveFrame`。
+  - `NewMove` 对应 segment 完整消化后，比较权威位置与 `ClientMove.predicted_pos_x/y/z`，误差小于阈值下发 `ack_good_move=true`，否则下发 `ack_good_move=false + correct_pos_x/y/z`。
 - 消费（Battle.cs `CollectAndBroadcastCurrentFrame`）：
   - 每个 ServerFrame 读取当前移动意图用于权威帧广播和动画参数。
-  - 不再在 BattleLoop 中按最新移动意图额外推进位置。
+  - 每帧慢消化 pending move 后记录当前权威位置。
   - `RecordPositionSnapshot(frameid)` 记录当前服务端权威位置历史。
-- Ack：`ClientAckedFrame` 表示客户端已消费到的服务端权威帧；移动确认/修正单独使用 `MoveAckResult`，`AckedMoveFrame` 只保持兼容同步。
+- Ack：`ClientAckedFrame` 表示客户端已消费到的服务端权威帧；移动确认/修正单独使用 `MoveAckResult`，`AckedMoveFrame = lastSimulatedMoveFrame`，只确认已模拟的 SavedMove。
 
 ### 5.2 Ping/Pong
 

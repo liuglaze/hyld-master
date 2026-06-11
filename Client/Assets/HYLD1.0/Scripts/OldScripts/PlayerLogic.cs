@@ -230,6 +230,7 @@ public class PlayerLogic : MonoBehaviour
 	{
 		Vector3 RevivePositon=new Vector3(-999,0,-999);;
 		HYLDStaticValue.Players[playerID].isNotDie = true;
+		Vector3 beforeRevive = HYLDStaticValue.Players[playerID].playerPositon;
 		HYLDStaticValue.Players[playerID].playerPositon = RevivePositon;
 		selfBodyTransform.position = RevivePositon;
 		if (HYLDStaticValue.ModenName == "HYLDTryGame")
@@ -254,6 +255,11 @@ public class PlayerLogic : MonoBehaviour
 		
 		HYLDStaticValue.Players[playerID].playerPositon=RevivePositon;
 		selfBodyTransform.position=RevivePositon;
+		float reviveDelta = Vector3.Distance(beforeRevive, RevivePositon);
+		if (playerID == HYLDStaticValue.playerSelfIDInServer && reviveDelta >= Manger.BattleData.LocalPositionJumpTraceThreshold)
+		{
+			Logging.HYLDDebug.FrameTrace($"[LocalPosJump][Revive] playerID={playerID} delta={reviveDelta:F3} before=({beforeRevive.x:F2},{beforeRevive.y:F2},{beforeRevive.z:F2}) revive=({RevivePositon.x:F2},{RevivePositon.y:F2},{RevivePositon.z:F2})");
+		}
 		selfBodyTransform.GetComponent<BoxCollider>().enabled = true;
 		selfUITransform.gameObject.SetActive(true);
 		bodyAnimator.SetBool("Die", false);

@@ -186,8 +186,18 @@ namespace Manger
         private void AdvancePlayerPosition(PlayerInformation player, LZJ.Fixed3 movementDir)
         {
             // 移动公式：dir * 移动速度(units/sec) * frameTime(sec)
+            Vector3 before = player.playerPositon;
             LZJ.Fixed3 move = movementDir * player.移动速度 * Server.NetConfigValue.frameTime;
             player.playerPositon = (new LZJ.Fixed3(player.playerPositon) + move).ToVector3();
+            float delta = Vector3.Distance(before, player.playerPositon);
+            int selfIndex = HYLDStaticValue.playerSelfIDInServer;
+            bool isSelf = selfIndex >= 0
+                && selfIndex < HYLDStaticValue.Players.Count
+                && ReferenceEquals(player, HYLDStaticValue.Players[selfIndex]);
+            if (isSelf && delta >= BattleData.LocalPositionJumpTraceThreshold)
+            {
+                Logging.HYLDDebug.FrameTrace($"[LocalPosJump][PredictAdvance] isSelf={isSelf} selfIndex={selfIndex} delta={delta:F3} move=({move.x.ToFloat():F3},{move.y.ToFloat():F3},{move.z.ToFloat():F3}) before=({before.x:F2},{before.y:F2},{before.z:F2}) after=({player.playerPositon.x:F2},{player.playerPositon.y:F2},{player.playerPositon.z:F2})");
+            }
         }
 
         private void ApplyAttackFacing(PlayerInformation player, BattleData.LocalPlayerInput opt, int sign)

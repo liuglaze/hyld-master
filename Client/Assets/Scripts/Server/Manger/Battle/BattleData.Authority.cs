@@ -164,11 +164,35 @@ namespace Manger
                 moveAck.CorrectPosY,
                 moveAck.CorrectPosZ * sign);
 
+            if (IsDuplicateMoveCorrection(moveAck.AckedMoveFrame, correctedPosition))
+            {
+                Logging.HYLDDebug.FrameTrace($"[MoveAck][CorrectionDuplicateSkip] ackedMove={moveAck.AckedMoveFrame} corrected=({correctedPosition.x:F2},{correctedPosition.y:F2},{correctedPosition.z:F2}) remaining={PredictionHistoryCount}");
+                return;
+            }
+
             Vector3 before = HYLDStaticValue.Players[selfPlayerIndex].playerPositon;
             HYLDStaticValue.Players[selfPlayerIndex].playerPositon = correctedPosition;
             lastAuthorityPosition = correctedPosition;
-            Logging.HYLDDebug.FrameTrace($"[MoveAck][Correction] ackedMove={moveAck.AckedMoveFrame} discrepancy={moveAck.FrameDiscrepancy} resolving={moveAck.ResolvingFrameDiscrepancy} before=({before.x:F2},{before.z:F2}) corrected=({correctedPosition.x:F2},{correctedPosition.z:F2}) remaining={PredictionHistoryCount}");
+            hasAppliedMoveCorrection = true;
+            lastAppliedCorrectionMoveFrame = moveAck.AckedMoveFrame;
+            lastAppliedCorrectionPosition = correctedPosition;
+            float correctionDelta = Vector3.Distance(before, correctedPosition);
+            Logging.HYLDDebug.FrameTrace($"[MoveAck][Correction] ackedMove={moveAck.AckedMoveFrame} discrepancy={moveAck.FrameDiscrepancy} resolving={moveAck.ResolvingFrameDiscrepancy} delta={correctionDelta:F3} before=({before.x:F2},{before.z:F2}) corrected=({correctedPosition.x:F2},{correctedPosition.z:F2}) remaining={PredictionHistoryCount}");
+            if (correctionDelta >= LocalPositionJumpTraceThreshold)
+            {
+                Logging.HYLDDebug.FrameTrace($"[LocalPosJump][MoveAckCorrection] playerIndex={selfPlayerIndex} ackedMove={moveAck.AckedMoveFrame} delta={correctionDelta:F3} before=({before.x:F2},{before.y:F2},{before.z:F2}) corrected=({correctedPosition.x:F2},{correctedPosition.y:F2},{correctedPosition.z:F2}) remaining={PredictionHistoryCount}");
+            }
             ReplayUnconfirmedInputs(moveAck.AckedMoveFrame);
+        }
+
+        private bool IsDuplicateMoveCorrection(int ackedMoveFrame, Vector3 correctedPosition)
+        {
+            if (!hasAppliedMoveCorrection || ackedMoveFrame != lastAppliedCorrectionMoveFrame)
+            {
+                return false;
+            }
+
+            return Vector3.SqrMagnitude(correctedPosition - lastAppliedCorrectionPosition) <= 0.000001f;
         }
 
         private int FindSelfPlayerIndex()
@@ -253,8 +277,9 @@ namespace Manger
 
         /// <summary>
         /// 1.5: 从权威帧批次最后一帧的操作中，更新所有玩家的动画驱动参数。
-        /// 仅写 playerMoveMagnitude / playerMoveDir，不修改位置（位置由 ApplyAuthoritativePositions 处理）。
-        /// 不在操作列表中的玩家清零动画参数（表示该帧没有移动输入）。
+        /// 仅写远端玩家的 playerMoveMagnitude / playerMoveDir，不修改位置（位置由 ApplyAuthoritativePositions 处理）。
+        /// 本地玩家由本地预测与 MoveAck replay 驱动，避免延迟权威输入覆盖当前摇杆方向。
+        /// 不在操作列表中的远端玩家清零动画参数（表示该帧没有移动输入）。
         /// </summary>
         private void UpdateAnimationStateFromAuthority(Google.Protobuf.Collections.RepeatedField<BattleFrame> frames)
         {
@@ -264,9 +289,13 @@ namespace Manger
             BattleFrame lastFrame = frames[frames.Count - 1];
             if (lastFrame.PlayerInputs == null || lastFrame.PlayerInputs.Count == 0)
             {
-                // 没有操作 -> 所有玩家清零
+                // 没有操作 -> 远端玩家清零，本地玩家保持当前预测输入
                 for (int i = 0; i < playerIndexBattleIds.Count && i < HYLDStaticValue.Players.Count; i++)
                 {
+                    if (playerIndexBattleIds[i] == battleID)
+                    {
+                        continue;
+                    }
                     HYLDStaticValue.Players[i].playerMoveDir = Vector3.zero;
                     HYLDStaticValue.Players[i].playerMoveMagnitude = 0f;
                 }
@@ -295,6 +324,10 @@ namespace Manger
                     }
                 }
                 if (playerIndex < 0 || playerIndex >= HYLDStaticValue.Players.Count) continue;
+                if (bpId == battleID)
+                {
+                    continue;
+                }
 
                 updatedIndices.Add(playerIndex);
 
@@ -327,6 +360,10 @@ namespace Manger
             // 不在操作列表中的玩家清零（该帧没有移动输入）
             for (int i = 0; i < playerIndexBattleIds.Count && i < HYLDStaticValue.Players.Count; i++)
             {
+                if (playerIndexBattleIds[i] == battleID)
+                {
+                    continue;
+                }
                 if (!updatedIndices.Contains(i))
                 {
                     HYLDStaticValue.Players[i].playerMoveDir = Vector3.zero;
@@ -395,7 +432,7 @@ namespace Manger
                         }
 
                         // 客户端半空推进（Lag Compensation Visual）：计算子弹应该飞了多远，并直接将其推移到那个位置
-                        int elapsedFrames = attack.SpawnServerFrame > 0 ? (frameId - attack.SpawnServerFrame) : 0;
+                        int elapsedFrames = attack.AttackMoveFrame > 0 ? (frameId - attack.AttackMoveFrame) : 0;
                         if (elapsedFrames > 0 && playerIndex >= 0 && playerIndex < HYLDStaticValue.Players.Count)
                         {
                             float bulletSpeed = HYLDStaticValue.Players[playerIndex].hero.speed;

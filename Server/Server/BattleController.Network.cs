@@ -92,7 +92,7 @@ namespace Server
 
 		/// <summary>
 		/// 接收客户端上行的单个玩家操作，并分别写入两条链路：
-		/// 1. 移动：按 ClientMove.MoveFrame 单调处理，接收阶段重模拟并推进服务端权威位置。
+		/// 1. 移动：按 ClientMove.MoveFrame 单调接受并入队，BattleLoop 按固定预算推进服务端权威位置。
 		/// 2. 攻击：进入 dic_pendingAttacks，等待 CollectAndBroadcastCurrentFrame 合并进当前权威帧。
 		///
 		/// 注意这里不会结算伤害；伤害仍发生在 BattleLoop -> CollectAndBroadcastCurrentFrame 中。
@@ -145,7 +145,7 @@ namespace Server
 				ProcessClientMoves(battlePlayerId, input);
 
 				// 攻击与移动解耦：
-				// - 移动使用 ClientMoveFrame 做上行排序，并在接收合法 move 时推进权威位置。
+				// - 移动使用 ClientMoveFrame 做上行排序，接收合法 move 后排队等待 BattleLoop 慢消化。
 				// - 攻击是离散事件，只要未过期且未重复，就先缓存进 pendingAttacks。
 				// 后续 CollectAndBroadcastCurrentFrame 会把这些待处理攻击并入当前权威帧。
 				if (input.Attacks != null && input.Attacks.Count > 0)
@@ -227,29 +227,40 @@ namespace Server
 				return;
 			}
 
-			int lastProcessedFrame = dic_lastProcessedMoveFrame.TryGetValue(battlePlayerId, out int storedFrame)
+			int lastAcceptedFrame = dic_lastAcceptedMoveFrame.TryGetValue(battlePlayerId, out int storedFrame)
 				? storedFrame
 				: 0;
-			if (move.MoveFrame <= lastProcessedFrame)
+			if (move.MoveFrame <= lastAcceptedFrame)
 			{
-				Logging.Debug.Log($"[ClientMove][STALE] bp={battlePlayerId} type={move.MoveType} moveFrame={move.MoveFrame} lastProcessed={lastProcessedFrame} serverFrame={frameid}");
+				Logging.Debug.Log($"[ClientMove][STALE] bp={battlePlayerId} type={move.MoveType} moveFrame={move.MoveFrame} lastAccepted={lastAcceptedFrame} serverFrame={frameid}");
 				return;
 			}
 
-			int deltaFrames = move.MoveFrame - lastProcessedFrame;
+			int segmentFrames = move.MoveFrame - lastAcceptedFrame;
 			int maxAcceptedMoveFrame = frameid + MaxClientMoveFrameLead;
 			if (move.MoveFrame > maxAcceptedMoveFrame)
 			{
-				Logging.Debug.Log($"[ClientMove][REJECT_FUTURE] bp={battlePlayerId} type={move.MoveType} moveFrame={move.MoveFrame} lastProcessed={lastProcessedFrame} delta={deltaFrames} serverFrame={frameid} maxAccepted={maxAcceptedMoveFrame} leadLimit={MaxClientMoveFrameLead}");
+				Logging.Debug.Log($"[ClientMove][REJECT_FUTURE] bp={battlePlayerId} type={move.MoveType} moveFrame={move.MoveFrame} lastAccepted={lastAcceptedFrame} delta={segmentFrames} serverFrame={frameid} maxAccepted={maxAcceptedMoveFrame} leadLimit={MaxClientMoveFrameLead}");
 				return;
 			}
 
-			int effectiveFrames = CalculateEffectiveSimulationFrames(battlePlayerId, deltaFrames);
-			ServerVector3 serverPosAfterMove = SimulateAuthoritativeMove(battlePlayerId, pos, move.MoveX, move.MoveY, effectiveFrames);
-			playerPositions[battlePlayerId] = serverPosAfterMove;
+			if (!dic_pendingMoveSegments.TryGetValue(battlePlayerId, out Queue<PendingMoveSegment> queue))
+			{
+				queue = new Queue<PendingMoveSegment>();
+				dic_pendingMoveSegments[battlePlayerId] = queue;
+			}
 
-			dic_lastProcessedMoveFrame[battlePlayerId] = move.MoveFrame;
-			dic_lastProcessedMoveServerFrame[battlePlayerId] = frameid;
+			queue.Enqueue(new PendingMoveSegment
+			{
+				MoveFrame = move.MoveFrame,
+				RemainingFrames = segmentFrames,
+				MoveX = move.MoveX,
+				MoveY = move.MoveY,
+				MoveType = move.MoveType,
+				PredictedPosition = new ServerVector3(move.PredictedPosX, move.PredictedPosY, move.PredictedPosZ),
+			});
+
+			dic_lastAcceptedMoveFrame[battlePlayerId] = move.MoveFrame;
 			dic_lastProcessedMoveInput[battlePlayerId] = new LastProcessedMoveInput
 			{
 				MoveFrame = move.MoveFrame,
@@ -259,76 +270,126 @@ namespace Server
 			};
 
 			bool zeroMove = Math.Abs(move.MoveX) <= 1e-6f && Math.Abs(move.MoveY) <= 1e-6f;
-			ServerVector3 predicted = new ServerVector3(move.PredictedPosX, move.PredictedPosY, move.PredictedPosZ);
-			float error = ServerVector3.Distance(serverPosAfterMove, predicted);
-			bool ackGoodMove = error <= MoveCorrectionThreshold;
-			int frameDiscrepancy = dic_accumulatedFrameDiscrepancy.TryGetValue(battlePlayerId, out int discrepancy) ? discrepancy : 0;
-			bool resolvingFrameDiscrepancy = dic_resolvingFrameDiscrepancy.TryGetValue(battlePlayerId, out bool resolving) && resolving;
-
-			if (move.MoveType != MoveType.OldMove)
+			int backlogFrames = GetPendingMoveBacklogFrames(battlePlayerId);
+			if (segmentFrames > MaxMoveApplyFramesPerServerFrame || backlogFrames > MaxMoveApplyFramesPerServerFrame || zeroMove)
 			{
-				MoveAckResult ack = new MoveAckResult
-				{
-					BattleId = battlePlayerId,
-					AckedMoveFrame = move.MoveFrame,
-					AckGoodMove = ackGoodMove,
-					CorrectPosX = serverPosAfterMove.X,
-					CorrectPosY = serverPosAfterMove.Y,
-					CorrectPosZ = serverPosAfterMove.Z,
-					FrameDiscrepancy = frameDiscrepancy,
-					ResolvingFrameDiscrepancy = resolvingFrameDiscrepancy,
-				};
-				dic_lastMoveAck[battlePlayerId] = ack;
-
-				if (!ackGoodMove || effectiveFrames != deltaFrames || move.MoveFrame % 60 == 0 || zeroMove)
-				{
-					Logging.Debug.Log($"[ClientMove][NEW] bp={battlePlayerId} moveFrame={move.MoveFrame} delta={deltaFrames} effective={effectiveFrames} move=({move.MoveX:F4},{move.MoveY:F4}) zero={zeroMove} serverFrame={frameid} pos=({serverPosAfterMove.X:F2},{serverPosAfterMove.Z:F2}) predicted=({predicted.X:F2},{predicted.Z:F2}) error={error:F3} ackGood={ackGoodMove} discrepancy={frameDiscrepancy} resolving={resolvingFrameDiscrepancy}");
-				}
-			}
-			else
-			{
-				Logging.Debug.Log($"[ClientMove][OLD] bp={battlePlayerId} moveFrame={move.MoveFrame} delta={deltaFrames} effective={effectiveFrames} move=({move.MoveX:F4},{move.MoveY:F4}) zero={zeroMove} serverFrame={frameid} pos=({serverPosAfterMove.X:F2},{serverPosAfterMove.Z:F2}) error={error:F3} ackGood={ackGoodMove} discrepancy={frameDiscrepancy} resolving={resolvingFrameDiscrepancy}");
+				Logging.Debug.Log($"[ClientMove][ACCEPT] bp={battlePlayerId} type={move.MoveType} moveFrame={move.MoveFrame} segment={segmentFrames} backlog={backlogFrames} move=({move.MoveX:F4},{move.MoveY:F4}) zero={zeroMove} serverFrame={frameid} pos=({pos.X:F2},{pos.Z:F2})");
 			}
 		}
 
-		private int CalculateEffectiveSimulationFrames(int battlePlayerId, int clientDeltaFrames)
+		private void ApplyPendingMoveSegments()
 		{
-			int lastServerFrame = dic_lastProcessedMoveServerFrame.TryGetValue(battlePlayerId, out int storedServerFrame)
-				? storedServerFrame
-				: 0;
-			int serverDeltaFrames = Math.Max(1, frameid - lastServerFrame);
-			int frameDiscrepancy = dic_accumulatedFrameDiscrepancy.TryGetValue(battlePlayerId, out int storedDiscrepancy)
-				? storedDiscrepancy
-				: 0;
-
-			frameDiscrepancy += clientDeltaFrames - serverDeltaFrames;
-			if (frameDiscrepancy < 0)
+			foreach (int battlePlayerId in uidToBattlePlayerId.Values)
 			{
-				frameDiscrepancy = 0;
-			}
-
-			bool resolving = dic_resolvingFrameDiscrepancy.TryGetValue(battlePlayerId, out bool storedResolving) && storedResolving;
-			if (frameDiscrepancy > FrameDiscrepancyMaxMargin)
-			{
-				resolving = true;
-			}
-
-			int effectiveFrames = clientDeltaFrames;
-			if (resolving && frameDiscrepancy > 0)
-			{
-				int paybackFrames = Math.Min(FrameDiscrepancyPaybackPerMove, Math.Min(frameDiscrepancy, effectiveFrames));
-				effectiveFrames -= paybackFrames;
-				frameDiscrepancy -= paybackFrames;
-				if (frameDiscrepancy <= 0)
+				if (!dic_pendingMoveSegments.TryGetValue(battlePlayerId, out Queue<PendingMoveSegment> queue)
+					|| queue.Count == 0
+					|| !playerPositions.TryGetValue(battlePlayerId, out ServerVector3 pos))
 				{
-					frameDiscrepancy = 0;
-					resolving = false;
+					continue;
+				}
+
+				int frameBudget = MaxMoveApplyFramesPerServerFrame;
+				int appliedThisServerFrame = 0;
+
+				while (frameBudget > 0 && queue.Count > 0)
+				{
+					PendingMoveSegment segment = queue.Peek();
+					int framesToApply = Math.Min(frameBudget, segment.RemainingFrames);
+					pos = SimulateAuthoritativeMove(battlePlayerId, pos, segment.MoveX, segment.MoveY, framesToApply);
+					playerPositions[battlePlayerId] = pos;
+
+					segment.RemainingFrames -= framesToApply;
+					frameBudget -= framesToApply;
+					appliedThisServerFrame += framesToApply;
+
+					int simulatedFrame = dic_lastSimulatedMoveFrame.TryGetValue(battlePlayerId, out int storedSimulated)
+						? storedSimulated
+						: 0;
+					simulatedFrame += framesToApply;
+					dic_lastSimulatedMoveFrame[battlePlayerId] = simulatedFrame;
+
+					if (segment.RemainingFrames <= 0)
+					{
+						queue.Dequeue();
+						if (segment.MoveType != MoveType.OldMove)
+						{
+							float error = ServerVector3.Distance(pos, segment.PredictedPosition);
+							bool ackGoodMove = error <= MoveCorrectionThreshold;
+							SetMoveAck(
+								battlePlayerId,
+								simulatedFrame,
+								ackGoodMove,
+								pos,
+								GetPendingMoveBacklogFrames(battlePlayerId));
+
+							if (!ackGoodMove || segment.MoveFrame % 60 == 0)
+							{
+								Logging.Debug.Log($"[ClientMove][SIM_DONE] bp={battlePlayerId} moveFrame={segment.MoveFrame} appliedThisFrame={appliedThisServerFrame} move=({segment.MoveX:F4},{segment.MoveY:F4}) serverFrame={frameid} pos=({pos.X:F2},{pos.Z:F2}) predicted=({segment.PredictedPosition.X:F2},{segment.PredictedPosition.Z:F2}) error={error:F3} ackGood={ackGoodMove} backlog={GetPendingMoveBacklogFrames(battlePlayerId)}");
+							}
+						}
+						else
+						{
+							SetMoveAck(
+								battlePlayerId,
+								simulatedFrame,
+								true,
+								pos,
+								GetPendingMoveBacklogFrames(battlePlayerId));
+						}
+					}
+					else
+					{
+						SetMoveAck(
+							battlePlayerId,
+							simulatedFrame,
+							true,
+							pos,
+							GetPendingMoveBacklogFrames(battlePlayerId));
+					}
+				}
+
+				int backlogFrames = GetPendingMoveBacklogFrames(battlePlayerId);
+				if (appliedThisServerFrame > 0 && (backlogFrames > 0 || frameid % 60 == 0))
+				{
+					int simulatedFrame = dic_lastSimulatedMoveFrame.TryGetValue(battlePlayerId, out int storedSimulated)
+						? storedSimulated
+						: 0;
+					int acceptedFrame = dic_lastAcceptedMoveFrame.TryGetValue(battlePlayerId, out int storedAccepted)
+						? storedAccepted
+						: 0;
+					Logging.Debug.Log($"[ClientMove][SIM_APPLY] bp={battlePlayerId} serverFrame={frameid} applied={appliedThisServerFrame} simulated={simulatedFrame} accepted={acceptedFrame} backlog={backlogFrames} pos=({pos.X:F2},{pos.Z:F2})");
 				}
 			}
+		}
 
-			dic_accumulatedFrameDiscrepancy[battlePlayerId] = frameDiscrepancy;
-			dic_resolvingFrameDiscrepancy[battlePlayerId] = resolving;
-			return Math.Max(0, effectiveFrames);
+		private void SetMoveAck(int battlePlayerId, int ackedMoveFrame, bool ackGoodMove, ServerVector3 correctPosition, int pendingBacklogFrames)
+		{
+			dic_lastMoveAck[battlePlayerId] = new MoveAckResult
+			{
+				BattleId = battlePlayerId,
+				AckedMoveFrame = ackedMoveFrame,
+				AckGoodMove = ackGoodMove,
+				CorrectPosX = correctPosition.X,
+				CorrectPosY = correctPosition.Y,
+				CorrectPosZ = correctPosition.Z,
+				FrameDiscrepancy = pendingBacklogFrames,
+				ResolvingFrameDiscrepancy = pendingBacklogFrames > 0,
+			};
+		}
+
+		private int GetPendingMoveBacklogFrames(int battlePlayerId)
+		{
+			if (!dic_pendingMoveSegments.TryGetValue(battlePlayerId, out Queue<PendingMoveSegment> queue) || queue.Count == 0)
+			{
+				return 0;
+			}
+
+			int backlog = 0;
+			foreach (PendingMoveSegment segment in queue)
+			{
+				backlog += segment.RemainingFrames;
+			}
+			return backlog;
 		}
 
 		private ServerVector3 SimulateAuthoritativeMove(int battlePlayerId, ServerVector3 startPos, float moveX, float moveY, int frameCount)
@@ -382,11 +443,10 @@ namespace Server
 				positionHistory?.Clear();
 				positionHistoryOrder?.Clear();
 				// ── ClientMove 状态清理 ──
-				dic_lastProcessedMoveFrame?.Clear();
-				dic_lastProcessedMoveServerFrame?.Clear();
+				dic_lastAcceptedMoveFrame?.Clear();
+				dic_lastSimulatedMoveFrame?.Clear();
+				dic_pendingMoveSegments?.Clear();
 				dic_lastProcessedMoveInput?.Clear();
-				dic_accumulatedFrameDiscrepancy?.Clear();
-				dic_resolvingFrameDiscrepancy?.Clear();
 				dic_lastMoveAck?.Clear();
 			}
 

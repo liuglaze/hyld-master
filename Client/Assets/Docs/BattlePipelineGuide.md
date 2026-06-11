@@ -190,8 +190,8 @@ if (当前能量 >= 最大能量) → 可以按大招 = true   // :29
 
 ### 设计模式：命令模式（Command Pattern）
 
-- `Commad` 接口（`:14-17`）：`void Execute()`
-- `AttackCommad` 类（`:49-65`）：封装攻击方向，Execute 时调用 `BattleData.Instance.EnqueueAttack(dx, dy)`
+- `Commad` 接口（`:14-17`）：`void Execute(int commandFrameId)`
+- `AttackCommad` 类（`:49-65`）：封装攻击方向，Execute 时调用 `BattleData.Instance.EnqueueAttack(dx, dy, commandFrameId)`
 - 单例：`CommandManger.Instance`（`:24-36`）
 
 ### 移动输入：`AddCommad_Move()` — `:75-85`
@@ -228,8 +228,8 @@ BattleData.Instance.FlushPendingAttacksToOperation();  // :103
 
 ### 攻击队列机制（BattleData.Attack.cs）
 
-- `EnqueueAttack()` — 分配唯一 AttackId，锁定 `ClientFrameId = predicted_frameID`
-- `FlushPendingAttacksToOperation()` — 超时清理（帧龄 > MaxClientAttackAge=10）+ 全量打包到 selfOperation
+- `EnqueueAttack()` — 分配唯一 AttackId，锁定本次 BattleTick 的 `nextFrame`
+- `FlushPendingAttacksToOperation()` — 超时清理（帧龄 > MaxClientAttackAge=8）+ 全量打包到 selfOperation
 - `ConfirmAttacks()` — 收到权威确认后移除 `<= maxConfirmedId` 的攻击
 - 丢包时自动重传未确认攻击，不依赖可靠传输层
 
@@ -579,7 +579,7 @@ if (fireState == ShotgunSuper)
 
 ### 目标
 
-客户端预测帧号应保持在 `targetFrame = sync_frameID + ceil(RTT/2/frameTime) + inputBufferSize` 附近。超前时减速，落后时加速。
+客户端预测帧号应保持在 `targetFrame = EstimateServerFrameNow()` 附近。`EstimateServerFrameNow()` 由最后收到的服务端帧、半 RTT 和本地经过时间估算服务器当前帧。超前时减速，落后时加速。
 
 ### RTT 测量（`BattleData.Rtt.cs`）
 
@@ -743,8 +743,8 @@ pos.y = Mathf.SmoothDamp(pos.y, endPos.y, ref _velocity.y, SmoothTime=0.08f);
 TouchLogic.JoystickMoveEnd()
      │  CommandManger.AddCommad_Attack(dx, dy)
      ▼
-CommandManger.Execute()
-     │  AttackCommad.Execute() → BattleData.EnqueueAttack(dx, dy)
+CommandManger.Execute(nextFrame)
+     │  AttackCommad.Execute(nextFrame) → BattleData.EnqueueAttack(dx, dy, nextFrame)
      │  FlushPendingAttacksToOperation() → selfOperation.AttackOperations
      ▼
 BattleManger.BattleTick()

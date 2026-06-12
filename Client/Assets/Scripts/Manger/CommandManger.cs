@@ -10,6 +10,7 @@ using UnityEngine;
 using System;
 using UnityEngine.UI;
 using System.Linq;
+using SocketProto;
 
 interface Commad
 {
@@ -62,23 +63,31 @@ public class CommandManger
     {
         private readonly float dx;
         private readonly float dy;
+        private readonly AttackType attackType;
 
-        public AttackCommad(float x, float y)
+        public AttackCommad(float x, float y, AttackType type)
         {
             dx = x;
             dy = y;
+            attackType = type;
         }
 
         public void Execute(int commandFrameId)
         {
             // 入队待确认攻击队列，分配唯一 AttackId
-            Manger.BattleData.Instance.EnqueueAttack(dx, dy, commandFrameId);
+            Manger.BattleData.Instance.EnqueueAttack(dx, dy, commandFrameId, attackType);
         }
     }
 
     public void AddCommad_Attack(float dx, float dy)
     {
-        allCommad.Add(new AttackCommad(dx, dy));
+        allCommad.Add(new AttackCommad(dx, dy, AttackType.Normal));
+        queuedAttackCommandCount++;
+    }
+
+    public void AddCommad_SuperAttack(float dx, float dy)
+    {
+        allCommad.Add(new AttackCommad(dx, dy, AttackType.Super));
         queuedAttackCommandCount++;
     }
 

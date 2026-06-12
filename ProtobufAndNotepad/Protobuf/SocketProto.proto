@@ -124,6 +124,12 @@ enum MoveType
     OldMove=1;
 }
 
+enum AttackType
+{
+    Normal=0;
+    Super=1;
+}
+
 message MainPack
 {
     RequestCode requestcode=1;
@@ -225,6 +231,7 @@ message BattleServerUpdate
     MoveAckResult move_ack=2;
     repeated HitEvent hit_events=3;
     int32 state_base_frame=4;
+    repeated AttackAck attack_acks=5;
 }
 
 message BattleFrame
@@ -248,6 +255,7 @@ message ClientAttack
     int32 attack_move_frame=2;
     float toward_x=3;
     float toward_y=4;
+    AttackType attack_type=5;
 }
 
 message ServerAttack
@@ -261,6 +269,7 @@ message ServerAttack
     float spawn_pos_x=7;
     float spawn_pos_y=8;
     float spawn_pos_z=9;
+    AttackType attack_type=10;
 }
 
 message ClientMove
@@ -299,6 +308,16 @@ message HitEvent
     bool is_kill=9;
 }
 
+message AttackAck
+{
+    int32 battle_player_id=1;
+    int32 attack_id=2;
+    bool accepted=3;
+    int32 mana_after=4;
+    string reject_reason=5;
+    int32 super_energy_after=6;
+}
+
 message AuthoritativePlayerState
 {
     int32 battle_id=1;
@@ -308,4 +327,6 @@ message AuthoritativePlayerState
     int32 hp=5;
     bool is_dead=6;
     uint32 state_mask=7;
+    int32 mana=8;
+    int32 super_energy=9;
 }

@@ -41,6 +41,8 @@ namespace Manger
             if (!ConsumeAuthoritativeFrameBatch(battleInfo.ServerFrame, mergedFrames, update.MoveAck))
                 return false;
 
+            ApplyAttackAcks(update.AttackAcks);
+
             if (update.HitEvents != null && update.HitEvents.Count > 0)
             {
                 Logging.HYLDDebug.FrameTrace($"[AHS-5] Seq: ApplyHitEvents START frame={battleInfo.ServerFrame} hitCount={update.HitEvents.Count}");
@@ -146,10 +148,20 @@ namespace Manger
                 cached.IsDead = delta.IsDead;
                 cached.HasDead = true;
             }
-
-            if (!cached.HasPosition || !cached.HasHp || !cached.HasDead)
+            if ((delta.StateMask & AuthorityStateMaskMana) != 0)
             {
-                Logging.HYLDDebug.FrameTrace($"[AuthStateDelta][Reject] frame={authorityFrameId} stateBaseFrame={stateBaseFrame} battleId={delta.BattleId} mask={delta.StateMask} reason=incomplete_cached_state pos={cached.HasPosition} hp={cached.HasHp} dead={cached.HasDead}");
+                cached.Mana = delta.Mana;
+                cached.HasMana = true;
+            }
+            if ((delta.StateMask & AuthorityStateMaskSuperEnergy) != 0)
+            {
+                cached.SuperEnergy = delta.SuperEnergy;
+                cached.HasSuperEnergy = true;
+            }
+
+            if (!cached.HasPosition || !cached.HasHp || !cached.HasDead || !cached.HasMana || !cached.HasSuperEnergy)
+            {
+                Logging.HYLDDebug.FrameTrace($"[AuthStateDelta][Reject] frame={authorityFrameId} stateBaseFrame={stateBaseFrame} battleId={delta.BattleId} mask={delta.StateMask} reason=incomplete_cached_state pos={cached.HasPosition} hp={cached.HasHp} dead={cached.HasDead} mana={cached.HasMana} super={cached.HasSuperEnergy}");
                 return false;
             }
 
@@ -188,6 +200,8 @@ namespace Manger
                 PosZ = cached.PosZ,
                 Hp = cached.Hp,
                 IsDead = cached.IsDead,
+                Mana = cached.Mana,
+                SuperEnergy = cached.SuperEnergy,
                 StateMask = AuthorityStateMaskAll,
             };
         }
@@ -579,7 +593,17 @@ namespace Manger
                         int elapsedFrames = attack.AttackMoveFrame > 0 ? (frameId - attack.AttackMoveFrame) : 0;
                         if (elapsedFrames > 0 && playerIndex >= 0 && playerIndex < HYLDStaticValue.Players.Count)
                         {
-                            float bulletSpeed = HYLDStaticValue.Players[playerIndex].hero.speed;
+                            Hero hero = HYLDStaticValue.Players[playerIndex].hero;
+                            if (attack.AttackType == AttackType.Super
+                                && (hero == null || hero.superBullet == null || hero.superBullet.speed < 0))
+                            {
+                                Logging.HYLDDebug.FrameTrace($"[SuperBullet][SkipVisual] attackId={attack.AttackId} reason=missing_super_speed");
+                                continue;
+                            }
+
+                            float bulletSpeed = attack.AttackType == AttackType.Super
+                                ? hero.superBullet.speed
+                                : hero.speed;
                             float advance = elapsedFrames * bulletSpeed * Server.NetConfigValue.frameTime;
                             bulletSpawnPos += dir.normalized * advance;
                             Logging.HYLDDebug.FrameTrace($"[LagComp][Visual] attackId={attack.AttackId} elapsed={elapsedFrames} advance={advance:F2} spawnPos=({bulletSpawnPos.x:F2},{bulletSpawnPos.z:F2})");
@@ -588,7 +612,10 @@ namespace Manger
                         // 实际生成纯表现层子弹
                         if (playerIndex >= 0 && BattleManger.Instance != null && BattleManger.Instance.bulletManger != null)
                         {
-                            BattleManger.Instance.bulletManger.SpawnVisualBullet(playerIndex, bulletSpawnPos, dir, FireState.PstolNormal);
+                            FireState fireState = attack.AttackType == AttackType.Super
+                                ? FireState.ShotgunSuper
+                                : FireState.PstolNormal;
+                            BattleManger.Instance.bulletManger.SpawnVisualBullet(playerIndex, bulletSpawnPos, dir, fireState);
                         }
                     }
                 }

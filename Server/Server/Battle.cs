@@ -55,6 +55,8 @@ namespace Server
 			public float PosZ;
 			public int Hp;
 			public bool IsDead;
+			public int Mana;
+			public int SuperEnergy;
 
 			public FullAuthorityState Clone()
 			{
@@ -66,6 +68,8 @@ namespace Server
 					PosZ = PosZ,
 					Hp = Hp,
 					IsDead = IsDead,
+					Mana = Mana,
+					SuperEnergy = SuperEnergy,
 				};
 			}
 		}
@@ -75,6 +79,8 @@ namespace Server
 		private int frameid;
 		private Dictionary<int, BattleFrame> dic_historyFrames;
 		private Dictionary<int, PlayerFrameInput> dic_pendingAttacks;
+		private Dictionary<int, List<AttackAck>> dic_pendingAttackAcks;
+		private Dictionary<int, Dictionary<int, AttackAck>> dic_recentAttackAcks;
 		private Dictionary<int, int> dic_playerAckedFrameId;
 		private Dictionary<int, int> dic_lastProcessedAttackId;
 		private Dictionary<int, bool> dic_playerGameOver;
@@ -115,6 +121,9 @@ namespace Server
 		// ---- 服务端权威 HP 系统 ----
 		private Dictionary<int, int> playerHp;
 		private Dictionary<int, bool> playerIsDead;
+		private Dictionary<int, int> playerMana;
+		private Dictionary<int, float> playerManaRegenTimerMs;
+		private Dictionary<int, int> playerSuperEnergy;
 		private int _killerBattlePlayerId;
 		private int _killerTeamId;
 
@@ -132,7 +141,9 @@ namespace Server
 		private const uint AuthorityStateMaskPosition = 1u;
 		private const uint AuthorityStateMaskHp = 2u;
 		private const uint AuthorityStateMaskDead = 4u;
-		private const uint AuthorityStateMaskAll = AuthorityStateMaskPosition | AuthorityStateMaskHp | AuthorityStateMaskDead;
+		private const uint AuthorityStateMaskMana = 8u;
+		private const uint AuthorityStateMaskSuperEnergy = 16u;
+		private const uint AuthorityStateMaskAll = AuthorityStateMaskPosition | AuthorityStateMaskHp | AuthorityStateMaskDead | AuthorityStateMaskMana | AuthorityStateMaskSuperEnergy;
 		private readonly Random _simRandom = new Random();
 
 		// ==================== 构造 / 初始化 ====================
@@ -316,6 +327,8 @@ namespace Server
 				_hasEnded = false;
 				dic_historyFrames = new Dictionary<int, BattleFrame>();
 				dic_pendingAttacks = new Dictionary<int, PlayerFrameInput>();
+				dic_pendingAttackAcks = new Dictionary<int, List<AttackAck>>();
+				dic_recentAttackAcks = new Dictionary<int, Dictionary<int, AttackAck>>();
 				dic_playerAckedFrameId = new Dictionary<int, int>();
 				dic_playerGameOver = new Dictionary<int, bool>();
 				dic_lastProcessedAttackId = new Dictionary<int, int>();
@@ -339,6 +352,9 @@ namespace Server
 				pendingHitEvents = new List<HitEvent>();
 				playerHp = new Dictionary<int, int>();
 				playerIsDead = new Dictionary<int, bool>();
+				playerMana = new Dictionary<int, int>();
+				playerManaRegenTimerMs = new Dictionary<int, float>();
+				playerSuperEnergy = new Dictionary<int, int>();
 				_killerBattlePlayerId = 0;
 				_killerTeamId = 0;
 
@@ -351,6 +367,9 @@ namespace Server
 					playerHeroes[bpId] = matchUser.hero;
 					playerHp[bpId] = HeroConfig.GetHp(matchUser.hero);
 					playerIsDead[bpId] = false;
+					playerMana[bpId] = HeroConfig.ManaMax;
+					playerManaRegenTimerMs[bpId] = 0f;
+					playerSuperEnergy[bpId] = 0;
 					if (!teamGroups.ContainsKey(matchUser.teamid))
 						teamGroups[matchUser.teamid] = new List<int>();
 					teamGroups[matchUser.teamid].Add(bpId);
@@ -381,6 +400,8 @@ namespace Server
 				foreach (int battlePlayerId in uidToBattlePlayerId.Values)
 				{
 					dic_pendingAttacks[battlePlayerId] = null;
+					dic_pendingAttackAcks[battlePlayerId] = new List<AttackAck>();
+					dic_recentAttackAcks[battlePlayerId] = new Dictionary<int, AttackAck>();
 					dic_playerAckedFrameId[battlePlayerId] = 0;
 					dic_playerGameOver[battlePlayerId] = false;
 					dic_lastProcessedAttackId[battlePlayerId] = 0;
@@ -491,6 +512,7 @@ namespace Server
 		private void CollectAndBroadcastCurrentFrame()
 		{
 			ApplyPendingMoveSegments();
+			RegeneratePlayerMana();
 
 			// nextFrameOp 表示“本次服务端权威帧最终采用的所有玩家操作集合”，
 			// 后续会继续用于：子弹生成/碰撞 -> PlayerStates 打包 -> 下行广播。
@@ -573,6 +595,52 @@ namespace Server
 			}
 			// 8. 当前帧的攻击已经被并入并广播，清空待攻击缓存，等待后续网络线程写入新攻击
 			dic_pendingAttacks.Clear();
+			ClearPendingAttackAcks();
+		}
+
+		private void RegeneratePlayerMana()
+		{
+			foreach (int battlePlayerId in uidToBattlePlayerId.Values)
+			{
+				if (!playerMana.TryGetValue(battlePlayerId, out int mana))
+				{
+					continue;
+				}
+				if (mana >= HeroConfig.ManaMax)
+				{
+					playerManaRegenTimerMs[battlePlayerId] = 0f;
+					continue;
+				}
+				if (!playerHeroes.TryGetValue(battlePlayerId, out Hero hero))
+				{
+					continue;
+				}
+
+				float reloadMs = HeroConfig.GetReloadSeconds(hero) * 1000f;
+				playerManaRegenTimerMs[battlePlayerId] += frameIntervalMs;
+				while (playerManaRegenTimerMs[battlePlayerId] >= reloadMs && mana < HeroConfig.ManaMax)
+				{
+					playerManaRegenTimerMs[battlePlayerId] -= reloadMs;
+					mana = Math.Min(HeroConfig.ManaMax, mana + HeroConfig.ManaPerSegment);
+				}
+				playerMana[battlePlayerId] = mana;
+				if (mana >= HeroConfig.ManaMax)
+				{
+					playerManaRegenTimerMs[battlePlayerId] = 0f;
+				}
+			}
+		}
+
+		private void ClearPendingAttackAcks()
+		{
+			if (dic_pendingAttackAcks == null)
+			{
+				return;
+			}
+			foreach (List<AttackAck> acks in dic_pendingAttackAcks.Values)
+			{
+				acks.Clear();
+			}
 		}
 
 		// ==================== 服务端位置追踪 ====================

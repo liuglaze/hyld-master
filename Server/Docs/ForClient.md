@@ -102,8 +102,9 @@ Program.cs -> Server/Server.cs -> Server/Client.cs -> Controller/ControllerMange
 8. 帧下发与补帧：`Server/BattleController.Network.cs:50`（`SendUnsyncedFrames`）
 9. **Pong 路由**：`Server/ClientUdp.cs:250`（Ping 识别 → Pong 构造）。Pong 发送**经过 NetSim**（`LZJUDP.SimDropRate/SimDelayMinMs/SimDelayMaxMs`），确保客户端 RTT 测量反映真实模拟延迟。NetSim 参数由 `BattleController.BeginBattle`（Battle.cs:224）写入、`HandleBattleEnd`（BattleController.Network.cs:183）清零
 10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_input.moves` 上报 `OldMove + NewMove`，攻击通过 `BattleInfo.client_input.attacks` 独立上报。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；每包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序排列。服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastAcceptedMoveFrame` 的旧包丢弃，`moveFrame > serverFrame + 2` 直接拒绝；合法 move 只入队为 pending segment。BattleLoop 每个 ServerFrame 对每个玩家最多消化 3 帧 pending move 并推进 `playerPositions`。下行 `BattleInfo.server_update.move_ack.acked_move_frame` 等于 `lastSimulatedMoveFrame`，客户端只裁剪已经被服务端权威位置实际模拟过的 SavedMove；`ack_good_move=false` 时客户端使用 `correct_pos_x/y/z` 拉回并重放未确认 SavedMove。
-11. **PlayerStates 增量下行**：服务端每个 ServerFrame 仍发送当前权威帧，`server_frame` 持续递增；但 `BattleFrame.player_states` 按接收客户端的已确认状态基准裁剪字段。客户端必须按 `AuthoritativePlayerState.state_mask` 合并：bit0=position(`pos_x/y/z`)，bit1=`hp`，bit2=`is_dead`。`BattleServerUpdate.state_base_frame` 表示本次增量基准帧，仅用于联调观测。
+11. **PlayerStates 增量下行**：服务端每个 ServerFrame 仍发送当前权威帧，`server_frame` 持续递增；但 `BattleFrame.player_states` 按接收客户端的已确认状态基准裁剪字段。客户端必须按 `AuthoritativePlayerState.state_mask` 合并：bit0=position(`pos_x/y/z`)，bit1=`hp`，bit2=`is_dead`，bit3=`mana`，bit4=`super_energy`。`BattleServerUpdate.state_base_frame` 表示本次增量基准帧，仅用于联调观测。
 12. **客户端首权威门控**：客户端收到 `BattleStart` 后先进入战斗网络泵，首个有效权威帧到达前不发送 `ClientMove`；首权威帧消费成功后才开启本地 `BattleTick`。若下行权威帧超过 1000ms 未刷新，或客户端 SavedMove 历史满，客户端会暂停继续生成预测 tick。
+13. **攻击资源确认**：客户端上行普通攻击和子弹型大招都在 `BattleInfo.client_input.attacks`，用 `attack_type` 区分。服务端先做过期、去重和资源检查；普通攻击扣 `mana`，大招要求 `super_energy >= 3000` 且服务端存在子弹型大招配置，通过后清零。资源不足或不支持时回 `BattleInfo.server_update.attack_acks`，客户端应对本玩家 ack 覆写 `playerManaValue=mana_after`、`当前能量=super_energy_after` 并移除对应 pending 攻击。
 
 > 关键前提：客户端必须先成功发 `BattleReady`，否则后续 UDP 包无法命中 battle 路由。
 >
@@ -252,16 +253,19 @@ dir.z *= sign
 
 ### 8.5.5 攻击去重
 
-- 服务端 `dic_lastProcessedAttackId`（BattleController.Network.cs:166）记录每个玩家最后处理的 AttackId
+- 服务端 `dic_lastProcessedAttackId` 记录每个玩家最后处理的 AttackId
 - 客户端 UDP 丢包时自动重发未确认攻击（pendingAttacks 窗口），服务端忽略已处理的旧 AttackId
+- 服务端会缓存最近 `AttackAck`；同一 `AttackId` 重发时只重发 ack，不重复扣蓝或清大招能量
 
-### 8.5.6 权威 HP/IsDead 下行（authoritative-hp-sync）
+### 8.5.6 权威 HP/IsDead/Mana/SuperEnergy 下行
 
-- **proto 字段**：`AuthoritativePlayerState` 消息含 `hp`（int32）和 `is_dead`（bool），随 `BattleInfo.server_update.frames[].player_states` 每帧下发
-- **服务端写入**：`PackPlayerStates`（BattleController.Network.cs:18）将 `playerHp[battleId]` 和 `playerIsDead[battleId]` 写入帧数据
+- **proto 字段**：`AuthoritativePlayerState` 消息含 `hp`（int32）、`is_dead`（bool）、`mana`（int32）和 `super_energy`（int32），随 `BattleInfo.server_update.frames[].player_states` 每帧下发
+- **服务端写入**：`PackPlayerStates`（BattleController.Network.cs:18）将 `playerHp[battleId]`、`playerIsDead[battleId]`、`playerMana[battleId]` 和 `playerSuperEnergy[battleId]` 写入帧数据
 - **客户端消费**：`ApplyAuthoritativeHpAndDeath` 取批次最后一帧的 `PlayerStates` 覆写 `playerBloodValue`
 - **帧序保护**：`_lastAuthHpFrameId` 跳过乱序到达的旧批次（UDP 包乱序时防止 HP 回弹）
 - **攻击超时**：服务端 `MaxAcceptableAttackDelay=8`，超过此帧数的延迟攻击被 REJECT
+- **普通蓝量**：服务端开局初始化 90；默认普通攻击消耗 30，贝亚消耗 90；按英雄装弹速度每格恢复 30，不超过 90。客户端可预测扣蓝，但最终以 `AttackAck.mana_after` 和 `PlayerStates.mana` 为准。
+- **大招能量**：服务端开局初始化 0，最大 3000；命中时按实际伤害 `damage / 2` 给攻击者充能并封顶。子弹型大招通过后清零；客户端可预测清零，但最终以 `AttackAck.super_energy_after` 和 `PlayerStates.super_energy` 为准。
 
 ---
 

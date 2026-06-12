@@ -18,19 +18,55 @@ public class TouchLogic : MonoBehaviour
 	public Slider 能量条;
 	public GameObject 大招遥感;
 
+	private bool TryGetSelfPlayer(out PlayerInformation selfPlayer)
+	{
+		int selfIndex = HYLDStaticValue.playerSelfIDInServer;
+		if (selfIndex >= 0 && selfIndex < HYLDStaticValue.Players.Count)
+		{
+			selfPlayer = HYLDStaticValue.Players[selfIndex];
+			return selfPlayer != null;
+		}
+
+		selfPlayer = null;
+		return false;
+	}
+
+	private bool EnsureSelfFireLineRenderer(PlayerInformation selfPlayer)
+	{
+		if (selfPlayer == null || selfPlayer.body == null)
+		{
+			selfFireLineRenderer = null;
+			return false;
+		}
+
+		if (selfFireLineRenderer != null)
+		{
+			return true;
+		}
+
+		selfFireLineRenderer = selfPlayer.body.GetComponentInChildren<LineRenderer>();
+		return selfFireLineRenderer != null;
+	}
+
 
 	private void FixedUpdate()
 {
-
-		if (HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].当前能量 >= HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].最大能量)
+		if (!TryGetSelfPlayer(out PlayerInformation selfPlayer))
 		{
-			HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].可以按大招 = true;
+			if (能量条 != null) 能量条.gameObject.SetActive(true);
+			if (大招遥感 != null) 大招遥感.SetActive(false);
+			return;
 		}
-		能量条.gameObject.SetActive(!HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].可以按大招);
-		大招遥感.SetActive(HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].可以按大招);
+
+		if (selfPlayer.当前能量 >= selfPlayer.最大能量)
+		{
+			selfPlayer.可以按大招 = true;
+		}
+		能量条.gameObject.SetActive(!selfPlayer.可以按大招);
+		大招遥感.SetActive(selfPlayer.可以按大招);
 		if (能量条.gameObject.activeSelf)
 		{
-			能量条.value = HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].当前能量 / HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].最大能量;
+			能量条.value = selfPlayer.当前能量 / selfPlayer.最大能量;
 		}
 
 	}
@@ -60,8 +96,19 @@ public class TouchLogic : MonoBehaviour
 		}
 		if (move.joystickName == "FireNormal"||move.joystickName=="FireSuper")
 		{
+			if (!TryGetSelfPlayer(out PlayerInformation selfPlayer))
+			{
+				Logging.HYLDDebug.FrameTrace($"[AttackInput] REJECTED joystick={move.joystickName} reason=self_player_not_found");
+				return;
+			}
 
-			HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].body.GetComponentInChildren<LineRenderer>().enabled = false;
+			if (!EnsureSelfFireLineRenderer(selfPlayer))
+			{
+				Logging.HYLDDebug.FrameTrace($"[AttackInput] REJECTED joystick={move.joystickName} reason=line_renderer_not_ready");
+				return;
+			}
+
+			selfFireLineRenderer.enabled = false;
 
 			// ★ 去掉 fireState == none 的前置检查
 			// 现在攻击统一走 CommandManger → EnqueueAttack 队列，
@@ -73,6 +120,26 @@ public class TouchLogic : MonoBehaviour
 				Logging.HYLDDebug.FrameTrace("[AttackInput] REJECTED by dead zone");
 				return;
 			}
+			if (move.joystickName == "FireSuper")
+			{
+				if (!selfPlayer.可以按大招 || selfPlayer.当前能量 < selfPlayer.最大能量)
+				{
+					Logging.HYLDDebug.FrameTrace($"[SuperInput] REJECTED energy={selfPlayer.当前能量:F1}/{selfPlayer.最大能量:F1}");
+					return;
+				}
+				if (selfPlayer.hero == null
+					|| selfPlayer.hero.superBullet == null
+					|| selfPlayer.hero.大招实体 == null
+					|| selfPlayer.hero.isSuperMovingType)
+				{
+					Logging.HYLDDebug.FrameTrace("[SuperInput] REJECTED reason=unsupported_super_type");
+					return;
+				}
+				Logging.HYLDDebug.FrameTrace("[SuperInput] ACCEPTED -> AddCommad_SuperAttack");
+				CommandManger.Instance.AddCommad_SuperAttack(FirePositionX.ToFloat(), FirePositionY.ToFloat());
+				return;
+			}
+
 			Logging.HYLDDebug.FrameTrace("[AttackInput] ACCEPTED -> AddCommad_Attack");
 			CommandManger.Instance.AddCommad_Attack(FirePositionX.ToFloat(), FirePositionY.ToFloat());
 		}
@@ -93,25 +160,8 @@ public class TouchLogic : MonoBehaviour
 	private float launchAngle;
 	private void Start()
 	{
-		selfFireLineRenderer = HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].body.GetComponentInChildren<LineRenderer>();
-		
-		selfFireLineRenderer.enabled = false;
-
-		for(int i=0;i<HYLDStaticValue.Players.Count;i++)
-		{
-			//Logging.HYLDDebug.LogError(HYLDStaticValue.Players.Count);
-			HYLDStaticValue.Players[i].isNotDie = true;
-		}
-
-		
-	}
-
-	private void OnDestroy()
-	{
-		for(int i=0;i<HYLDStaticValue.Players.Count;i++)
-		{
-			HYLDStaticValue.Players[i].isNotDie = false;
-		}
+		if (能量条 != null) 能量条.gameObject.SetActive(true);
+		if (大招遥感 != null) 大招遥感.SetActive(false);
 	}
 
 
@@ -121,29 +171,41 @@ public class TouchLogic : MonoBehaviour
 		if (Toolbox.是否游戏结束) return;
 		if (move.joystickName == "FireNormal"|| move.joystickName == "FireSuper")
 		{
+			if (!TryGetSelfPlayer(out PlayerInformation selfPlayer))
+			{
+				Logging.HYLDDebug.FrameTrace($"[AttackAim] REJECTED joystick={move.joystickName} reason=self_player_not_found");
+				return;
+			}
+
+			if (!EnsureSelfFireLineRenderer(selfPlayer))
+			{
+				Logging.HYLDDebug.FrameTrace($"[AttackAim] REJECTED joystick={move.joystickName} reason=line_renderer_not_ready");
+				return;
+			}
+			if (selfPlayer.hero == null)
+			{
+				Logging.HYLDDebug.FrameTrace($"[AttackAim] REJECTED joystick={move.joystickName} reason=hero_not_ready");
+				return;
+			}
+
 			FirePositionY = new Fixed( move.joystickAxis.y);
 			
 			FirePositionX = new Fixed(move.joystickAxis.x);
 			Fixed R = FirePositionX * FirePositionX + FirePositionY * FirePositionY;
-			if(selfFireLineRenderer==null)
-			{
-				HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].body.transform.Find("Capsule").Find("Gun").gameObject.AddComponent<LineRenderer>();
-				selfFireLineRenderer= HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].body.GetComponentInChildren<LineRenderer>();
-			}
 			selfFireLineRenderer.enabled = true;
 			Vector3 temp =
-				LZJ.MathFixed.Vector32UnitVector3((HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].playerPositon),
-					(HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].playerPositon+new Vector3(FirePositionX.ToFloat(),1,FirePositionY.ToFloat())));
+				LZJ.MathFixed.Vector32UnitVector3((selfPlayer.playerPositon),
+					(selfPlayer.playerPositon+new Vector3(FirePositionX.ToFloat(),1,FirePositionY.ToFloat())));
 			temp.y = temp.z;
 			temp.z = temp.x;
 			temp.x = -temp.y;
 			temp.y = 0;
-			shootDistance = HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].hero.shootDistance;
+			shootDistance = selfPlayer.hero.shootDistance;
 			
 			//Logging.HYLDDebug.Log(shootDistance);
 			
-			launchAngle=HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].hero.LaunchAngle;
-			float lineWidth=HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].hero.shootWidth;
+			launchAngle=selfPlayer.hero.LaunchAngle;
+			float lineWidth=selfPlayer.hero.shootWidth;
 
 			if (launchAngle == 0)
 			{
@@ -152,16 +214,16 @@ public class TouchLogic : MonoBehaviour
 				selfFireLineRenderer.startColor = new Color(1,1,1,0.5f);
 				
 				selfFireLineRenderer.endColor = new Color(1,1,1,0.5f);
-				selfFireLineRenderer.SetPosition(0,HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].playerPositon);
-				selfFireLineRenderer.SetPosition(1,HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].playerPositon+shootDistance*temp);
+				selfFireLineRenderer.SetPosition(0,selfPlayer.playerPositon);
+				selfFireLineRenderer.SetPosition(1,selfPlayer.playerPositon+shootDistance*temp);
 
 			}
 			else
 			{
-				Vector3 center = HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].playerPositon;
-				int pointAmmount = HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].hero.bulletCount;
+				Vector3 center = selfPlayer.playerPositon;
+				int pointAmmount = selfPlayer.hero.bulletCount;
 				float eachAngle = launchAngle / pointAmmount;
-				Vector3 forward = HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].body.transform.forward;
+				Vector3 forward = selfPlayer.body.transform.forward;
 				if (lineWidth == 0)
 				{
 					lineWidth = 0.1f;

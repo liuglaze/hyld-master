@@ -4,6 +4,7 @@
 *****************************************************/
 
 using System.Collections.Generic;
+using UnityEngine;
 using SocketProto;
 
 namespace Manger
@@ -64,6 +65,7 @@ namespace Manger
             public int AttackId;
             public float Towardx;
             public float Towardy;
+            public AttackType AttackType;
             /// <summary>
             /// 攻击产生时的客户端预测帧号（入队时锁定，重发时不刷新）。
             /// 供服务端 V2 延迟补偿回溯到攻击真正发生时的玩家位置。
@@ -79,19 +81,64 @@ namespace Manger
         ///    - 这是为了告诉服务器：“我是在哪一帧开的火”。
         ///    - 锁定后即使因为网络丢包导致这笔攻击重复发送，它的 ClientFrameId 永远不变。
         /// </summary>
-        public PendingAttack EnqueueAttack(float towardx, float towardy, int attackFrameId)
+        public PendingAttack EnqueueAttack(float towardx, float towardy, int attackFrameId, AttackType attackType)
         {
+            int selfPlayerIndex = HYLDStaticValue.playerSelfIDInServer;
+            if (selfPlayerIndex < 0 || selfPlayerIndex >= HYLDStaticValue.Players.Count)
+            {
+                Logging.HYLDDebug.FrameTrace($"[AttackMana][LocalReject] reason=self_player_not_found frame={attackFrameId}");
+                return null;
+            }
+
+            PlayerInformation selfPlayer = HYLDStaticValue.Players[selfPlayerIndex];
+            if (selfPlayer.hero == null)
+            {
+                Logging.HYLDDebug.FrameTrace($"[AttackMana][LocalReject] reason=hero_missing frame={attackFrameId}");
+                return null;
+            }
+
+            if (attackType == AttackType.Super)
+            {
+                if (selfPlayer.hero.superBullet == null
+                    || selfPlayer.hero.大招实体 == null
+                    || selfPlayer.hero.isSuperMovingType)
+                {
+                    Logging.HYLDDebug.FrameTrace($"[SuperEnergy][LocalReject] reason=unsupported_super frame={attackFrameId}");
+                    return null;
+                }
+                if (selfPlayer.当前能量 < selfPlayer.最大能量)
+                {
+                    Logging.HYLDDebug.FrameTrace($"[SuperEnergy][LocalReject] energy={selfPlayer.当前能量:F1} max={selfPlayer.最大能量:F1} frame={attackFrameId}");
+                    return null;
+                }
+
+                selfPlayer.当前能量 = 0f;
+                selfPlayer.可以按大招 = false;
+            }
+            else
+            {
+                int manaCost = selfPlayer.hero.normalAttackManaCost;
+                if (selfPlayer.playerManaValue < manaCost)
+                {
+                    Logging.HYLDDebug.FrameTrace($"[AttackMana][LocalReject] mana={selfPlayer.playerManaValue} cost={manaCost} frame={attackFrameId}");
+                    return null;
+                }
+
+                selfPlayer.playerManaValue = Mathf.Max(0, selfPlayer.playerManaValue - manaCost);
+            }
+
             nextAttackId++;
             PendingAttack attack = new PendingAttack()
             {
                 AttackId = nextAttackId,
                 Towardx = towardx,
                 Towardy = towardy,
+                AttackType = attackType,
                 ClientFrameId = attackFrameId,
             };
             pendingAttacks.Add(attack);
             _lastEnqueuedAttackId = attack.AttackId;
-            Logging.HYLDDebug.FrameTrace($"[AttackPipeline] EnqueueAttack id={nextAttackId} toward=({towardx:F4},{towardy:F4}) clientFrame={attackFrameId} predicted={predicted_frameID} pendingCount={pendingAttacks.Count}");
+            Logging.HYLDDebug.FrameTrace($"[AttackPipeline] EnqueueAttack id={nextAttackId} type={attackType} toward=({towardx:F4},{towardy:F4}) clientFrame={attackFrameId} predicted={predicted_frameID} manaAfter={selfPlayer.playerManaValue} superEnergy={selfPlayer.当前能量:F1} pendingCount={pendingAttacks.Count}");
             return attack;
         }
 
@@ -123,6 +170,7 @@ namespace Manger
                 attackOp.AttackId = pendingAttacks[i].AttackId;
                 attackOp.TowardX = pendingAttacks[i].Towardx;
                 attackOp.TowardY = pendingAttacks[i].Towardy;
+                attackOp.AttackType = pendingAttacks[i].AttackType;
                 // 6.1: 填充客户端预测帧号，供服务端 V2 延迟补偿使用
                 // 使用入队时锁定的帧号（重发时不刷新，避免丢包恢复后 predicted_frameID 跳跃导致 delay<0）
                 attackOp.AttackMoveFrame = pendingAttacks[i].ClientFrameId;
@@ -157,7 +205,38 @@ namespace Manger
                 }
             }
             pendingAttacks.RemoveAll(a => a.AttackId <= maxConfirmedId);
-            _predictedBulletAttackIds.RemoveWhere(attackId => attackId <= maxConfirmedId);
+        }
+
+        public void ApplyAttackAcks(Google.Protobuf.Collections.RepeatedField<AttackAck> attackAcks)
+        {
+            if (attackAcks == null || attackAcks.Count == 0)
+            {
+                return;
+            }
+
+            int selfPlayerIndex = HYLDStaticValue.playerSelfIDInServer;
+            for (int i = 0; i < attackAcks.Count; i++)
+            {
+                AttackAck ack = attackAcks[i];
+                if (ack.BattlePlayerId != battleID)
+                {
+                    continue;
+                }
+
+                if (selfPlayerIndex >= 0 && selfPlayerIndex < HYLDStaticValue.Players.Count)
+                {
+                    HYLDStaticValue.Players[selfPlayerIndex].playerManaValue = Mathf.Clamp(ack.ManaAfter, 0, 90);
+                    HYLDStaticValue.Players[selfPlayerIndex].当前能量 = Mathf.Clamp(
+                        ack.SuperEnergyAfter,
+                        0,
+                        HYLDStaticValue.Players[selfPlayerIndex].最大能量);
+                    HYLDStaticValue.Players[selfPlayerIndex].可以按大招 =
+                        HYLDStaticValue.Players[selfPlayerIndex].当前能量 >= HYLDStaticValue.Players[selfPlayerIndex].最大能量;
+                }
+
+                int removed = pendingAttacks.RemoveAll(a => a.AttackId == ack.AttackId);
+                Logging.HYLDDebug.FrameTrace($"[AttackAck] attackId={ack.AttackId} accepted={ack.Accepted} manaAfter={ack.ManaAfter} superEnergyAfter={ack.SuperEnergyAfter} reject={ack.RejectReason} removedPending={removed}");
+            }
         }
 
         public void ClearPendingAttacks()

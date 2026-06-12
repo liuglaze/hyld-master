@@ -46,9 +46,9 @@
 
 **Server/BattleController.Network.cs** — 网络收发 / 权威状态
 
-- `PackPlayerStates`:18 — 生成当前帧完整权威状态（位置/HP/IsDead）并保存状态快照
+- `PackPlayerStates`:18 — 生成当前帧完整权威状态（位置/HP/IsDead/Mana）并保存状态快照
 - `SendUnsyncedFrames`:50 — 只下发当前权威帧，并按接收客户端已确认状态基准裁剪 `PlayerStates` 增量；每包仍携带当前 `server_frame`
-- `UpdatePlayerOperation`:103 — 接收 `BattleInfo.client_input`：AckedServerFrame 单调更新 + ClientMoveFrame 单调处理 + ClientAttack 去重/超时
+- `UpdatePlayerOperation`:103 — 接收 `BattleInfo.client_input`：AckedServerFrame 单调更新 + ClientMoveFrame 单调处理 + ClientAttack 去重/超时/普通蓝量或大招能量扣除与 AttackAck
 - `HandleBattleEnd`:183 — 战斗结束：停循环、清理资源、清 NetSim、注销 UDP、发送 FinishBattle
 - `SendFinishBattle`:224 — 发送 GameOver 包（含 winnerTeamId）
 - `UpdatePlayerGameOver`:235 — 处理客户端上报 GameOver
@@ -182,7 +182,7 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
           4. RecordPositionSnapshot (Battle.cs:526) — 环形缓冲区
           5. SpawnBulletsFromOperations (Bullets.cs:12) — 生成子弹 + V2 追帧，追帧命中写入同一 HitEvent 列表
           6. TickServerBullets (Bullets.cs:265) — 推进 + 碰撞 + HitEvent
-          7. PackPlayerStates (Network.cs:18) — HP/IsDead/位置完整快照
+          7. PackPlayerStates (Network.cs:18) — HP/IsDead/Mana/位置完整快照
           8. SendUnsyncedFrames (Network.cs:50) — 只组织当前权威帧，`PlayerStates` 按接收客户端状态基准增量下发，并按 `CurrentFrameRepeatSendCount` 重复发送
         frameid++
 ```
@@ -198,6 +198,7 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
       3. 合法 ClientMove 按帧差入队为 pending move segment，同时保存当前移动意图供权威帧广播
       4. 攻击去重（dic_lastProcessedAttackId）
       5. 攻击超时（frameDelay > MaxAcceptableAttackDelay=8 → REJECT）
+      6. 攻击资源门控：普通攻击蓝量足够才扣蓝；子弹型大招能量满且有服务端配置才清零并进入 pendingAttacks；不足回 `AttackAck(accepted=false, reject_reason="mana"|"super_energy"|"unsupported_super")`
 ```
 
 ### 4.5 伤害判定链路
@@ -282,7 +283,7 @@ oneGameOver = true（来源：击杀 / 断线）
 
 ## 7. 状态所有权
 
-- **服务端权威**：帧状态（frameid）、玩家 HP（playerHp）、死亡（playerIsDead）、击杀判定、GameOver、胜负结果
+- **服务端权威**：帧状态（frameid）、玩家 HP（playerHp）、死亡（playerIsDead）、普通攻击蓝量（playerMana）、大招能量（playerSuperEnergy）、击杀判定、GameOver、胜负结果
 - **服务端维护**：playerPositions、positionHistory、activeBullets、ClientMove 处理进度
 - **客户端上报**：移动 SavedMove（ClientMove）、攻击操作（ClientAttack）、BattleReady、ClientSendGameOver
 

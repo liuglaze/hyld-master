@@ -65,78 +65,86 @@ namespace SocketProto {
             "IAEoBRITCgtjbGllbnRfdGljaxgCIAEoBRIaChJhY2tlZF9zZXJ2ZXJfZnJh",
             "bWUYAyABKAUSDgoGcnR0X21zGAQgASgFEiYKBW1vdmVzGAogAygLMhcuU29j",
             "a2V0UHJvdG8uQ2xpZW50TW92ZRIqCgdhdHRhY2tzGAsgAygLMhkuU29ja2V0",
-            "UHJvdG8uQ2xpZW50QXR0YWNrIrEBChJCYXR0bGVTZXJ2ZXJVcGRhdGUSKAoG",
+            "UHJvdG8uQ2xpZW50QXR0YWNrIt4BChJCYXR0bGVTZXJ2ZXJVcGRhdGUSKAoG",
             "ZnJhbWVzGAEgAygLMhguU29ja2V0UHJvdG8uQmF0dGxlRnJhbWUSLAoIbW92",
             "ZV9hY2sYAiABKAsyGi5Tb2NrZXRQcm90by5Nb3ZlQWNrUmVzdWx0EikKCmhp",
             "dF9ldmVudHMYAyADKAsyFS5Tb2NrZXRQcm90by5IaXRFdmVudBIYChBzdGF0",
-            "ZV9iYXNlX2ZyYW1lGAQgASgFIpcBCgtCYXR0bGVGcmFtZRIUCgxzZXJ2ZXJf",
+            "ZV9iYXNlX2ZyYW1lGAQgASgFEisKC2F0dGFja19hY2tzGAUgAygLMhYuU29j",
+            "a2V0UHJvdG8uQXR0YWNrQWNrIpcBCgtCYXR0bGVGcmFtZRIUCgxzZXJ2ZXJf",
             "ZnJhbWUYASABKAUSNAoNcGxheWVyX2lucHV0cxgCIAMoCzIdLlNvY2tldFBy",
             "b3RvLlBsYXllckZyYW1lSW5wdXQSPAoNcGxheWVyX3N0YXRlcxgDIAMoCzIl",
             "LlNvY2tldFByb3RvLkF1dGhvcml0YXRpdmVQbGF5ZXJTdGF0ZSJ4ChBQbGF5",
             "ZXJGcmFtZUlucHV0EhgKEGJhdHRsZV9wbGF5ZXJfaWQYASABKAUSDgoGbW92",
             "ZV94GAIgASgCEg4KBm1vdmVfeRgDIAEoAhIqCgdhdHRhY2tzGAQgAygLMhku",
-            "U29ja2V0UHJvdG8uU2VydmVyQXR0YWNrImAKDENsaWVudEF0dGFjaxIRCglh",
-            "dHRhY2tfaWQYASABKAUSGQoRYXR0YWNrX21vdmVfZnJhbWUYAiABKAUSEAoI",
-            "dG93YXJkX3gYAyABKAISEAoIdG93YXJkX3kYBCABKAIi3gEKDFNlcnZlckF0",
-            "dGFjaxIRCglhdHRhY2tfaWQYASABKAUSIQoZYXR0YWNrZXJfYmF0dGxlX3Bs",
-            "YXllcl9pZBgCIAEoBRIZChFhdHRhY2tfbW92ZV9mcmFtZRgDIAEoBRIaChJz",
-            "cGF3bl9zZXJ2ZXJfZnJhbWUYBCABKAUSEAoIdG93YXJkX3gYBSABKAISEAoI",
-            "dG93YXJkX3kYBiABKAISEwoLc3Bhd25fcG9zX3gYByABKAISEwoLc3Bhd25f",
-            "cG9zX3kYCCABKAISEwoLc3Bhd25fcG9zX3oYCSABKAIitQEKCkNsaWVudE1v",
-            "dmUSEgoKbW92ZV9mcmFtZRgBIAEoBRIOCgZtb3ZlX3gYAiABKAISDgoGbW92",
-            "ZV95GAMgASgCEhcKD3ByZWRpY3RlZF9wb3NfeBgEIAEoAhIXCg9wcmVkaWN0",
-            "ZWRfcG9zX3kYBSABKAISFwoPcHJlZGljdGVkX3Bvc196GAYgASgCEigKCW1v",
-            "dmVfdHlwZRgHIAEoDjIVLlNvY2tldFByb3RvLk1vdmVUeXBlItgBCg1Nb3Zl",
-            "QWNrUmVzdWx0EhEKCWJhdHRsZV9pZBgBIAEoBRIYChBhY2tlZF9tb3ZlX2Zy",
-            "YW1lGAIgASgFEhUKDWFja19nb29kX21vdmUYAyABKAgSFQoNY29ycmVjdF9w",
-            "b3NfeBgEIAEoAhIVCg1jb3JyZWN0X3Bvc195GAUgASgCEhUKDWNvcnJlY3Rf",
-            "cG9zX3oYBiABKAISGQoRZnJhbWVfZGlzY3JlcGFuY3kYByABKAUSIwobcmVz",
-            "b2x2aW5nX2ZyYW1lX2Rpc2NyZXBhbmN5GAggASgIIsMBCghIaXRFdmVudBIR",
-            "CglhdHRhY2tfaWQYASABKAUSGgoSYXR0YWNrZXJfYmF0dGxlX2lkGAIgASgF",
-            "EhgKEHZpY3RpbV9iYXR0bGVfaWQYAyABKAUSDgoGZGFtYWdlGAQgASgFEhQK",
-            "DGhpdF9mcmFtZV9pZBgFIAEoBRIRCgloaXRfcG9zX3gYBiABKAISEQoJaGl0",
-            "X3Bvc195GAcgASgCEhEKCWhpdF9wb3NfehgIIAEoAhIPCgdpc19raWxsGAkg",
-            "ASgIIosBChhBdXRob3JpdGF0aXZlUGxheWVyU3RhdGUSEQoJYmF0dGxlX2lk",
-            "GAEgASgFEg0KBXBvc194GAIgASgCEg0KBXBvc195GAMgASgCEg0KBXBvc196",
-            "GAQgASgCEgoKAmhwGAUgASgFEg8KB2lzX2RlYWQYBiABKAgSEgoKc3RhdGVf",
-            "bWFzaxgHIAEoDSqGAQoLUmVxdWVzdENvZGUSDwoLUmVxdWVzdE5vbmUQABII",
-            "CgRVc2VyEAESCAoEUm9vbRACEgoKBkZyaWVuZBADEg4KCkZyaWVuZFJvb20Q",
-            "BBIMCghQaW5nUG9uZxAFEgwKCE1hdGNoaW5nEAYSCgoGQmF0dGxlEAcSDgoK",
-            "Q2xlYXJTZW5jZRAIKrUGCgpBY3Rpb25Db2RlEg4KCkFjdGlvbk5vbmUQABIJ",
-            "CgVMb2dvbhABEgkKBUxvZ2luEAISDgoKQ3JlYXRlUm9vbRADEgwKCEZpbmRS",
-            "b29tEAQSDgoKUGxheWVyTGlzdBAFEgwKCEpvaW5Sb29tEAYSCAoERXhpdBAH",
-            "EggKBENoYXQQCBIRCg1BcGx5QWRkRnJpZW5kEAkSEAoMSW52aXRlRnJpZW5k",
-            "EAoSDAoIRmluZE5hbWUQCxIOCgpVcGRhdGVOYW1lEAwSEwoPQWNjZXB0QWRk",
-            "RnJpZW5kEA0SEwoPUmVqZWN0QWRkRnJpZW5kEA4SEgoORmluZFBsYXllcklu",
-            "Zm8QDxITCg9GaW5kRnJpZW5kc0luZm8QEBIPCgtGcmllbmRMb2dpbhAREhAK",
-            "DEZyaWVuZExvZ291dBASEhYKEkFjY2VwdEludmF0ZUZyaWVuZBATEhYKElJl",
-            "amVjdEludmF0ZUZyaWVuZBAUEhYKEkNhbmNhbEludmF0ZUZyaWVuZBAVEgwK",
-            "CEV4aXRSb29tEBYSFQoRR2V0RnJpZW5kUm9vbUluZm8QFxIICgRQaW5nEBgS",
-            "CAoEUG9uZxAZEg4KCkNoYW5nZUhlcm8QGhIaChZVcERhdGVBY3RpdmVGcmll",
-            "bmRJbmZvEBsSFQoRQWRkTWF0Y2hpbmdQbGF5ZXIQHBIYChRSZW1vdmVNYXRj",
-            "aGluZ1BsYXllchAdEhQKEFN0YXJ0RW50ZXJCYXR0bGUQHhIPCgtCYXR0bGVS",
-            "ZWFkeRAfEg8KC0JhdHRsZVN0YXJ0ECASJAogQmF0dGxlUHVzaERvd21BbGxG",
-            "cmFtZU9wZWFydGlvbnMQIRIiCh5CYXR0bGVQdXNoRG93bVBsYXllck9wZWFy",
-            "dGlvbnMQIhIdChlDbGllbnRTZW5kQ2xlYXJTZW5jZVJlYWR5ECMSFgoSQWxs",
-            "Q2xlYXJTZW5jZVJlYWR5ECQSFgoSQ2xpZW50U2VuZEdhbWVPdmVyECUSGgoW",
-            "QmF0dGxlUHVzaERvd21HYW1lT3ZlchAmEhAKDEJhdHRsZVJldmlldxAnEhsK",
-            "F0JhdHRsZVB1c2hEb3duSGl0RXZlbnRzECgqTwoKUmV0dXJuQ29kZRIOCgpS",
-            "ZXR1cm5Ob25lEAASCwoHU3VjY2VlZBABEggKBEZhaWwQAhILCgdOb3RSb29t",
-            "EAMSDQoJQWRkRnJpZW5kEAQqNwoJUm9vbVN0YXRlEg4KClJvb21Ob3JtYWwQ",
-            "ABIMCghSb29tRnVsbBABEgwKCFJvb21HYW1lEAIqaQoLUGxheWVyU3RhdGUS",
-            "EAoMUGxheWVyT25saW5lEAASEQoNUGxheWVyT3V0bGluZRABEg4KClBsYXll",
-            "ckdhbWUQAhIQCgxQbGF5ZXJPblJvb20QAxITCg9QbGF5ZXJPbkludmF0ZWQQ",
-            "BCrrAQoESGVybxIJCgVYdWVMaRAAEgoKBktlRXJUZRABEgoKBlBlaVBlaRAC",
-            "EgkKBVBhbk5pEAMSCAoEQmFMaRAEEgsKB0dvbmdOaXUQBRIKCgZEYUxpRXIQ",
-            "BhIICgRHZUVyEAcSCwoHQnVMdW9LZRAIEg4KCkJhb1BvTWFpS2UQCRIHCgNB",
-            "Qm8QChIICgREaUtlEAsSCQoFQmVpWWEQDBIICgRUYUxhEA0SCwoHTWFpS2VT",
-            "aRAOEgsKB1NpUGFpS2UQDxIJCgVIZWlZYRAQEgkKBUxpQW5nEBESCAoEUGFN",
-            "dRASEgkKBVJ1aUtlEBMqLAoMRmlnaHRQYXR0ZXJuEhEKDUJhb1NoaVpoZW5n",
-            "QmEQABIJCgVTaGVqaRABKiQKCE1vdmVUeXBlEgsKB05ld01vdmUQABILCgdP",
-            "bGRNb3ZlEAFiBnByb3RvMw=="));
+            "U29ja2V0UHJvdG8uU2VydmVyQXR0YWNrIo4BCgxDbGllbnRBdHRhY2sSEQoJ",
+            "YXR0YWNrX2lkGAEgASgFEhkKEWF0dGFja19tb3ZlX2ZyYW1lGAIgASgFEhAK",
+            "CHRvd2FyZF94GAMgASgCEhAKCHRvd2FyZF95GAQgASgCEiwKC2F0dGFja190",
+            "eXBlGAUgASgOMhcuU29ja2V0UHJvdG8uQXR0YWNrVHlwZSKMAgoMU2VydmVy",
+            "QXR0YWNrEhEKCWF0dGFja19pZBgBIAEoBRIhChlhdHRhY2tlcl9iYXR0bGVf",
+            "cGxheWVyX2lkGAIgASgFEhkKEWF0dGFja19tb3ZlX2ZyYW1lGAMgASgFEhoK",
+            "EnNwYXduX3NlcnZlcl9mcmFtZRgEIAEoBRIQCgh0b3dhcmRfeBgFIAEoAhIQ",
+            "Cgh0b3dhcmRfeRgGIAEoAhITCgtzcGF3bl9wb3NfeBgHIAEoAhITCgtzcGF3",
+            "bl9wb3NfeRgIIAEoAhITCgtzcGF3bl9wb3NfehgJIAEoAhIsCgthdHRhY2tf",
+            "dHlwZRgKIAEoDjIXLlNvY2tldFByb3RvLkF0dGFja1R5cGUitQEKCkNsaWVu",
+            "dE1vdmUSEgoKbW92ZV9mcmFtZRgBIAEoBRIOCgZtb3ZlX3gYAiABKAISDgoG",
+            "bW92ZV95GAMgASgCEhcKD3ByZWRpY3RlZF9wb3NfeBgEIAEoAhIXCg9wcmVk",
+            "aWN0ZWRfcG9zX3kYBSABKAISFwoPcHJlZGljdGVkX3Bvc196GAYgASgCEigK",
+            "CW1vdmVfdHlwZRgHIAEoDjIVLlNvY2tldFByb3RvLk1vdmVUeXBlItgBCg1N",
+            "b3ZlQWNrUmVzdWx0EhEKCWJhdHRsZV9pZBgBIAEoBRIYChBhY2tlZF9tb3Zl",
+            "X2ZyYW1lGAIgASgFEhUKDWFja19nb29kX21vdmUYAyABKAgSFQoNY29ycmVj",
+            "dF9wb3NfeBgEIAEoAhIVCg1jb3JyZWN0X3Bvc195GAUgASgCEhUKDWNvcnJl",
+            "Y3RfcG9zX3oYBiABKAISGQoRZnJhbWVfZGlzY3JlcGFuY3kYByABKAUSIwob",
+            "cmVzb2x2aW5nX2ZyYW1lX2Rpc2NyZXBhbmN5GAggASgIIsMBCghIaXRFdmVu",
+            "dBIRCglhdHRhY2tfaWQYASABKAUSGgoSYXR0YWNrZXJfYmF0dGxlX2lkGAIg",
+            "ASgFEhgKEHZpY3RpbV9iYXR0bGVfaWQYAyABKAUSDgoGZGFtYWdlGAQgASgF",
+            "EhQKDGhpdF9mcmFtZV9pZBgFIAEoBRIRCgloaXRfcG9zX3gYBiABKAISEQoJ",
+            "aGl0X3Bvc195GAcgASgCEhEKCWhpdF9wb3NfehgIIAEoAhIPCgdpc19raWxs",
+            "GAkgASgIIpEBCglBdHRhY2tBY2sSGAoQYmF0dGxlX3BsYXllcl9pZBgBIAEo",
+            "BRIRCglhdHRhY2tfaWQYAiABKAUSEAoIYWNjZXB0ZWQYAyABKAgSEgoKbWFu",
+            "YV9hZnRlchgEIAEoBRIVCg1yZWplY3RfcmVhc29uGAUgASgJEhoKEnN1cGVy",
+            "X2VuZXJneV9hZnRlchgGIAEoBSKvAQoYQXV0aG9yaXRhdGl2ZVBsYXllclN0",
+            "YXRlEhEKCWJhdHRsZV9pZBgBIAEoBRINCgVwb3NfeBgCIAEoAhINCgVwb3Nf",
+            "eRgDIAEoAhINCgVwb3NfehgEIAEoAhIKCgJocBgFIAEoBRIPCgdpc19kZWFk",
+            "GAYgASgIEhIKCnN0YXRlX21hc2sYByABKA0SDAoEbWFuYRgIIAEoBRIUCgxz",
+            "dXBlcl9lbmVyZ3kYCSABKAUqhgEKC1JlcXVlc3RDb2RlEg8KC1JlcXVlc3RO",
+            "b25lEAASCAoEVXNlchABEggKBFJvb20QAhIKCgZGcmllbmQQAxIOCgpGcmll",
+            "bmRSb29tEAQSDAoIUGluZ1BvbmcQBRIMCghNYXRjaGluZxAGEgoKBkJhdHRs",
+            "ZRAHEg4KCkNsZWFyU2VuY2UQCCq1BgoKQWN0aW9uQ29kZRIOCgpBY3Rpb25O",
+            "b25lEAASCQoFTG9nb24QARIJCgVMb2dpbhACEg4KCkNyZWF0ZVJvb20QAxIM",
+            "CghGaW5kUm9vbRAEEg4KClBsYXllckxpc3QQBRIMCghKb2luUm9vbRAGEggK",
+            "BEV4aXQQBxIICgRDaGF0EAgSEQoNQXBseUFkZEZyaWVuZBAJEhAKDEludml0",
+            "ZUZyaWVuZBAKEgwKCEZpbmROYW1lEAsSDgoKVXBkYXRlTmFtZRAMEhMKD0Fj",
+            "Y2VwdEFkZEZyaWVuZBANEhMKD1JlamVjdEFkZEZyaWVuZBAOEhIKDkZpbmRQ",
+            "bGF5ZXJJbmZvEA8SEwoPRmluZEZyaWVuZHNJbmZvEBASDwoLRnJpZW5kTG9n",
+            "aW4QERIQCgxGcmllbmRMb2dvdXQQEhIWChJBY2NlcHRJbnZhdGVGcmllbmQQ",
+            "ExIWChJSZWplY3RJbnZhdGVGcmllbmQQFBIWChJDYW5jYWxJbnZhdGVGcmll",
+            "bmQQFRIMCghFeGl0Um9vbRAWEhUKEUdldEZyaWVuZFJvb21JbmZvEBcSCAoE",
+            "UGluZxAYEggKBFBvbmcQGRIOCgpDaGFuZ2VIZXJvEBoSGgoWVXBEYXRlQWN0",
+            "aXZlRnJpZW5kSW5mbxAbEhUKEUFkZE1hdGNoaW5nUGxheWVyEBwSGAoUUmVt",
+            "b3ZlTWF0Y2hpbmdQbGF5ZXIQHRIUChBTdGFydEVudGVyQmF0dGxlEB4SDwoL",
+            "QmF0dGxlUmVhZHkQHxIPCgtCYXR0bGVTdGFydBAgEiQKIEJhdHRsZVB1c2hE",
+            "b3dtQWxsRnJhbWVPcGVhcnRpb25zECESIgoeQmF0dGxlUHVzaERvd21QbGF5",
+            "ZXJPcGVhcnRpb25zECISHQoZQ2xpZW50U2VuZENsZWFyU2VuY2VSZWFkeRAj",
+            "EhYKEkFsbENsZWFyU2VuY2VSZWFkeRAkEhYKEkNsaWVudFNlbmRHYW1lT3Zl",
+            "chAlEhoKFkJhdHRsZVB1c2hEb3dtR2FtZU92ZXIQJhIQCgxCYXR0bGVSZXZp",
+            "ZXcQJxIbChdCYXR0bGVQdXNoRG93bkhpdEV2ZW50cxAoKk8KClJldHVybkNv",
+            "ZGUSDgoKUmV0dXJuTm9uZRAAEgsKB1N1Y2NlZWQQARIICgRGYWlsEAISCwoH",
+            "Tm90Um9vbRADEg0KCUFkZEZyaWVuZBAEKjcKCVJvb21TdGF0ZRIOCgpSb29t",
+            "Tm9ybWFsEAASDAoIUm9vbUZ1bGwQARIMCghSb29tR2FtZRACKmkKC1BsYXll",
+            "clN0YXRlEhAKDFBsYXllck9ubGluZRAAEhEKDVBsYXllck91dGxpbmUQARIO",
+            "CgpQbGF5ZXJHYW1lEAISEAoMUGxheWVyT25Sb29tEAMSEwoPUGxheWVyT25J",
+            "bnZhdGVkEAQq6wEKBEhlcm8SCQoFWHVlTGkQABIKCgZLZUVyVGUQARIKCgZQ",
+            "ZWlQZWkQAhIJCgVQYW5OaRADEggKBEJhTGkQBBILCgdHb25nTml1EAUSCgoG",
+            "RGFMaUVyEAYSCAoER2VFchAHEgsKB0J1THVvS2UQCBIOCgpCYW9Qb01haUtl",
+            "EAkSBwoDQUJvEAoSCAoERGlLZRALEgkKBUJlaVlhEAwSCAoEVGFMYRANEgsK",
+            "B01haUtlU2kQDhILCgdTaVBhaUtlEA8SCQoFSGVpWWEQEBIJCgVMaUFuZxAR",
+            "EggKBFBhTXUQEhIJCgVSdWlLZRATKiwKDEZpZ2h0UGF0dGVybhIRCg1CYW9T",
+            "aGlaaGVuZ0JhEAASCQoFU2hlamkQASokCghNb3ZlVHlwZRILCgdOZXdNb3Zl",
+            "EAASCwoHT2xkTW92ZRABKiMKCkF0dGFja1R5cGUSCgoGTm9ybWFsEAASCQoF",
+            "U3VwZXIQAWIGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
-          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::SocketProto.RequestCode), typeof(global::SocketProto.ActionCode), typeof(global::SocketProto.ReturnCode), typeof(global::SocketProto.RoomState), typeof(global::SocketProto.PlayerState), typeof(global::SocketProto.Hero), typeof(global::SocketProto.FightPattern), typeof(global::SocketProto.MoveType), }, null, new pbr::GeneratedClrTypeInfo[] {
+          new pbr::GeneratedClrTypeInfo(new[] {typeof(global::SocketProto.RequestCode), typeof(global::SocketProto.ActionCode), typeof(global::SocketProto.ReturnCode), typeof(global::SocketProto.RoomState), typeof(global::SocketProto.PlayerState), typeof(global::SocketProto.Hero), typeof(global::SocketProto.FightPattern), typeof(global::SocketProto.MoveType), typeof(global::SocketProto.AttackType), }, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MainPack), global::SocketProto.MainPack.Parser, new[]{ "Requestcode", "Actioncode", "Returncode", "Loginpack", "Str", "Roompack", "Friendspack", "UserInfopack", "Friendroompack", "Playerspack", "Chatpack", "Battleplayerpack", "BattleInfo", "Timestamp" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ChatPack), global::SocketProto.ChatPack.Parser, new[]{ "Playername", "Message", "State" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.LoginPack), global::SocketProto.LoginPack.Parser, new[]{ "Username", "Password" }, null, null, null, null),
@@ -147,15 +155,16 @@ namespace SocketProto {
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.PlayerPack), global::SocketProto.PlayerPack.Parser, new[]{ "Username", "Playername", "Id", "State", "Hero", "Fightpattern" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleInfo), global::SocketProto.BattleInfo.Parser, new[]{ "ServerFrame", "RandSeed", "BattleUsers", "ClientInput", "ServerUpdate" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleClientInput), global::SocketProto.BattleClientInput.Parser, new[]{ "BattlePlayerId", "ClientTick", "AckedServerFrame", "RttMs", "Moves", "Attacks" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleServerUpdate), global::SocketProto.BattleServerUpdate.Parser, new[]{ "Frames", "MoveAck", "HitEvents", "StateBaseFrame" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleServerUpdate), global::SocketProto.BattleServerUpdate.Parser, new[]{ "Frames", "MoveAck", "HitEvents", "StateBaseFrame", "AttackAcks" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleFrame), global::SocketProto.BattleFrame.Parser, new[]{ "ServerFrame", "PlayerInputs", "PlayerStates" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.PlayerFrameInput), global::SocketProto.PlayerFrameInput.Parser, new[]{ "BattlePlayerId", "MoveX", "MoveY", "Attacks" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ClientAttack), global::SocketProto.ClientAttack.Parser, new[]{ "AttackId", "AttackMoveFrame", "TowardX", "TowardY" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ServerAttack), global::SocketProto.ServerAttack.Parser, new[]{ "AttackId", "AttackerBattlePlayerId", "AttackMoveFrame", "SpawnServerFrame", "TowardX", "TowardY", "SpawnPosX", "SpawnPosY", "SpawnPosZ" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ClientAttack), global::SocketProto.ClientAttack.Parser, new[]{ "AttackId", "AttackMoveFrame", "TowardX", "TowardY", "AttackType" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ServerAttack), global::SocketProto.ServerAttack.Parser, new[]{ "AttackId", "AttackerBattlePlayerId", "AttackMoveFrame", "SpawnServerFrame", "TowardX", "TowardY", "SpawnPosX", "SpawnPosY", "SpawnPosZ", "AttackType" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ClientMove), global::SocketProto.ClientMove.Parser, new[]{ "MoveFrame", "MoveX", "MoveY", "PredictedPosX", "PredictedPosY", "PredictedPosZ", "MoveType" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MoveAckResult), global::SocketProto.MoveAckResult.Parser, new[]{ "BattleId", "AckedMoveFrame", "AckGoodMove", "CorrectPosX", "CorrectPosY", "CorrectPosZ", "FrameDiscrepancy", "ResolvingFrameDiscrepancy" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.HitEvent), global::SocketProto.HitEvent.Parser, new[]{ "AttackId", "AttackerBattleId", "VictimBattleId", "Damage", "HitFrameId", "HitPosX", "HitPosY", "HitPosZ", "IsKill" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AuthoritativePlayerState), global::SocketProto.AuthoritativePlayerState.Parser, new[]{ "BattleId", "PosX", "PosY", "PosZ", "Hp", "IsDead", "StateMask" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AttackAck), global::SocketProto.AttackAck.Parser, new[]{ "BattlePlayerId", "AttackId", "Accepted", "ManaAfter", "RejectReason", "SuperEnergyAfter" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AuthoritativePlayerState), global::SocketProto.AuthoritativePlayerState.Parser, new[]{ "BattleId", "PosX", "PosY", "PosZ", "Hp", "IsDead", "StateMask", "Mana", "SuperEnergy" }, null, null, null, null)
           }));
     }
     #endregion
@@ -271,6 +280,11 @@ namespace SocketProto {
   public enum MoveType {
     [pbr::OriginalName("NewMove")] NewMove = 0,
     [pbr::OriginalName("OldMove")] OldMove = 1,
+  }
+
+  public enum AttackType {
+    [pbr::OriginalName("Normal")] Normal = 0,
+    [pbr::OriginalName("Super")] Super = 1,
   }
 
   #endregion
@@ -2819,6 +2833,7 @@ namespace SocketProto {
       moveAck_ = other.moveAck_ != null ? other.moveAck_.Clone() : null;
       hitEvents_ = other.hitEvents_.Clone();
       stateBaseFrame_ = other.stateBaseFrame_;
+      attackAcks_ = other.attackAcks_.Clone();
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -2869,6 +2884,16 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "attack_acks" field.</summary>
+    public const int AttackAcksFieldNumber = 5;
+    private static readonly pb::FieldCodec<global::SocketProto.AttackAck> _repeated_attackAcks_codec
+        = pb::FieldCodec.ForMessage(42, global::SocketProto.AttackAck.Parser);
+    private readonly pbc::RepeatedField<global::SocketProto.AttackAck> attackAcks_ = new pbc::RepeatedField<global::SocketProto.AttackAck>();
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public pbc::RepeatedField<global::SocketProto.AttackAck> AttackAcks {
+      get { return attackAcks_; }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as BattleServerUpdate);
@@ -2886,6 +2911,7 @@ namespace SocketProto {
       if (!object.Equals(MoveAck, other.MoveAck)) return false;
       if(!hitEvents_.Equals(other.hitEvents_)) return false;
       if (StateBaseFrame != other.StateBaseFrame) return false;
+      if(!attackAcks_.Equals(other.attackAcks_)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -2896,6 +2922,7 @@ namespace SocketProto {
       if (moveAck_ != null) hash ^= MoveAck.GetHashCode();
       hash ^= hitEvents_.GetHashCode();
       if (StateBaseFrame != 0) hash ^= StateBaseFrame.GetHashCode();
+      hash ^= attackAcks_.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -2919,6 +2946,7 @@ namespace SocketProto {
         output.WriteRawTag(32);
         output.WriteInt32(StateBaseFrame);
       }
+      attackAcks_.WriteTo(output, _repeated_attackAcks_codec);
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -2935,6 +2963,7 @@ namespace SocketProto {
       if (StateBaseFrame != 0) {
         size += 1 + pb::CodedOutputStream.ComputeInt32Size(StateBaseFrame);
       }
+      size += attackAcks_.CalculateSize(_repeated_attackAcks_codec);
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
       }
@@ -2957,6 +2986,7 @@ namespace SocketProto {
       if (other.StateBaseFrame != 0) {
         StateBaseFrame = other.StateBaseFrame;
       }
+      attackAcks_.Add(other.attackAcks_);
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -2985,6 +3015,10 @@ namespace SocketProto {
           }
           case 32: {
             StateBaseFrame = input.ReadInt32();
+            break;
+          }
+          case 42: {
+            attackAcks_.AddEntriesFrom(input, _repeated_attackAcks_codec);
             break;
           }
         }
@@ -3396,6 +3430,7 @@ namespace SocketProto {
       attackMoveFrame_ = other.attackMoveFrame_;
       towardX_ = other.towardX_;
       towardY_ = other.towardY_;
+      attackType_ = other.attackType_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -3448,6 +3483,17 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "attack_type" field.</summary>
+    public const int AttackTypeFieldNumber = 5;
+    private global::SocketProto.AttackType attackType_ = global::SocketProto.AttackType.Normal;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public global::SocketProto.AttackType AttackType {
+      get { return attackType_; }
+      set {
+        attackType_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as ClientAttack);
@@ -3465,6 +3511,7 @@ namespace SocketProto {
       if (AttackMoveFrame != other.AttackMoveFrame) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(TowardX, other.TowardX)) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(TowardY, other.TowardY)) return false;
+      if (AttackType != other.AttackType) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -3475,6 +3522,7 @@ namespace SocketProto {
       if (AttackMoveFrame != 0) hash ^= AttackMoveFrame.GetHashCode();
       if (TowardX != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(TowardX);
       if (TowardY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(TowardY);
+      if (AttackType != global::SocketProto.AttackType.Normal) hash ^= AttackType.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -3504,6 +3552,10 @@ namespace SocketProto {
         output.WriteRawTag(37);
         output.WriteFloat(TowardY);
       }
+      if (AttackType != global::SocketProto.AttackType.Normal) {
+        output.WriteRawTag(40);
+        output.WriteEnum((int) AttackType);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -3523,6 +3575,9 @@ namespace SocketProto {
       }
       if (TowardY != 0F) {
         size += 1 + 4;
+      }
+      if (AttackType != global::SocketProto.AttackType.Normal) {
+        size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) AttackType);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -3546,6 +3601,9 @@ namespace SocketProto {
       }
       if (other.TowardY != 0F) {
         TowardY = other.TowardY;
+      }
+      if (other.AttackType != global::SocketProto.AttackType.Normal) {
+        AttackType = other.AttackType;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -3572,6 +3630,10 @@ namespace SocketProto {
           }
           case 37: {
             TowardY = input.ReadFloat();
+            break;
+          }
+          case 40: {
+            AttackType = (global::SocketProto.AttackType) input.ReadEnum();
             break;
           }
         }
@@ -3614,6 +3676,7 @@ namespace SocketProto {
       spawnPosX_ = other.spawnPosX_;
       spawnPosY_ = other.spawnPosY_;
       spawnPosZ_ = other.spawnPosZ_;
+      attackType_ = other.attackType_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -3721,6 +3784,17 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "attack_type" field.</summary>
+    public const int AttackTypeFieldNumber = 10;
+    private global::SocketProto.AttackType attackType_ = global::SocketProto.AttackType.Normal;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public global::SocketProto.AttackType AttackType {
+      get { return attackType_; }
+      set {
+        attackType_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as ServerAttack);
@@ -3743,6 +3817,7 @@ namespace SocketProto {
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(SpawnPosX, other.SpawnPosX)) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(SpawnPosY, other.SpawnPosY)) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(SpawnPosZ, other.SpawnPosZ)) return false;
+      if (AttackType != other.AttackType) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -3758,6 +3833,7 @@ namespace SocketProto {
       if (SpawnPosX != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(SpawnPosX);
       if (SpawnPosY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(SpawnPosY);
       if (SpawnPosZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(SpawnPosZ);
+      if (AttackType != global::SocketProto.AttackType.Normal) hash ^= AttackType.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -3807,6 +3883,10 @@ namespace SocketProto {
         output.WriteRawTag(77);
         output.WriteFloat(SpawnPosZ);
       }
+      if (AttackType != global::SocketProto.AttackType.Normal) {
+        output.WriteRawTag(80);
+        output.WriteEnum((int) AttackType);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -3841,6 +3921,9 @@ namespace SocketProto {
       }
       if (SpawnPosZ != 0F) {
         size += 1 + 4;
+      }
+      if (AttackType != global::SocketProto.AttackType.Normal) {
+        size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) AttackType);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -3879,6 +3962,9 @@ namespace SocketProto {
       }
       if (other.SpawnPosZ != 0F) {
         SpawnPosZ = other.SpawnPosZ;
+      }
+      if (other.AttackType != global::SocketProto.AttackType.Normal) {
+        AttackType = other.AttackType;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -3925,6 +4011,10 @@ namespace SocketProto {
           }
           case 77: {
             SpawnPosZ = input.ReadFloat();
+            break;
+          }
+          case 80: {
+            AttackType = (global::SocketProto.AttackType) input.ReadEnum();
             break;
           }
         }
@@ -4908,6 +4998,275 @@ namespace SocketProto {
 
   }
 
+  public sealed partial class AttackAck : pb::IMessage<AttackAck> {
+    private static readonly pb::MessageParser<AttackAck> _parser = new pb::MessageParser<AttackAck>(() => new AttackAck());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pb::MessageParser<AttackAck> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[18]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public AttackAck() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public AttackAck(AttackAck other) : this() {
+      battlePlayerId_ = other.battlePlayerId_;
+      attackId_ = other.attackId_;
+      accepted_ = other.accepted_;
+      manaAfter_ = other.manaAfter_;
+      rejectReason_ = other.rejectReason_;
+      superEnergyAfter_ = other.superEnergyAfter_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public AttackAck Clone() {
+      return new AttackAck(this);
+    }
+
+    /// <summary>Field number for the "battle_player_id" field.</summary>
+    public const int BattlePlayerIdFieldNumber = 1;
+    private int battlePlayerId_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int BattlePlayerId {
+      get { return battlePlayerId_; }
+      set {
+        battlePlayerId_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "attack_id" field.</summary>
+    public const int AttackIdFieldNumber = 2;
+    private int attackId_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int AttackId {
+      get { return attackId_; }
+      set {
+        attackId_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "accepted" field.</summary>
+    public const int AcceptedFieldNumber = 3;
+    private bool accepted_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public bool Accepted {
+      get { return accepted_; }
+      set {
+        accepted_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "mana_after" field.</summary>
+    public const int ManaAfterFieldNumber = 4;
+    private int manaAfter_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int ManaAfter {
+      get { return manaAfter_; }
+      set {
+        manaAfter_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "reject_reason" field.</summary>
+    public const int RejectReasonFieldNumber = 5;
+    private string rejectReason_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public string RejectReason {
+      get { return rejectReason_; }
+      set {
+        rejectReason_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
+    /// <summary>Field number for the "super_energy_after" field.</summary>
+    public const int SuperEnergyAfterFieldNumber = 6;
+    private int superEnergyAfter_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int SuperEnergyAfter {
+      get { return superEnergyAfter_; }
+      set {
+        superEnergyAfter_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override bool Equals(object other) {
+      return Equals(other as AttackAck);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public bool Equals(AttackAck other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (BattlePlayerId != other.BattlePlayerId) return false;
+      if (AttackId != other.AttackId) return false;
+      if (Accepted != other.Accepted) return false;
+      if (ManaAfter != other.ManaAfter) return false;
+      if (RejectReason != other.RejectReason) return false;
+      if (SuperEnergyAfter != other.SuperEnergyAfter) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (BattlePlayerId != 0) hash ^= BattlePlayerId.GetHashCode();
+      if (AttackId != 0) hash ^= AttackId.GetHashCode();
+      if (Accepted != false) hash ^= Accepted.GetHashCode();
+      if (ManaAfter != 0) hash ^= ManaAfter.GetHashCode();
+      if (RejectReason.Length != 0) hash ^= RejectReason.GetHashCode();
+      if (SuperEnergyAfter != 0) hash ^= SuperEnergyAfter.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void WriteTo(pb::CodedOutputStream output) {
+      if (BattlePlayerId != 0) {
+        output.WriteRawTag(8);
+        output.WriteInt32(BattlePlayerId);
+      }
+      if (AttackId != 0) {
+        output.WriteRawTag(16);
+        output.WriteInt32(AttackId);
+      }
+      if (Accepted != false) {
+        output.WriteRawTag(24);
+        output.WriteBool(Accepted);
+      }
+      if (ManaAfter != 0) {
+        output.WriteRawTag(32);
+        output.WriteInt32(ManaAfter);
+      }
+      if (RejectReason.Length != 0) {
+        output.WriteRawTag(42);
+        output.WriteString(RejectReason);
+      }
+      if (SuperEnergyAfter != 0) {
+        output.WriteRawTag(48);
+        output.WriteInt32(SuperEnergyAfter);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int CalculateSize() {
+      int size = 0;
+      if (BattlePlayerId != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(BattlePlayerId);
+      }
+      if (AttackId != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(AttackId);
+      }
+      if (Accepted != false) {
+        size += 1 + 1;
+      }
+      if (ManaAfter != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(ManaAfter);
+      }
+      if (RejectReason.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(RejectReason);
+      }
+      if (SuperEnergyAfter != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(SuperEnergyAfter);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(AttackAck other) {
+      if (other == null) {
+        return;
+      }
+      if (other.BattlePlayerId != 0) {
+        BattlePlayerId = other.BattlePlayerId;
+      }
+      if (other.AttackId != 0) {
+        AttackId = other.AttackId;
+      }
+      if (other.Accepted != false) {
+        Accepted = other.Accepted;
+      }
+      if (other.ManaAfter != 0) {
+        ManaAfter = other.ManaAfter;
+      }
+      if (other.RejectReason.Length != 0) {
+        RejectReason = other.RejectReason;
+      }
+      if (other.SuperEnergyAfter != 0) {
+        SuperEnergyAfter = other.SuperEnergyAfter;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(pb::CodedInputStream input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+        switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            BattlePlayerId = input.ReadInt32();
+            break;
+          }
+          case 16: {
+            AttackId = input.ReadInt32();
+            break;
+          }
+          case 24: {
+            Accepted = input.ReadBool();
+            break;
+          }
+          case 32: {
+            ManaAfter = input.ReadInt32();
+            break;
+          }
+          case 42: {
+            RejectReason = input.ReadString();
+            break;
+          }
+          case 48: {
+            SuperEnergyAfter = input.ReadInt32();
+            break;
+          }
+        }
+      }
+    }
+
+  }
+
   public sealed partial class AuthoritativePlayerState : pb::IMessage<AuthoritativePlayerState> {
     private static readonly pb::MessageParser<AuthoritativePlayerState> _parser = new pb::MessageParser<AuthoritativePlayerState>(() => new AuthoritativePlayerState());
     private pb::UnknownFieldSet _unknownFields;
@@ -4916,7 +5275,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[18]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[19]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4940,6 +5299,8 @@ namespace SocketProto {
       hp_ = other.hp_;
       isDead_ = other.isDead_;
       stateMask_ = other.stateMask_;
+      mana_ = other.mana_;
+      superEnergy_ = other.superEnergy_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -5025,6 +5386,28 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "mana" field.</summary>
+    public const int ManaFieldNumber = 8;
+    private int mana_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int Mana {
+      get { return mana_; }
+      set {
+        mana_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "super_energy" field.</summary>
+    public const int SuperEnergyFieldNumber = 9;
+    private int superEnergy_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int SuperEnergy {
+      get { return superEnergy_; }
+      set {
+        superEnergy_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as AuthoritativePlayerState);
@@ -5045,6 +5428,8 @@ namespace SocketProto {
       if (Hp != other.Hp) return false;
       if (IsDead != other.IsDead) return false;
       if (StateMask != other.StateMask) return false;
+      if (Mana != other.Mana) return false;
+      if (SuperEnergy != other.SuperEnergy) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -5058,6 +5443,8 @@ namespace SocketProto {
       if (Hp != 0) hash ^= Hp.GetHashCode();
       if (IsDead != false) hash ^= IsDead.GetHashCode();
       if (StateMask != 0) hash ^= StateMask.GetHashCode();
+      if (Mana != 0) hash ^= Mana.GetHashCode();
+      if (SuperEnergy != 0) hash ^= SuperEnergy.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -5099,6 +5486,14 @@ namespace SocketProto {
         output.WriteRawTag(56);
         output.WriteUInt32(StateMask);
       }
+      if (Mana != 0) {
+        output.WriteRawTag(64);
+        output.WriteInt32(Mana);
+      }
+      if (SuperEnergy != 0) {
+        output.WriteRawTag(72);
+        output.WriteInt32(SuperEnergy);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -5127,6 +5522,12 @@ namespace SocketProto {
       }
       if (StateMask != 0) {
         size += 1 + pb::CodedOutputStream.ComputeUInt32Size(StateMask);
+      }
+      if (Mana != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(Mana);
+      }
+      if (SuperEnergy != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(SuperEnergy);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -5159,6 +5560,12 @@ namespace SocketProto {
       }
       if (other.StateMask != 0) {
         StateMask = other.StateMask;
+      }
+      if (other.Mana != 0) {
+        Mana = other.Mana;
+      }
+      if (other.SuperEnergy != 0) {
+        SuperEnergy = other.SuperEnergy;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -5197,6 +5604,14 @@ namespace SocketProto {
           }
           case 56: {
             StateMask = input.ReadUInt32();
+            break;
+          }
+          case 64: {
+            Mana = input.ReadInt32();
+            break;
+          }
+          case 72: {
+            SuperEnergy = input.ReadInt32();
             break;
           }
         }

@@ -391,12 +391,15 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                         Vector3 dir = LZJ.MathFixed.xAndY2UnitVector3(attackOp.TowardY, attackOp.TowardX);
                         dir.x *= -1;
 
+                        FireState predictedFireState = attackOp.AttackType == AttackType.Super
+                            ? FireState.ShotgunSuper
+                            : FireState.PstolNormal;
                         // 这里只生成视觉子弹；真正命中与伤害仍以服务端权威结果为准。
-                        bulletManger.SpawnVisualBullet(selfIdx, selfPos, dir, FireState.PstolNormal);
+                        bulletManger.SpawnVisualBullet(selfIdx, selfPos, dir, predictedFireState);
                         // 标记该 AttackId 已做过预测，后续重发或权威帧回放时用于去重。
                         Manger.BattleData.Instance.MarkAttackPredicted(attackOp.AttackId);
                         Logging.HYLDDebug.FrameTrace($"[PredBullet]" +
-                            $" SPAWN attackId={attackOp.AttackId} pos=({selfPos.x:F2},{selfPos.z:F2}) dir=({dir.x:F2},{dir.z:F2})");
+                            $" SPAWN attackId={attackOp.AttackId} type={attackOp.AttackType} pos=({selfPos.x:F2},{selfPos.z:F2}) dir=({dir.x:F2},{dir.z:F2})");
                     }
                 }
             }

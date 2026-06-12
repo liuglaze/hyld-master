@@ -23,6 +23,12 @@ namespace Server
 				ServerVector3 pos = kvp.Value;
 				int hp = playerHp.TryGetValue(bpId, out int hpVal) ? hpVal : 0;
 				bool isDead = playerIsDead.TryGetValue(bpId, out bool deadVal) && deadVal;
+				if (!playerMana.TryGetValue(bpId, out int mana))
+				{
+					Logging.Debug.Log($"[AuthState] SKIP bp={bpId} reason=mana_state_missing frame={currentFrameId}");
+					continue;
+				}
+				int superEnergy = playerSuperEnergy.TryGetValue(bpId, out int superEnergyVal) ? superEnergyVal : 0;
 				frameOp.PlayerStates.Add(new AuthoritativePlayerState
 				{
 					BattleId = bpId,
@@ -31,6 +37,8 @@ namespace Server
 					PosZ = pos.Z,
 					Hp = hp,
 					IsDead = isDead,
+					Mana = mana,
+					SuperEnergy = superEnergy,
 					StateMask = AuthorityStateMaskAll,
 				});
 			}
@@ -81,6 +89,15 @@ namespace Server
 				{
 					foreach (HitEvent evt in hitEventsThisFrame)
 						battleInfo.ServerUpdate.HitEvents.Add(evt);
+				}
+				if (dic_pendingAttackAcks != null
+					&& dic_pendingAttackAcks.TryGetValue(battlePlayerId, out List<AttackAck> attackAcks)
+					&& attackAcks.Count > 0)
+				{
+					foreach (AttackAck ack in attackAcks)
+					{
+						battleInfo.ServerUpdate.AttackAcks.Add(ack.Clone());
+					}
 				}
 
 				pack.BattleInfo = battleInfo;
@@ -153,6 +170,14 @@ namespace Server
 				{
 					deltaState.IsDead = currentState.IsDead;
 				}
+				if ((mask & AuthorityStateMaskMana) != 0)
+				{
+					deltaState.Mana = currentState.Mana;
+				}
+				if ((mask & AuthorityStateMaskSuperEnergy) != 0)
+				{
+					deltaState.SuperEnergy = currentState.SuperEnergy;
+				}
 				result.PlayerStates.Add(deltaState);
 				deltaStateCount++;
 			}
@@ -184,6 +209,14 @@ namespace Server
 			if (currentState.IsDead != baseState.IsDead)
 			{
 				mask |= AuthorityStateMaskDead;
+			}
+			if (currentState.Mana != baseState.Mana)
+			{
+				mask |= AuthorityStateMaskMana;
+			}
+			if (currentState.SuperEnergy != baseState.SuperEnergy)
+			{
+				mask |= AuthorityStateMaskSuperEnergy;
 			}
 			return mask;
 		}
@@ -253,7 +286,7 @@ namespace Server
 				{
 					foreach (var incomingAttack in input.Attacks)
 					{
-						Logging.Debug.Log($"[SERVER DEBUG] 收到来自 BattlePlayerID {battlePlayerId} 的攻击. 原始方向: ({incomingAttack.TowardX}, {incomingAttack.TowardY}) attackMoveFrame={incomingAttack.AttackMoveFrame}");
+						Logging.Debug.Log($"[SERVER DEBUG] 收到来自 BattlePlayerID {battlePlayerId} 的攻击. type={incomingAttack.AttackType} 原始方向: ({incomingAttack.TowardX}, {incomingAttack.TowardY}) attackMoveFrame={incomingAttack.AttackMoveFrame}");
 
 						// 攻击允许有一定延迟补偿空间，但不是无限回补。
 						// 若攻击声明的 clientFrameId 距当前服务端帧已经太老，就拒绝进入待处理队列，
@@ -262,6 +295,10 @@ namespace Server
 						if (incomingAttack.AttackMoveFrame > 0 && frameDelay > MaxAcceptableAttackDelay)
 						{
 							Logging.Debug.Log($"[AttackTimeout] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} attackMoveFrame={incomingAttack.AttackMoveFrame} serverFrame={frameid} delay={frameDelay} max={MaxAcceptableAttackDelay}");
+							if (playerMana.TryGetValue(battlePlayerId, out int timeoutMana))
+							{
+								RecordAttackAck(battlePlayerId, incomingAttack.AttackId, false, timeoutMana, GetSuperEnergy(battlePlayerId), "timeout");
+							}
 							continue;
 						}
 
@@ -270,6 +307,50 @@ namespace Server
 						// 这允许客户端在 UDP 丢包时持续重发“同一次攻击”，而服务端只真正处理一次。
 						if (incomingAttack.AttackId > dic_lastProcessedAttackId[battlePlayerId])
 						{
+							if (!playerMana.TryGetValue(battlePlayerId, out int currentMana)
+								|| playerHeroes == null
+								|| !playerHeroes.TryGetValue(battlePlayerId, out Hero hero))
+							{
+								Logging.Debug.Log($"[AttackMana] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} reason=resource_state_missing");
+								continue;
+							}
+
+							int currentSuperEnergy = GetSuperEnergy(battlePlayerId);
+							if (incomingAttack.AttackType == AttackType.Super)
+							{
+								if (!HeroConfig.TryGetSuper(hero, out _))
+								{
+									dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
+									RecordAttackAck(battlePlayerId, incomingAttack.AttackId, false, currentMana, currentSuperEnergy, "unsupported_super");
+									Logging.Debug.Log($"[SuperEnergy] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} reason=unsupported_super hero={hero}");
+									continue;
+								}
+								if (currentSuperEnergy < HeroConfig.SuperEnergyMax)
+								{
+									dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
+									RecordAttackAck(battlePlayerId, incomingAttack.AttackId, false, currentMana, currentSuperEnergy, "super_energy");
+									Logging.Debug.Log($"[SuperEnergy] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} energy={currentSuperEnergy} max={HeroConfig.SuperEnergyMax}");
+									continue;
+								}
+								currentSuperEnergy = 0;
+								playerSuperEnergy[battlePlayerId] = currentSuperEnergy;
+							}
+							else
+							{
+								int manaCost = HeroConfig.GetAttackManaCost(hero);
+								if (currentMana < manaCost)
+								{
+									dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
+									RecordAttackAck(battlePlayerId, incomingAttack.AttackId, false, currentMana, currentSuperEnergy, "mana");
+									Logging.Debug.Log($"[AttackMana] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} mana={currentMana} cost={manaCost}");
+									continue;
+								}
+
+								currentMana -= manaCost;
+								playerMana[battlePlayerId] = currentMana;
+								playerManaRegenTimerMs[battlePlayerId] = 0f;
+							}
+
 							bufferedAttackOperation.Attacks.Add(new ServerAttack
 							{
 								AttackId = incomingAttack.AttackId,
@@ -277,9 +358,11 @@ namespace Server
 								AttackMoveFrame = incomingAttack.AttackMoveFrame,
 								TowardX = incomingAttack.TowardX,
 								TowardY = incomingAttack.TowardY,
+								AttackType = incomingAttack.AttackType,
 							});
 							dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
-							Logging.Debug.Log($"[AttackDedup] ACCEPT bp={battlePlayerId} attackId={incomingAttack.AttackId} lastProcessed={dic_lastProcessedAttackId[battlePlayerId]} delay={frameDelay}");
+							RecordAttackAck(battlePlayerId, incomingAttack.AttackId, true, currentMana, currentSuperEnergy, "");
+							Logging.Debug.Log($"[AttackDedup] ACCEPT bp={battlePlayerId} attackId={incomingAttack.AttackId} type={incomingAttack.AttackType} lastProcessed={dic_lastProcessedAttackId[battlePlayerId]} delay={frameDelay}");
 						}
 						else
 						{
@@ -288,11 +371,61 @@ namespace Server
                             if (repeatedSameAttack)
                             {
                                 Logging.Debug.Log($"[CriticalInput][AttackBurstIdempotent] bp={battlePlayerId} attackId={incomingAttack.AttackId} frame={frameid} delay={frameDelay}");
+								RepeatRecentAttackAck(battlePlayerId, incomingAttack.AttackId);
                             }
 						}
 					}
 				}
 			}
+		}
+
+		private int GetSuperEnergy(int battlePlayerId)
+		{
+			return playerSuperEnergy != null && playerSuperEnergy.TryGetValue(battlePlayerId, out int energy)
+				? energy
+				: 0;
+		}
+
+		private void RecordAttackAck(int battlePlayerId, int attackId, bool accepted, int manaAfter, int superEnergyAfter, string rejectReason)
+		{
+			AttackAck ack = new AttackAck
+			{
+				BattlePlayerId = battlePlayerId,
+				AttackId = attackId,
+				Accepted = accepted,
+				ManaAfter = manaAfter,
+				SuperEnergyAfter = superEnergyAfter,
+				RejectReason = rejectReason ?? "",
+			};
+
+			if (!dic_pendingAttackAcks.TryGetValue(battlePlayerId, out List<AttackAck> pendingAcks))
+			{
+				pendingAcks = new List<AttackAck>();
+				dic_pendingAttackAcks[battlePlayerId] = pendingAcks;
+			}
+			pendingAcks.Add(ack);
+
+			if (!dic_recentAttackAcks.TryGetValue(battlePlayerId, out Dictionary<int, AttackAck> recentAcks))
+			{
+				recentAcks = new Dictionary<int, AttackAck>();
+				dic_recentAttackAcks[battlePlayerId] = recentAcks;
+			}
+			recentAcks[attackId] = ack.Clone();
+		}
+
+		private void RepeatRecentAttackAck(int battlePlayerId, int attackId)
+		{
+			if (!dic_recentAttackAcks.TryGetValue(battlePlayerId, out Dictionary<int, AttackAck> recentAcks)
+				|| !recentAcks.TryGetValue(attackId, out AttackAck ack))
+			{
+				return;
+			}
+			if (!dic_pendingAttackAcks.TryGetValue(battlePlayerId, out List<AttackAck> pendingAcks))
+			{
+				pendingAcks = new List<AttackAck>();
+				dic_pendingAttackAcks[battlePlayerId] = pendingAcks;
+			}
+			pendingAcks.Add(ack.Clone());
 		}
 
 		private void StoreAuthorityStateSnapshot(int frameId, Google.Protobuf.Collections.RepeatedField<AuthoritativePlayerState> states)
@@ -336,6 +469,8 @@ namespace Server
 				PosZ = state.PosZ,
 				Hp = state.Hp,
 				IsDead = state.IsDead,
+				Mana = state.Mana,
+				SuperEnergy = state.SuperEnergy,
 			};
 		}
 

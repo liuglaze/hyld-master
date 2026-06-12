@@ -11,10 +11,11 @@
   - `server_frame`：服务端权威帧号；下行权威帧包填写，上行可为 0。
   - `rand_seed`、`battle_users`：开局初始化信息。
   - `client_input`：客户端上行输入，包含 `battle_player_id`、`client_tick`、`acked_server_frame`、`rtt_ms`、`moves`、`attacks`。
-  - `server_update`：服务端下行更新，包含 `frames`、`move_ack`、`hit_events`。
+  - `server_update`：服务端下行更新，包含 `frames`、`move_ack`、`hit_events`、`state_base_frame`、`attack_acks`。
 - **移动上行**：只走 `BattleClientInput.moves`（`ClientMove`），按 `move_frame` 做 CMC-style 单调处理。
-- **攻击上行**：只走 `BattleClientInput.attacks`（`ClientAttack`），字段为 `attack_id`、`attack_move_frame`、`toward_x/y`。
+- **攻击上行**：只走 `BattleClientInput.attacks`（`ClientAttack`），字段为 `attack_id`、`attack_move_frame`、`toward_x/y`、`attack_type`。
 - **权威下行**：只走 `BattleServerUpdate.frames`（`BattleFrame`），每帧包含 `player_inputs` 与 `player_states`；攻击表现使用 `ServerAttack`，包含 `spawn_pos_x/y/z` 与 `spawn_server_frame`。
+- **攻击资源**：服务端维护普通攻击蓝量与大招能量，`BattleServerUpdate.attack_acks` 确认每个本地攻击是否被接受；`AuthoritativePlayerState.mana` / `super_energy` 持续同步 UI 资源。
 - **已删除旧字段/旧类型**：`BattleInfo.selfOperation`、`BattleInfo.client_moves`、`BattleInfo.client_acked_frame`、`BattleInfo.client_rtt_ms`、`BattleInfo.acked_move_frame`、顶层 `BattleInfo.move_ack`、顶层 `BattleInfo.hit_events`、`BattleFrameSync`、`PlayerOperation`、`AttackOperation`。
 - **不做兼容兜底**：客户端与服务端必须由同一份权威 `SocketProto.proto` 生成后一起运行。
 
@@ -363,11 +364,13 @@
 - **目标**：保持服务端每个 ServerFrame 仍下发权威帧时钟包，但将 `BattleFrame.player_states` 从每包全字段改为按接收客户端已确认状态生成增量，降低包体大小且不影响 `targetFrame` 对时。
 - **新增 proto 字段**：
   - `BattleServerUpdate.state_base_frame = 4`：本次增量使用的接收端状态基准帧，仅用于日志和联调校验。
-  - `AuthoritativePlayerState.state_mask = 7`：字段有效位，bit0=position(`pos_x/y/z`)，bit1=`hp`，bit2=`is_dead`。
+  - `AuthoritativePlayerState.state_mask`（field 7）：字段有效位，bit0=position(`pos_x/y/z`)，bit1=`hp`，bit2=`is_dead`，bit3=`mana`，bit4=`super_energy`。
+  - `AuthoritativePlayerState.mana = 8`：服务端权威普通攻击蓝量，用于客户端资源 UI 校正。
+  - `AuthoritativePlayerState.super_energy = 9`：服务端权威大招能量，用于客户端能量条和大招摇杆 UI 校正。
 - **服务端发送语义**：
   - `BattleInfo.server_frame` 与 `BattleFrame.server_frame` 每包仍写当前 ServerFrame；服务端不降低下行帧频率。
   - 服务端内部仍保存每帧完整权威状态快照；网络发送时按接收客户端的 acknowledged snapshot 生成 delta。
-  - 客户端未确认任何状态基准前，服务端对该客户端持续发送全字段状态（`state_mask=7`）。
+  - 客户端未确认任何状态基准前，服务端对该客户端持续发送全字段状态（当前全字段 `state_mask=15`）。
   - 收到客户端上行 `acked_server_frame` 后，服务端若仍保存该帧完整快照，则把该接收客户端的增量基准推进到该帧。
   - `player_inputs`、`move_ack`、`hit_events` 语义不变。
 - **客户端消费语义**：
@@ -377,6 +380,33 @@
 - **丢包语义**：
   - 若某个 delta 包丢失，客户端不会 ack 该 ServerFrame；服务端后续仍按旧 acknowledged snapshot 计算 delta，因此会继续包含所有相对旧基准发生变化的字段。
   - 同一当前帧重复到达时，客户端合并操作保持幂等；HitEvent 仍按既有 key 去重。
+
+---
+
+## 28. 攻击资源服务端权威化（2026-06）
+
+- **范围**：普通攻击蓝量和子弹型大招能量均由服务端权威维护。移动型/召唤型大招本轮不接入，客户端不发送，服务端收到未配置大招会拒绝。
+- **proto 新增**：
+  - `enum AttackType { Normal=0; Super=1; }`：标记 `ClientAttack` / `ServerAttack` 是普通攻击还是大招。
+  - `BattleServerUpdate.attack_acks = 5`：服务端给攻击发起者下发普通攻击确认。
+  - `message AttackAck { battle_player_id, attack_id, accepted, mana_after, reject_reason, super_energy_after }`。
+  - `AuthoritativePlayerState.mana = 8`，并由 `state_mask` bit3 标记是否有效。
+  - `AuthoritativePlayerState.super_energy = 9`，并由 `state_mask` bit4 标记是否有效。
+- **服务端所有权**：
+  - 开局每个玩家 `mana=90`。
+  - 普通攻击消耗：默认 30，贝亚 90。
+  - 恢复：按英雄 `装弹速度` 秒数每满一格恢复 30，不超过 90。
+  - 开局每个玩家 `super_energy=0`，最大值 3000。服务端命中结算时按实际伤害 `damage / 2` 给攻击者充能并封顶。
+  - 服务端收到新 `ClientAttack` 后先做过期与 `AttackId` 去重，再按 `attack_type` 检查资源。普通攻击蓝量足够才扣蓝；大招要求 `super_energy >= 3000` 且该英雄存在服务端子弹型大招配置，通过后清零。
+  - 资源不足或大招类型未支持时不进入 `player_inputs.attacks`，回 `AttackAck(accepted=false, reject_reason="mana" | "super_energy" | "unsupported_super")`。
+  - 同一 `AttackId` 重发不重复扣蓝；服务端可重发最近 ack，避免客户端 pending 清不掉。
+- **客户端语义**：
+  - `EnqueueAttack` 先按本地英雄配置预测扣 `playerManaValue`；蓝量不足不入队、不发 `ClientAttack`。
+  - 大招本地要求 `当前能量 >= 最大能量` 且英雄有子弹型大招配置，入队后预测 `当前能量=0`、`可以按大招=false`。
+  - 收到本玩家 `AttackAck` 后，用 `mana_after` 覆写本地蓝量，用 `super_energy_after` 覆写本地大招能量，并从 `pendingAttacks` 移除对应 `AttackId`。
+  - accepted 的本地预测子弹不因 ack 被销毁；rejected 只校正蓝量并清 pending，已生成的纯视觉子弹自然飞完。
+  - 收到权威 `PlayerStates.mana` / `super_energy` 时同样覆写资源 UI，最终以服务端状态为准。
+  - 普通攻击和大招都算关键输入，触发同帧 burst-send。
 
 ---
 

@@ -10,6 +10,11 @@ namespace Server
     /// </summary>
     public static class HeroConfig
     {
+        public const int ManaMax = 90;
+        public const int ManaPerSegment = 30;
+        public const int DefaultAttackManaCost = 30;
+        public const int SuperEnergyMax = 3000;
+
         public struct BulletParams
         {
             public float BulletSpeed;       // 子弹速度（单位/秒）
@@ -69,6 +74,21 @@ namespace Server
             return _default;
         }
 
+        private static readonly Dictionary<Hero, BulletParams> _superConfig = new Dictionary<Hero, BulletParams>
+        {
+            [Hero.RuiKe] = new BulletParams { BulletSpeed=19, BulletMaxDist=14, HitRadius=DefaultHitRadius, Damage=400, BulletCount=12, SpreadAngle=0f, IsParabola=false },
+            [Hero.KeErTe] = new BulletParams { BulletSpeed=18, BulletMaxDist=12, HitRadius=DefaultHitRadius, Damage=340, BulletCount=12, SpreadAngle=0f, IsParabola=false },
+            [Hero.XueLi] = new BulletParams { BulletSpeed=14, BulletMaxDist=6, HitRadius=DefaultHitRadius, Damage=80, BulletCount=40, SpreadAngle=40f, IsParabola=false },
+            [Hero.GeEr] = new BulletParams { BulletSpeed=14, BulletMaxDist=7, HitRadius=DefaultHitRadius, Damage=448, BulletCount=4, SpreadAngle=0f, IsParabola=false },
+            [Hero.BeiYa] = new BulletParams { BulletSpeed=10, BulletMaxDist=10, HitRadius=DefaultHitRadius, Damage=60, BulletCount=6, SpreadAngle=0f, IsParabola=false },
+            [Hero.PaMu] = new BulletParams { BulletSpeed=5, BulletMaxDist=2, HitRadius=DefaultHitRadius, Damage=300, BulletCount=1, SpreadAngle=0f, IsParabola=true },
+        };
+
+        public static bool TryGetSuper(Hero hero, out BulletParams p)
+        {
+            return _superConfig.TryGetValue(hero, out p);
+        }
+
         // ---- HP 配置 ----
         // 临时降低血量（约原值 1/5），减少测试期子弹累积量避免 Editor 崩溃。
         // 后续对象池优化完成后恢复原始血量。
@@ -104,5 +124,39 @@ namespace Server
         {
             return _hpConfig.TryGetValue(hero, out int hp) ? hp : DefaultHp;
         }
+
+        public static int GetAttackManaCost(Hero hero)
+        {
+            return hero == Hero.BeiYa ? ManaMax : DefaultAttackManaCost;
+        }
+
+        public static float GetReloadSeconds(Hero hero)
+        {
+            return _reloadSeconds[hero];
+        }
+
+        private static readonly Dictionary<Hero, float> _reloadSeconds = new Dictionary<Hero, float>
+        {
+            [Hero.DaLiEr] = 2f,
+            [Hero.GongNiu] = 1f,
+            [Hero.RuiKe] = 1f,
+            [Hero.Abo] = 1f,
+            [Hero.MaiKeSi] = 2f,
+            [Hero.TaLa] = 1f,
+            [Hero.PaMu] = 1f,
+            [Hero.HeiYa] = 2f,
+            [Hero.PeiPei] = 1f,
+            [Hero.LiAng] = 1f,
+            [Hero.GeEr] = 1f,
+            [Hero.PanNi] = 1f,
+            [Hero.KeErTe] = 1f,
+            [Hero.XueLi] = 1f,
+            [Hero.BuLuoKe] = 1f,
+            [Hero.BeiYa] = 9f,
+            [Hero.SiPaiKe] = 1f,
+            [Hero.BaoPoMaiKe] = 1f,
+            [Hero.BaLi] = 1f,
+            [Hero.DiKe] = 1f,
+        };
     }
 }

@@ -56,9 +56,13 @@ namespace Manger
             public float PosZ;
             public int Hp;
             public bool IsDead;
+            public int Mana;
+            public int SuperEnergy;
             public bool HasPosition;
             public bool HasHp;
             public bool HasDead;
+            public bool HasMana;
+            public bool HasSuperEnergy;
         }
 
         // ═══════ 核心集合 ═══════
@@ -72,7 +76,9 @@ namespace Manger
         private const uint AuthorityStateMaskPosition = 1u;
         private const uint AuthorityStateMaskHp = 2u;
         private const uint AuthorityStateMaskDead = 4u;
-        private const uint AuthorityStateMaskAll = AuthorityStateMaskPosition | AuthorityStateMaskHp | AuthorityStateMaskDead;
+        private const uint AuthorityStateMaskMana = 8u;
+        private const uint AuthorityStateMaskSuperEnergy = 16u;
+        private const uint AuthorityStateMaskAll = AuthorityStateMaskPosition | AuthorityStateMaskHp | AuthorityStateMaskDead | AuthorityStateMaskMana | AuthorityStateMaskSuperEnergy;
 
         // ═══════ 权威位置校正（CSP 模式） ═══════
         private Vector3 lastAuthorityPosition;
@@ -267,6 +273,7 @@ namespace Manger
                 cloned.AttackMoveFrame = attackOp.AttackMoveFrame;
                 cloned.TowardX = attackOp.TowardX;
                 cloned.TowardY = attackOp.TowardY;
+                cloned.AttackType = attackOp.AttackType;
                 copy.Attacks.Add(cloned);
             }
             return copy;

@@ -207,6 +207,13 @@ namespace Manger
 
                 // [AHS-2] 覆写 HP
                 HYLDStaticValue.Players[playerIndex].playerBloodValue = newHp;
+                HYLDStaticValue.Players[playerIndex].playerManaValue = Mathf.Clamp(state.Mana, 0, 90);
+                HYLDStaticValue.Players[playerIndex].当前能量 = Mathf.Clamp(
+                    state.SuperEnergy,
+                    0,
+                    HYLDStaticValue.Players[playerIndex].最大能量);
+                HYLDStaticValue.Players[playerIndex].可以按大招 =
+                    HYLDStaticValue.Players[playerIndex].当前能量 >= HYLDStaticValue.Players[playerIndex].最大能量;
                 Logging.HYLDDebug.FrameTrace($"[AHS-2] AuthHP: player={playerIndex} oldHp={oldHp} newHp={newHp} isDead={state.IsDead} frame={frameId}");
 
                 // [AHS-3] 兜底受击动画：HP 下降但无 HitEvent 动画时补播

@@ -19,10 +19,21 @@ namespace Server
 				if (!playerTeamIds.TryGetValue(bpId, out int teamId)) continue;
 				if (!playerHeroes.TryGetValue(bpId, out Hero hero)) continue;
 
-				HeroConfig.BulletParams cfg = HeroConfig.Get(hero);
-
 				foreach (ServerAttack atk in op.Attacks)
 				{
+					HeroConfig.BulletParams cfg;
+					if (atk.AttackType == AttackType.Super)
+					{
+						if (!HeroConfig.TryGetSuper(hero, out cfg))
+						{
+							Logging.Debug.Log($"[SuperBullet][Skip] bp={bpId} attackId={atk.AttackId} hero={hero} reason=missing_super_config");
+							continue;
+						}
+					}
+					else
+					{
+						cfg = HeroConfig.Get(hero);
+					}
 					int clientFrameId = atk.AttackMoveFrame;
 					// 服务端 clamp：防止客户端帧号超过服务端当前帧（丢包恢复后 predicted_frameID 跳跃导致）
 					if (clientFrameId > frameid)
@@ -106,7 +117,7 @@ namespace Server
 			ServerVector3 baseDir = new ServerVector3(baseX, 0, baseZ).Normalized();
 			if (baseDir.Magnitude() < 1e-6f) return bullets; // 方向无效
 
-			Logging.Debug.Log($"[BulletDir] bp{ownerBattleId} teamSign={teamSign} raw=({atk.TowardX:F3},{atk.TowardY:F3}) -> dir=({baseDir.X:F3},{baseDir.Z:F3}) pos=({spawnPos.X:F2},{spawnPos.Z:F2})");
+			Logging.Debug.Log($"[BulletDir] bp{ownerBattleId} type={atk.AttackType} teamSign={teamSign} raw=({atk.TowardX:F3},{atk.TowardY:F3}) -> dir=({baseDir.X:F3},{baseDir.Z:F3}) pos=({spawnPos.X:F2},{spawnPos.Z:F2})");
 
 			// 散弹扇形生成
 			int bulletCount = cfg.BulletCount;
@@ -192,6 +203,12 @@ namespace Server
 					if (playerHp.ContainsKey(targetBpId))
 					{
 						playerHp[targetBpId] -= bullet.Damage;
+						if (playerSuperEnergy != null && playerSuperEnergy.ContainsKey(bullet.OwnerBattleId))
+						{
+							playerSuperEnergy[bullet.OwnerBattleId] = Math.Min(
+								HeroConfig.SuperEnergyMax,
+								playerSuperEnergy[bullet.OwnerBattleId] + bullet.Damage / 2);
+						}
 						Logging.Debug.Log($"[HP] bp{targetBpId} hp={playerHp[targetBpId]} (dmg={bullet.Damage} from bp{bullet.OwnerBattleId})");
 
 						if (playerHp[targetBpId] <= 0 && !playerIsDead[targetBpId])

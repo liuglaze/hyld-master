@@ -28,7 +28,7 @@ Assets/HYLD1.0/Scripts/OldScripts/TouchLogic.cs
 Assets/Scripts/Manger/CommandManger.cs
 
 - AddCommad_Move 只缓存"最新移动值"（连续输入）。
-- AddCommad_Attack 入队到 BattleData.pendingAttacks（分配唯一 AttackID）。
+- AddCommad_Attack 入队到 BattleData.pendingAttacks（先按本地英雄普通蓝耗预测扣蓝，蓝不足不入队；成功后分配唯一 AttackID）。
 - Execute() 每个发送帧先写本地 LocalPlayerInput 移动，再消费离散命令，最后 FlushPendingAttacksToOperation 把所有待确认攻击打包为 ClientAttack。
 
 **攻击操作重发窗口机制（四段式）**：
@@ -36,7 +36,7 @@ Assets/Scripts/Manger/CommandManger.cs
 1. **EnqueueAttack**：入队时锁定本次 `BattleTick` 真实推进的 `nextFrame` 作为 `ClientFrameId`，后续重发不刷新。
 2. **FlushPendingAttacksToOperation**：每帧先做**超时清理**（`predicted_frameID - ClientFrameId > MaxClientAttackAge=8` 的攻击直接移除），然后将剩余待确认攻击全部打包到 `BattleInfo.client_input.attacks`。
 3. **dic_lastProcessedAttackId**（服务端）：服务端记录每个玩家最后处理的 AttackId，重复收到旧攻击时忽略。超过 `MaxAcceptableAttackDelay=8` 帧的攻击直接 REJECT。
-4. **ConfirmAttacks**：收到权威帧后，若该帧包含本玩家的攻击确认（HasSelfAuthorityInput），调用 ConfirmAttacks 从 pendingAttacks 移除已确认的攻击（通过 maxConfirmedId 批量移除 <= maxConfirmedId 的项）。
+4. **ApplyAttackAcks**：收到服务端 `BattleServerUpdate.attack_acks` 后，对本玩家 ack 用 `mana_after` 校正普通蓝量、用 `super_energy_after` 校正大招能量，并从 pendingAttacks 移除对应 `AttackId`。accepted/rejected 都清 pending；rejected 不回收已预测视觉子弹。
 
 这样可在 UDP 丢包时自动重传未确认的攻击，不依赖可靠传输层。客户端超时清理防止确认丢包时攻击无限重发浪费带宽。
 
@@ -72,7 +72,7 @@ Assets/Scripts/Server/Manger/Battle/BattleManger.cs
 BattleData.OnLogicUpdate_sync_FrameIdCheck(server_sync_frameid, allPlayerOperation)
 
 - UDP 回调 HandleMessage -> BattlePushDowmAllFrameOpeartions -> 调用此方法。
-- 流程：先按 `AuthoritativePlayerState.state_mask` 合并 PlayerStates 增量为完整权威状态视图 -> 和解 -> 记录权威确认 -> 更新 sync_frameID -> **生成视觉子弹** -> ApplyHitEvents（受击动画，不扣血）-> ApplyAuthoritativeHpAndDeath（权威 HP 覆写 + 死亡判定）。
+- 流程：先按 `AuthoritativePlayerState.state_mask` 合并 PlayerStates 增量为完整权威状态视图 -> 和解 -> 更新 sync_frameID -> **生成视觉子弹** -> ApplyAttackAcks（攻击确认/普通蓝量/大招能量校正）-> ApplyHitEvents（受击动画，不扣血）-> ApplyAuthoritativeHpAndDeath（权威 HP/死亡/Mana/SuperEnergy 覆写）。
 
 ### 3.5 权威位置校正 (CSP 模式)
 
@@ -82,7 +82,7 @@ OnLogicUpdate_sync_FrameIdCheck 收到权威帧批次后：
 
 1. **ApplyAuthoritativePositions**：取批次最后一帧的 player_states，远端玩家直接应用服务端权威位置；本地玩家逻辑位置只由 MoveAck 修正
 2. **更新 sync_frameID**
-3. **RecordAuthorityConfirmation**：ConfirmAttacks 移除已确认的攻击
+3. **ApplyAttackAcks**：AttackAck 移除已确认/拒绝的攻击并校正普通蓝量和大招能量
 4. **ConsumeMoveAck**：`ack_good_move=true` 只裁剪 SavedMove；`ack_good_move=false` 拉回 `correct_pos_x/y/z` 并 Replay
 5. **ReplayUnconfirmedInputs**：仅在服务端明确 correction 后，以修正位置为起点重放剩余 SavedMove
 6. **RecordAuthoritySnapshotForFrame**：记录权威快照供视觉子弹定位
@@ -325,7 +325,7 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 
 - `OnJoystickMove`:111 — 摇杆移动：瞄准线 + 滞回死区 + CommandManger
 - `JoystickMoveEnd`:47 — 松手触发攻击或重置移动
-- `Start`:87 — 初始化瞄准线、isNotDie=true
+- `Start`:87 — 只恢复 UI 初始状态；攻击瞄准线在 FireNormal/FireSuper 输入事件中懒初始化
 
 **Assets/Scripts/Manger/CommandManger.cs**（105 行） — 命令聚合
 
@@ -365,10 +365,10 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 
 ## 6. 状态所有权
 
-- **服务端权威**：最终帧状态、最终战斗结果、**玩家 HP（playerHp）**、**死亡状态（playerIsDead）**、**击杀判定**、**GameOver 触发与胜负**。
+- **服务端权威**：最终帧状态、最终战斗结果、**玩家 HP（playerHp）**、**死亡状态（playerIsDead）**、**普通攻击蓝量（playerMana）**、**大招能量（playerSuperEnergy）**、**击杀判定**、**GameOver 触发与胜负**。
 - **客户端临时状态**：本地预测历史、权威位置快照（authoritySnapshotHistory）、回滚后表现层平滑状态。
 - 高风险共享状态：sync_frameID、predicted_frameID、selfOperation、BattleID:PlayerIndex 映射。
-- **不参与和解快照的字段**：isNotDie（由 TouchLogic.Start() 设 true / PlayerLogic.playerDieLogic() 设 false 在主线程管理，和解快照不捕获/不恢复此字段）。
+- **不参与和解快照的字段**：isNotDie（玩家 body 创建绑定时设 true，权威死亡/PlayerLogic.playerDieLogic() 设 false；TouchLogic 不批量改写，和解快照不捕获/不恢复此字段）。
 
 ## 7. 当前参数值
 
@@ -395,6 +395,9 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 | canPlayerRestoreHealthTime              | 2 秒                    | ConstValue.cs           |
 | MaxClientAttackAge                      | 8                       | BattleData.Attack.cs    |
 | MaxAcceptableAttackDelay（服务端）      | 8                       | Battle.cs               |
+| 普通攻击蓝量上限                        | 90                      | HeroConfig.cs / PlayerLogic |
+| 普通攻击蓝耗                            | 默认 30，贝亚 90        | HeroConfig.cs / HYLDStaticValue.cs |
+| 大招能量上限                            | 3000                    | HeroConfig.cs / PlayerInformation |
 | inputBufferSize（客户端兼容参数）       | 4                       | ConstValue.cs           |
 | targetFrameSafetyFrames                 | 1                       | ConstValue.cs           |
 | adjustRate                              | 0.05f                   | ConstValue.cs           |

@@ -42,9 +42,11 @@
     - **开局握手语义**：客户端初始化后每 200ms 重发一次 `BattleReady`；收到 `BattleStart` 后停止重发并进入“等待首权威帧”状态。首个有效权威帧到达前客户端不发送 `ClientMove`。若首次 `BattleStart` 丢失，服务端会在后续 `BattleReady` 到达时对该客户端单播补发 `BattleStart`，且不会重复执行 `BeginBattle`
     - **预测暂停语义**：若权威帧超过 1000ms 未刷新，或客户端 SavedMove 历史达到 `PredictionHistoryWindowSize`，客户端暂停生成新的预测 tick；收到新权威帧或 MoveAck 裁剪历史后从下一帧继续，不补跑暂停期间累计的 tick。
   - **攻击重发与超时**：
+    - 客户端 `EnqueueAttack` 会先按本地英雄普通攻击蓝耗预测扣 `playerManaValue`；蓝量不足则不入队、不发 `ClientAttack`。
     - 客户端每帧重发所有未确认攻击（pendingAttacks），`ClientFrameId` 在本次 BattleTick 的 `nextFrame` 入队时锁定不变。
     - 客户端超时清理：帧龄 `(predicted_frameID - ClientFrameId) > 8` 的攻击自动移除。
-    - 服务端通过 `dic_lastProcessedAttackId` 去重 + `MaxAcceptableAttackDelay=8` 拒绝过期攻击。
+    - 服务端通过 `dic_lastProcessedAttackId` 去重 + `MaxAcceptableAttackDelay=8` 拒绝过期攻击，并通过 `BattleServerUpdate.attack_acks` 回传 accepted/rejected、`mana_after` 与 `super_energy_after`。
+    - 服务端普通蓝量权威：开局 90，默认攻击消耗 30，贝亚消耗 90；按英雄装弹速度每格恢复 30。服务端拒绝不会回收客户端已预测的纯视觉子弹。
   - **关键输入同帧 burst-send**：
     - 若本地 BattleTick 发生“停步边沿”（non-zero -> zero）或本帧新增攻击，则客户端会在同一逻辑帧内把同一份 `BattleInfo` 连发 3 次。
     - 3 次发送复用相同 `OperationID`、`ClientAckedFrame`、`ClientMoveFrame`、移动值、OldMove 列表与 `AttackId` 集合，不引入新协议字段。
@@ -66,8 +68,9 @@
     - 客户端 HandleMessage 解析 hit_events，调用 BattleData.ApplyHitEvents(...)，仅触发受击动画（不扣血）。
     - ApplyHitEvents 在主线程执行：查找 victim → 受击动画（不修改 HP）→ 记录 hitAnimatedPlayers。
     - 去重机制：_appliedHitEventKeys（HashSet<long>，key=attackId*100000+victimBattleId），防止帧重传重复播放动画。
-  - **权威 HP/IsDead 消费**：ApplyHitEvents 之后调用 `ApplyAuthoritativeHpAndDeath`，从 `PlayerStates.Hp` 覆写客户端 `playerBloodValue`，从 `PlayerStates.IsDead` 驱动死亡判定。首帧初始化 `maxHp` 和 `hero.BloodValue`（血条比例）。HP 下降但无 HitEvent 时补播兜底受击动画。
-  - **PlayerStates 增量下行**：服务端仍每个 ServerFrame 下发权威帧时钟包，但 `BattleFrame.player_states` 可只携带变化字段。客户端先按 `AuthoritativePlayerState.state_mask` 合并到本地权威状态缓存，再把完整状态视图交给位置、HP、死亡和视觉子弹逻辑。`state_mask` bit0=position，bit1=hp，bit2=is_dead；客户端不通过 protobuf 默认值判断字段是否存在。
+  - **权威 HP/IsDead/Mana/大招能量消费**：ApplyHitEvents 之后调用 `ApplyAuthoritativeHpAndDeath`，从 `PlayerStates.Hp` 覆写客户端 `playerBloodValue`，从 `PlayerStates.IsDead` 驱动死亡判定，并从 `PlayerStates.Mana` / `PlayerStates.SuperEnergy` 覆写普通攻击蓝量和大招能量 UI。首帧初始化 `maxHp` 和 `hero.BloodValue`（血条比例）。HP 下降但无 HitEvent 时补播兜底受击动画。
+  - **AttackAck 消费**：客户端收到本玩家 `BattleServerUpdate.attack_acks` 后，用 `mana_after` 覆写 `playerManaValue`，用 `super_energy_after` 覆写 `当前能量`，并从 `pendingAttacks` 移除对应 `AttackId`。accepted 与 rejected 都会清 pending；rejected 不销毁已预测视觉子弹。
+  - **PlayerStates 增量下行**：服务端仍每个 ServerFrame 下发权威帧时钟包，但 `BattleFrame.player_states` 可只携带变化字段。客户端先按 `AuthoritativePlayerState.state_mask` 合并到本地权威状态缓存，再把完整状态视图交给位置、HP、死亡、Mana、大招能量和视觉子弹逻辑。`state_mask` bit0=position，bit1=hp，bit2=is_dead，bit3=mana，bit4=super_energy；客户端不通过 protobuf 默认值判断字段是否存在。
   - **死亡判定**：以 `PlayerStates.IsDead` 为权威。`ApplyHitEvents` 中 `IsKill` 兜底作为安全网（IsDead 未到达前的备用路径）。
   - ~~**HP 不同步临时状态**~~ **已解决**：客户端 HP 现在由服务端 `PlayerStates.Hp` 覆写，血条比例显示正确。
   - 和解完成后，外部仅更新 sync_frameID，不再额外逐帧调用 OnLogicUpdate。
@@ -132,8 +135,12 @@
     - MainPack.timestamp（int64，UDP Ping/Pong 时间戳）
     - BattleInfo.server_frame
     - BattleInfo.client_input（battle_player_id / client_tick / acked_server_frame / rtt_ms / moves / attacks）
-    - BattleInfo.server_update（frames / move_ack / hit_events / state_base_frame）
-    - AuthoritativePlayerState.state_mask（bit0=position，bit1=hp，bit2=is_dead）
+    - BattleInfo.server_update（frames / move_ack / hit_events / state_base_frame / attack_acks）
+    - AttackType（Normal / Super），由 `ClientAttack.attack_type` 和 `ServerAttack.attack_type` 使用
+    - AuthoritativePlayerState.state_mask（bit0=position，bit1=hp，bit2=is_dead，bit3=mana，bit4=super_energy）
+    - AuthoritativePlayerState.mana（普通攻击蓝量，UI 最终以服务端为准）
+    - AuthoritativePlayerState.super_energy（大招能量，UI 最终以服务端为准）
+    - AttackAck（battle_player_id / attack_id / accepted / mana_after / reject_reason / super_energy_after）
     - ClientMove.move_frame
     - ClientAttack.attack_move_frame
     - ServerAttack.spawn_pos_x/y/z 与 spawn_server_frame

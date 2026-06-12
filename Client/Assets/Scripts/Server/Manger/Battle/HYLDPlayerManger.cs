@@ -57,26 +57,31 @@ namespace Manger
             int k = 0;
             foreach (var player in list_battleUser)
             {
+                PlayerInformation playerInfo;
                 if (player.Battleid == battleid)
                 {
                     //是player
-                    HYLDStaticValue.Players.Add(new PlayerInformation
+                    playerInfo = new PlayerInformation
                         (myteam.Dequeue(), player.Playername, 
-                        HYLDStaticValue.Heros[(HeroName)((int)player.Hero)], player.Teamid, global::PlayerType.Self));
+                        HYLDStaticValue.Heros[(HeroName)((int)player.Hero)], player.Teamid, global::PlayerType.Self);
                 }
                 else if (player.Teamid == teamid)
                 {
                     //和player一个队伍的
-                    HYLDStaticValue.Players.Add(new PlayerInformation(myteam.Dequeue(), 
+                    playerInfo = new PlayerInformation(myteam.Dequeue(),
                         player.Playername, HYLDStaticValue.Heros[(HeroName)((int)player.Hero)], 
-                        player.Teamid, global::PlayerType.Teammate));
+                        player.Teamid, global::PlayerType.Teammate);
                 }
                 else
                 {
-                    HYLDStaticValue.Players.Add(new PlayerInformation(otherTeam.Dequeue(), 
+                    playerInfo = new PlayerInformation(otherTeam.Dequeue(),
                         player.Playername, HYLDStaticValue.Heros[(HeroName)((int)player.Hero)], 
-                        player.Teamid, global::PlayerType.Enemy));
+                        player.Teamid, global::PlayerType.Enemy);
                 }
+                playerInfo.playerManaValue = 90;
+                playerInfo.当前能量 = 0f;
+                playerInfo.可以按大招 = false;
+                HYLDStaticValue.Players.Add(playerInfo);
                 Logging.HYLDDebug.LogError(player);
                 dic_battleID_map_Playeridx.Add(player.Battleid, k++);
 
@@ -109,6 +114,7 @@ namespace Manger
                 list_playerlogics.Add(temp.GetComponent<PlayerLogic>());
                 list_playerlogics[list_playerlogics.Count - 1].playerID = k;
                 HYLDStaticValue.Players[k].body = temp;
+                HYLDStaticValue.Players[k].isNotDie = true;
                 k++;
                 //FactoryManager.CharacterFactory.CreateCharacter(WeaponType.Gun, new Vector3(0, 0, 0), HeroName.RuiKe);
             }
@@ -207,7 +213,9 @@ namespace Manger
                 return;
 
             ClientAttack lastAttack = opt.Attacks[opt.Attacks.Count - 1];
-            player.fireState = FireState.PstolNormal;
+            player.fireState = lastAttack.AttackType == AttackType.Super
+                ? FireState.ShotgunSuper
+                : FireState.PstolNormal;
 
             Vector3 temp = LZJ.MathFixed.xAndY2UnitVector3(lastAttack.TowardY, lastAttack.TowardX);
             temp.x *= -1 * sign;

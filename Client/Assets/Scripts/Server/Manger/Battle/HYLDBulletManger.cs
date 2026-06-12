@@ -136,8 +136,6 @@ namespace Manger
 
             if (fireState == FireState.ShotgunSuper && hero.isSuperMovingType)
             {
-                HYLDStaticValue.Players[playerID].可以按大招 = false;
-                HYLDStaticValue.Players[playerID].当前能量 = 0;
                 SpawnMovementSuperEntity(playerID, hero, spawnPosition);
                 return;
             }
@@ -170,28 +168,24 @@ namespace Manger
 
             if (fireState == FireState.ShotgunSuper)
             {
+                if (hero.superBullet == null || hero.大招实体 == null)
+                {
+                    Logging.HYLDDebug.Trace("[VisualBullet][Skip] fireState=ShotgunSuper reason=missing-super-config");
+                    return null;
+                }
+
                 spec.IsSuper = true;
-                HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].可以按大招 = false;
-                HYLDStaticValue.Players[HYLDStaticValue.playerSelfIDInServer].当前能量 = 0;
-
-                if (hero.大招实体 != null)
-                {
-                    spec.BulletPrefab = hero.大招实体;
-                }
-
-                if (hero.superBullet != null)
-                {
-                    spec.ShootDistance = hero.superBullet.shootDistance;
-                    spec.ShootWidth = hero.superBullet.shootWidth;
-                    spec.BulletCount = hero.superBullet.bulletCount;
-                    if (hero.superBullet.bulletDamage >= 0) spec.BulletDamage = hero.superBullet.bulletDamage;
-                    if (hero.superBullet.LaunchAngle >= 0) spec.LaunchAngle = hero.superBullet.LaunchAngle;
-                    if (hero.superBullet.speed >= 0) spec.Speed = hero.superBullet.speed;
-                    if (hero.superBullet.bulletCountByEachTime >= 0) spec.BulletCountByEachTime = hero.superBullet.bulletCountByEachTime;
-                    if (hero.superBullet.EachTimebulletsShootSpace >= 0) spec.EachTimeBulletsShootSpace = hero.superBullet.EachTimebulletsShootSpace;
-                    spec.IsParadola = hero.superBullet.IsParadola;
-                    if (hero.superBullet.high >= 0) spec.High = hero.superBullet.high;
-                }
+                spec.BulletPrefab = hero.大招实体;
+                spec.ShootDistance = hero.superBullet.shootDistance;
+                spec.ShootWidth = hero.superBullet.shootWidth;
+                spec.BulletCount = hero.superBullet.bulletCount;
+                if (hero.superBullet.bulletDamage >= 0) spec.BulletDamage = hero.superBullet.bulletDamage;
+                if (hero.superBullet.LaunchAngle >= 0) spec.LaunchAngle = hero.superBullet.LaunchAngle;
+                if (hero.superBullet.speed >= 0) spec.Speed = hero.superBullet.speed;
+                if (hero.superBullet.bulletCountByEachTime >= 0) spec.BulletCountByEachTime = hero.superBullet.bulletCountByEachTime;
+                if (hero.superBullet.EachTimebulletsShootSpace >= 0) spec.EachTimeBulletsShootSpace = hero.superBullet.EachTimebulletsShootSpace;
+                spec.IsParadola = hero.superBullet.IsParadola;
+                if (hero.superBullet.high >= 0) spec.High = hero.superBullet.high;
             }
 
             if (spec.BulletCountByEachTime <= 0)

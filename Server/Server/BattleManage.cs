@@ -2,6 +2,7 @@ using Server.Controller;
 using SocketProto;
 using System;
 using System.Collections.Generic;
+using Google.Protobuf;
 
 namespace Server
 {
@@ -234,6 +235,9 @@ namespace Server
 
 			mainPack.Str = ((int)battleContext.FightPattern).ToString();
 			mainPack.BattleInfo = battleInfo;
+			int reviewBytes = mainPack.CalculateSize();
+			int reviewFrameCount = battleInfo.ServerUpdate != null ? battleInfo.ServerUpdate.Frames.Count : 0;
+			Logging.Debug.Log($"[BattleFinish][ReviewPack] battleId={battleId} frames={reviewFrameCount} users={battleContext.PlayerUids.Count} bytes={reviewBytes}");
 			Console.WriteLine(mainPack);
 			foreach (int uid in battleContext.PlayerUids)
 			{
@@ -242,10 +246,16 @@ namespace Server
 				{
 					continue;
 				}
+				activeClient.PlayerState = PlayerState.PlayerOnline;
+				activeClient.UpdateMyselfInfo();
+				activeClient.UpdateActiveFriendInfo();
+				Logging.Debug.Log($"[BattleFinish][RestorePlayerState] battleId={battleId} uid={uid} state={activeClient.PlayerState}");
+				Logging.Debug.Log($"[BattleFinish][SendReview] battleId={battleId} uid={uid} bytes={reviewBytes}");
 				activeClient.Send(mainPack);
 			}
 
 			Logging.Debug.Log("战斗结束。。。。。BattleID：" + battleId);
+			Logging.Debug.FlushTrace();
 		}
 	}
 }

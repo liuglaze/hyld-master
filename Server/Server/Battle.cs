@@ -37,14 +37,14 @@ namespace Server
 			public MoveType MoveType;
 		}
 
-		private sealed class PendingMoveSegment
+		private sealed class PendingClientMove
 		{
 			public int MoveFrame;
-			public int RemainingFrames;
 			public float MoveX;
 			public float MoveY;
 			public MoveType MoveType;
 			public ServerVector3 PredictedPosition;
+			public ServerVector3 PredictedVelocity;
 		}
 
 		private sealed class FullAuthorityState
@@ -84,15 +84,22 @@ namespace Server
 		private Dictionary<int, int> dic_playerAckedFrameId;
 		private Dictionary<int, int> dic_lastProcessedAttackId;
 		private Dictionary<int, bool> dic_playerGameOver;
-		// ── CMC-style Move Timeline（客户端 SavedMove 时间轴） ──
-		private const int MaxClientMoveFrameLead = 2;
-		private const int MaxMoveApplyFramesPerServerFrame = 3;
-		private const float MoveCorrectionThreshold = 0.6f;
-		private Dictionary<int, int> dic_lastAcceptedMoveFrame;
-		private Dictionary<int, int> dic_lastSimulatedMoveFrame;
-		private Dictionary<int, Queue<PendingMoveSegment>> dic_pendingMoveSegments;
-		private Dictionary<int, LastProcessedMoveInput> dic_lastProcessedMoveInput;
-		private Dictionary<int, MoveAckResult> dic_lastMoveAck;
+			// ── CMC-style Move Timeline（客户端 SavedMove 时间轴） ──
+			private const int MaxDeltaFramesPerMove = 8;
+			private const int MinMoveQuantum = 1;
+			private const float MoveDiscrepancyResolutionRate = 0.5f;
+			private const float MovementMaxPositionError = 0.6f;
+			private Dictionary<int, int> dic_lastReceivedMoveFrame;
+			private Dictionary<int, int> dic_lastAckedMoveFrame;
+			private Dictionary<int, List<PendingClientMove>> dic_pendingClientMoves;
+			private Dictionary<int, LastProcessedMoveInput> dic_lastProcessedMoveInput;
+			private Dictionary<int, int> dic_lastProcessedClientMoveFrame;
+			private Dictionary<int, MoveAckResult> dic_lastMoveAck;
+			private Dictionary<int, int> dic_moveAckCorrectionLockedServerFrame;
+			private Dictionary<int, int> dic_moveFrameDiscrepancyDebt;
+			private Dictionary<int, int> dic_lastServerFrameWhenProcessedMove;
+			private Dictionary<int, bool> dic_isResolvingFrameDiscrepancy;
+		private Dictionary<int, double> dic_moveFrameDiscrepancyResolutionCarry;
 		private Dictionary<int, Dictionary<int, FullAuthorityState>> dic_authorityStateHistory;
 		private Dictionary<int, Dictionary<int, FullAuthorityState>> dic_playerAcknowledgedAuthorityStates;
 		private Dictionary<int, int> dic_playerAcknowledgedAuthorityStateFrame;
@@ -131,9 +138,10 @@ namespace Server
 		private static readonly float[] SpawnZ = { -5f, 0f, 5f };
 
 		// ---- 网络模拟（测试用，发布前设为 0） ----
-		private const float SimDropRate = 0.3f;
-		private const int SimDelayMinMs = 50;
-		private const int SimDelayMaxMs = 75;
+		private const float DefaultSimDropRate = 0.1f;
+		private const int DefaultSimDelayMinMs = 30;
+		private const int DefaultSimDelayMaxMs = 60;
+		private const int NetSimDelayLimitMs = 2000;
 		private const int MaxAcceptableAttackDelay = 8;
 		private const int AckGapRepeatThreshold = 3;
 		private const int CurrentFrameRepeatSendCount = 3;
@@ -269,8 +277,8 @@ namespace Server
 					if (!_battleStarted)
 					{
 						_battleStarted = true;
-						LZJUDP.ApplyBattleNetSimConfig(SimDropRate, SimDelayMinMs, SimDelayMaxMs);
-						Logging.Debug.Log($"[NetSim] PREPARE battleId={battleId} dropRate={SimDropRate} delayMs={SimDelayMinMs}~{SimDelayMaxMs} (BattleStart enters unified NetSim)");
+						LZJUDP.ApplyBattleNetSimConfig(battleId, DefaultSimDropRate, DefaultSimDelayMinMs, DefaultSimDelayMaxMs);
+						Logging.Debug.Log($"[NetSim] PREPARE battleId={battleId} dropRate={DefaultSimDropRate} delayMs={DefaultSimDelayMinMs}~{DefaultSimDelayMaxMs} (BattleStart enters unified NetSim)");
 						BroadcastBattleStart();
 						BeginBattle();
 						return;
@@ -288,7 +296,30 @@ namespace Server
 				case ActionCode.ClientSendGameOver:
 					UpdatePlayerGameOver(int.Parse(pack.Str));
 					break;
+
+				case ActionCode.BattleSetNetSimConfig:
+					ApplyNetSimConfigFromClient(pack.BattleNetSimConfig);
+					break;
 			}
+		}
+
+		private void ApplyNetSimConfigFromClient(BattleNetSimConfig config)
+		{
+			if (config == null || !OwnsBattlePlayerId(config.BattlePlayerId))
+			{
+				return;
+			}
+
+			float dropRate = Math.Max(0f, Math.Min(1f, config.DropRate));
+			int delayMinMs = Math.Max(0, Math.Min(NetSimDelayLimitMs, config.DelayMinMs));
+			int delayMaxMs = Math.Max(0, Math.Min(NetSimDelayLimitMs, config.DelayMaxMs));
+			if (delayMinMs > delayMaxMs)
+			{
+				delayMinMs = delayMaxMs;
+			}
+
+			LZJUDP.ApplyBattleNetSimConfig(battleId, dropRate, delayMinMs, delayMaxMs);
+			Logging.Debug.Log($"[NetSim][ClientConfig] battleId={battleId} bp={config.BattlePlayerId} dropRate={dropRate} delayMs={delayMinMs}~{delayMaxMs}");
 		}
 
 		private void BroadcastBattleStart()
@@ -333,11 +364,17 @@ namespace Server
 				dic_playerGameOver = new Dictionary<int, bool>();
 				dic_lastProcessedAttackId = new Dictionary<int, int>();
 				// ── CMC-style Move Timeline 初始化 ──
-				dic_lastAcceptedMoveFrame = new Dictionary<int, int>();
-				dic_lastSimulatedMoveFrame = new Dictionary<int, int>();
-				dic_pendingMoveSegments = new Dictionary<int, Queue<PendingMoveSegment>>();
+				dic_lastReceivedMoveFrame = new Dictionary<int, int>();
+				dic_lastAckedMoveFrame = new Dictionary<int, int>();
+				dic_pendingClientMoves = new Dictionary<int, List<PendingClientMove>>();
 				dic_lastProcessedMoveInput = new Dictionary<int, LastProcessedMoveInput>();
+				dic_lastProcessedClientMoveFrame = new Dictionary<int, int>();
 				dic_lastMoveAck = new Dictionary<int, MoveAckResult>();
+				dic_moveAckCorrectionLockedServerFrame = new Dictionary<int, int>();
+				dic_moveFrameDiscrepancyDebt = new Dictionary<int, int>();
+				dic_lastServerFrameWhenProcessedMove = new Dictionary<int, int>();
+				dic_isResolvingFrameDiscrepancy = new Dictionary<int, bool>();
+				dic_moveFrameDiscrepancyResolutionCarry = new Dictionary<int, double>();
 				dic_authorityStateHistory = new Dictionary<int, Dictionary<int, FullAuthorityState>>();
 				dic_playerAcknowledgedAuthorityStates = new Dictionary<int, Dictionary<int, FullAuthorityState>>();
 				dic_playerAcknowledgedAuthorityStateFrame = new Dictionary<int, int>();
@@ -405,9 +442,15 @@ namespace Server
 					dic_playerAckedFrameId[battlePlayerId] = 0;
 					dic_playerGameOver[battlePlayerId] = false;
 					dic_lastProcessedAttackId[battlePlayerId] = 0;
-					dic_lastAcceptedMoveFrame[battlePlayerId] = 0;
-					dic_lastSimulatedMoveFrame[battlePlayerId] = 0;
-					dic_pendingMoveSegments[battlePlayerId] = new Queue<PendingMoveSegment>();
+					dic_lastReceivedMoveFrame[battlePlayerId] = 0;
+					dic_lastAckedMoveFrame[battlePlayerId] = 0;
+					dic_pendingClientMoves[battlePlayerId] = new List<PendingClientMove>();
+					dic_moveFrameDiscrepancyDebt[battlePlayerId] = 0;
+					dic_lastProcessedClientMoveFrame[battlePlayerId] = 0;
+					dic_lastServerFrameWhenProcessedMove[battlePlayerId] = frameid - 1;
+					dic_isResolvingFrameDiscrepancy[battlePlayerId] = false;
+					dic_moveFrameDiscrepancyResolutionCarry[battlePlayerId] = 0d;
+					dic_moveAckCorrectionLockedServerFrame[battlePlayerId] = 0;
 					dic_lastProcessedMoveInput[battlePlayerId] = new LastProcessedMoveInput
 					{
 						MoveFrame = 0,
@@ -420,10 +463,10 @@ namespace Server
 				}
 			}
 			// ---- 网络模拟启动日志 ----
-			if (SimDropRate > 0f || SimDelayMaxMs > 0)
+			if (DefaultSimDropRate > 0f || DefaultSimDelayMaxMs > 0)
 			{
-				LZJUDP.ApplyBattleNetSimConfig(SimDropRate, SimDelayMinMs, SimDelayMaxMs);
-				Logging.Debug.Log($"[NetSim] ACTIVE battleId={battleId} dropRate={SimDropRate} delayMs={SimDelayMinMs}~{SimDelayMaxMs} (synced to unified battle UDP NetSim)");
+				LZJUDP.ApplyBattleNetSimConfig(battleId, DefaultSimDropRate, DefaultSimDelayMinMs, DefaultSimDelayMaxMs);
+				Logging.Debug.Log($"[NetSim] ACTIVE battleId={battleId} dropRate={DefaultSimDropRate} delayMs={DefaultSimDelayMinMs}~{DefaultSimDelayMaxMs} (synced to unified battle UDP NetSim)");
 			}
 
 			Thread thread = new Thread(BattleLoop) { IsBackground = true };
@@ -434,84 +477,93 @@ namespace Server
 
 		private void BattleLoop()
 		{
-			Stopwatch sw = new Stopwatch();
-			sw.Start();
-			long lastTick = sw.ElapsedMilliseconds;
-			double accum = 0;
-
-			while (_isRun)
+			try
 			{
-				long now = sw.ElapsedMilliseconds;
-				long dt = now - lastTick;
-				lastTick = now;
-				accum += dt;
+				Stopwatch sw = new Stopwatch();
+				sw.Start();
+				long lastTick = sw.ElapsedMilliseconds;
+				double accum = 0;
 
-				int stepCount = 0;
-				while (accum >= frameIntervalMs && stepCount < maxCatchupFrame)
+				while (_isRun)
 				{
-					bool shouldEndNow = false;
+					long now = sw.ElapsedMilliseconds;
+					long dt = now - lastTick;
+					lastTick = now;
+					accum += dt;
+
+					int stepCount = 0;
+					while (accum >= frameIntervalMs && stepCount < maxCatchupFrame)
+					{
+						bool shouldEndNow = false;
+						lock (_battleLock)
+						{
+							if (hasAnyPlayerDied)
+							{
+								shouldEndNow = true;
+							}
+							else
+							{
+								CollectAndBroadcastCurrentFrame();
+								frameid++;
+							}
+						}
+
+						if (shouldEndNow)
+						{
+							HandleBattleEnd();
+							return;
+						}
+
+						accum -= frameIntervalMs;
+						stepCount++;
+					}
+
+					bool shouldFinishAfterWait = false;
 					lock (_battleLock)
 					{
-						if (hasAnyPlayerDied)
+						if (allClientsConfirmedGameOver && !isWaitingClientConfirm)
 						{
-							shouldEndNow = true;
+							isWaitingClientConfirm = true;
+							gameOverConfirmTimeoutMs = 1000f;
 						}
-						else
+						if (isWaitingClientConfirm)
 						{
-							CollectAndBroadcastCurrentFrame();
-							frameid++;
+							gameOverConfirmTimeoutMs -= dt;
+							if (gameOverConfirmTimeoutMs <= 0)
+							{
+								shouldFinishAfterWait = true;
+							}
 						}
 					}
 
-					if (shouldEndNow)
+					if (shouldFinishAfterWait)
 					{
 						HandleBattleEnd();
 						return;
 					}
 
-					accum -= frameIntervalMs;
-					stepCount++;
+					Thread.Sleep(1);
 				}
 
-				bool shouldFinishAfterWait = false;
-				lock (_battleLock)
-				{
-					if (allClientsConfirmedGameOver && !isWaitingClientConfirm)
-					{
-						isWaitingClientConfirm = true;
-						gameOverConfirmTimeoutMs = 1000f;
-					}
-					if (isWaitingClientConfirm)
-					{
-						gameOverConfirmTimeoutMs -= dt;
-						if (gameOverConfirmTimeoutMs <= 0)
-						{
-							shouldFinishAfterWait = true;
-						}
-					}
-				}
-
-				if (shouldFinishAfterWait)
-				{
-					HandleBattleEnd();
-					return;
-				}
-
-				Thread.Sleep(1);
+				sw.Stop();
 			}
-
-			sw.Stop();
+			catch (Exception ex)
+			{
+				_isRun = false;
+				Logging.Debug.Log($"[BattleLoop][Fatal] battleId={battleId} frame={frameid} ex={ex}");
+				Logging.Debug.FlushTrace();
+			}
 		}
 
 		// ==================== 帧收集与广播 ====================
 		// 帧号语义：
 		// 1. frameid 是服务端权威帧，只由 BattleLoop 每 16ms 推进一次。
 		// 2. ClientMove.MoveFrame 是客户端本地预测移动帧，只用于上行移动排序与确认。
-		// 3. 合法 ClientMove 在 UDP 接收阶段只入队；BattleLoop 每帧按预算消化 pending move 并推进 playerPositions。
-		// 4. 本函数组织当前 ServerFrame 的移动消化、广播、位置历史、攻击、子弹、HP 与死亡状态。
+		// 3. 合法 ClientMove 在 UDP 接收阶段只入队；BattleLoop 固定阶段一次性完整模拟 pending move。
+		// 4. 本函数组织当前 ServerFrame 的移动模拟、广播、位置历史、攻击、子弹、HP 与死亡状态。
 		private void CollectAndBroadcastCurrentFrame()
 		{
-			ApplyPendingMoveSegments();
+			ApplyPendingClientMoves();
 			RegeneratePlayerMana();
 
 			// nextFrameOp 表示“本次服务端权威帧最终采用的所有玩家操作集合”，
@@ -564,7 +616,7 @@ namespace Server
 			}
             //上面只是组织本帧要广播/结算的操作，下面按服务端权威帧推进位置。
 
-			// 1. 玩家位置已在 ApplyPendingMoveSegments 中按固定预算慢消化；
+			// 1. 玩家位置已在 ApplyPendingClientMoves 中按 pending move 一次性完整模拟；
 			// BattleLoop 后续只消费当前权威位置并组织本 ServerFrame 的广播/伤害判定。
 
 			// 2. 创建本帧 HitEvent 列表。追帧命中和正常 Tick 命中都写入同一个列表。

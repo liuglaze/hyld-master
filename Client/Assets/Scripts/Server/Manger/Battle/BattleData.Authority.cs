@@ -297,6 +297,11 @@ namespace Manger
                 Logging.HYLDDebug.FrameTrace($"[MoveAck][Ignore] localBattleId={battleID} ackBattleId={moveAck.BattleId} ackedMove={moveAck.AckedMoveFrame}");
                 return;
             }
+            if (!HasSavedMoveFrame(moveAck.AckedMoveFrame))
+            {
+                Logging.HYLDDebug.FrameTrace($"[MoveAck][IgnoreMissingSavedMove] ackedMove={moveAck.AckedMoveFrame} good={moveAck.AckGoodMove} history={PredictionHistoryCount} sync={sync_frameID} predicted={predicted_frameID}");
+                return;
+            }
 
             AcknowledgeMoveFrame(moveAck.AckedMoveFrame);
 
@@ -330,6 +335,15 @@ namespace Manger
 
             Vector3 before = HYLDStaticValue.Players[selfPlayerIndex].playerPositon;
             HYLDStaticValue.Players[selfPlayerIndex].playerPositon = correctedPosition;
+            Vector3 correctedVelocity = new Vector3(
+                moveAck.CorrectVelX * sign,
+                moveAck.CorrectVelY,
+                moveAck.CorrectVelZ * sign);
+            float correctedSpeed = correctedVelocity.magnitude;
+            HYLDStaticValue.Players[selfPlayerIndex].playerMoveDir = correctedSpeed <= 0.001f
+                ? Vector3.zero
+                : correctedVelocity / correctedSpeed;
+            HYLDStaticValue.Players[selfPlayerIndex].playerMoveMagnitude = correctedSpeed <= 0.001f ? 0f : 1f;
             lastAuthorityPosition = correctedPosition;
             hasAppliedMoveCorrection = true;
             lastAppliedCorrectionMoveFrame = moveAck.AckedMoveFrame;
@@ -497,21 +511,18 @@ namespace Manger
                     flipSign = -1;
                 }
 
-                float mx = flipSign * op.MoveX;
-                float mz = flipSign * op.MoveY;
+                Vector3 tempDir = BattleFloatMath.ToMoveDirection(op.MoveX, op.MoveY, flipSign);
+                float tempMagnitude = tempDir.magnitude;
 
-                LZJ.Fixed3 tempDir = new LZJ.Fixed3(-mx, 0f, mz);
-                LZJ.Fixed tempMagnitude = tempDir.magnitude;
-
-                if (tempMagnitude.ToFloat() < 0.001f)
+                if (tempMagnitude < 0.001f)
                 {
                     HYLDStaticValue.Players[playerIndex].playerMoveDir = Vector3.zero;
                     HYLDStaticValue.Players[playerIndex].playerMoveMagnitude = 0f;
                 }
                 else
                 {
-                    HYLDStaticValue.Players[playerIndex].playerMoveDir = tempDir.ToVector3();
-                    HYLDStaticValue.Players[playerIndex].playerMoveMagnitude = tempMagnitude.ToFloat();
+                    HYLDStaticValue.Players[playerIndex].playerMoveDir = tempDir;
+                    HYLDStaticValue.Players[playerIndex].playerMoveMagnitude = tempMagnitude;
                 }
             }
 
@@ -571,9 +582,7 @@ namespace Manger
                         }
 
                         int bulletSign = ownerTeamId != teamID ? -1 : 1;
-                        Vector3 dir = LZJ.MathFixed.xAndY2UnitVector3(attack.TowardY, attack.TowardX);
-                        dir.x *= -1 * bulletSign;
-                        dir.z *= bulletSign;
+                        Vector3 dir = BattleFloatMath.ToWorldDirection(attack.TowardX, attack.TowardY, bulletSign);
 
                         Vector3 bulletSpawnPos = spawnPos;
 

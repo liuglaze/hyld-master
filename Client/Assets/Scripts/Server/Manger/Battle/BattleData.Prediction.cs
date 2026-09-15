@@ -29,7 +29,7 @@ namespace Manger
 
 *****************************************************/
         /// </summary>
-        public void RecordPredictedHistory(int frameId, LocalPlayerInput input, Vector3 startPosition, Vector3 predictedPosition)
+        public void RecordPredictedHistory(int frameId, LocalPlayerInput input, Vector3 startPosition, Vector3 predictedPosition, Vector3 predictedVelocity)
         {
             if (!IsPredictionEnabled)
             {
@@ -42,6 +42,8 @@ namespace Manger
                 Input = ClonePlayerOperation(input),
                 StartPosition = startPosition,
                 PredictedPosition = predictedPosition,
+                PredictedVelocity = predictedVelocity,
+                CoveredFrames = 1,
             };
             entry.ImportantReason = GetImportantMoveReason(entry, lastAckedMove);
 
@@ -51,32 +53,28 @@ namespace Manger
                 return;
             }
 
+            if (predictionHistory.Count >= Server.NetConfigValue.PredictionHistoryWindowSize)
+            {
+                ClearPredictionHistoryForOverflow(frameId);
+            }
+
             LinkedListNode<SavedMove> node = predictionHistory.AddLast(entry);
             predictionHistoryIndex[frameId] = node;
-            TrimPredictionHistory();
         }
 
         /// <summary>
-        /// 【保障机制】限制预测流水账本的容量。
-        /// 如果账本条数超过规定长度（PredictionHistoryWindowSize，通常设为 60 或几百），就开始把最老的第一条强行丢掉。
-        /// 这种情况通常发生在玩家断网卡主，本地一直在“盲走”，导致迟迟收不到服务器确认包来消耗链表。
+        /// UE CMC 风格的 SavedMove 爆仓处理：丢弃旧未确认历史，但不回滚角色、不暂停预测。
+        /// 后续旧 MoveAck/correction 因找不到对应 SavedMove 会被忽略，新的 SavedMove 会重新接回确认链路。
         /// </summary>
-        private void TrimPredictionHistory()
+        private void ClearPredictionHistoryForOverflow(int incomingFrameId)
         {
-            while (predictionHistory.Count > Server.NetConfigValue.PredictionHistoryWindowSize)
-            {
-                LinkedListNode<SavedMove> oldest = predictionHistory.First;
-                if (oldest == null)
-                {
-                    break;
-                }
-                if (pendingMove != null && pendingMove.FrameId == oldest.Value.FrameId)
-                {
-                    pendingMove = null;
-                }
-                predictionHistory.RemoveFirst();
-                predictionHistoryIndex.Remove(oldest.Value.FrameId);
-            }
+            Logging.HYLDDebug.FrameTrace(
+                $"[ClientMove][SavedMoveOverflow] incoming={incomingFrameId} clearCount={predictionHistory.Count} " +
+                $"window={Server.NetConfigValue.PredictionHistoryWindowSize} pending={(pendingMove != null ? pendingMove.FrameId : -1)} " +
+                $"lastAck={(lastAckedMove != null ? lastAckedMove.FrameId : 0)} predicted={predicted_frameID} sync={sync_frameID}");
+            predictionHistory.Clear();
+            predictionHistoryIndex.Clear();
+            pendingMove = null;
         }
 
         public List<ClientMove> BuildClientMovesForSend(int newMoveFrame, bool flushPendingMove)
@@ -127,12 +125,6 @@ namespace Manger
                 {
                     mode = "keep-pending";
                 }
-            }
-            else if (CanCombineSavedMoves(pendingMove, newMove) && !flushPendingMove)
-            {
-                AddNewMoveForSend(moves, newMove);
-                mode = "combine";
-                pendingMove = null;
             }
             else
             {
@@ -232,42 +224,6 @@ namespace Manger
             return null;
         }
 
-        private bool CanCombineSavedMoves(SavedMove pending, SavedMove current)
-        {
-            if (pending == null || current == null)
-            {
-                return false;
-            }
-            if (pending.ForceNoCombine || current.ForceNoCombine)
-            {
-                return false;
-            }
-            if (current.FrameId != pending.FrameId + 1)
-            {
-                return false;
-            }
-
-            float pendingX = pending.Input.MoveX;
-            float pendingY = pending.Input.MoveY;
-            float currentX = current.Input.MoveX;
-            float currentY = current.Input.MoveY;
-            float pendingMag = Mathf.Sqrt(pendingX * pendingX + pendingY * pendingY);
-            float currentMag = Mathf.Sqrt(currentX * currentX + currentY * currentY);
-            bool pendingZero = pendingMag <= 1e-6f;
-            bool currentZero = currentMag <= 1e-6f;
-            if (pendingZero || currentZero)
-            {
-                return pendingZero && currentZero;
-            }
-            if (Mathf.Abs(pendingMag - currentMag) > Server.NetConfigValue.moveCombineMagnitudeThreshold)
-            {
-                return false;
-            }
-
-            float dot = ((pendingX / pendingMag) * (currentX / currentMag)) + ((pendingY / pendingMag) * (currentY / currentMag));
-            return dot >= Server.NetConfigValue.moveCombineDotThreshold;
-        }
-
         private ClientMove CreateClientMove(SavedMove entry, MoveType moveType)
         {
             float sign = GetClientToServerSign();
@@ -280,6 +236,9 @@ namespace Manger
                 PredictedPosY = entry.PredictedPosition.y,
                 PredictedPosZ = entry.PredictedPosition.z * sign,
                 MoveType = moveType,
+                PredictedVelX = entry.PredictedVelocity.x * sign,
+                PredictedVelY = entry.PredictedVelocity.y,
+                PredictedVelZ = entry.PredictedVelocity.z * sign,
             };
         }
 
@@ -317,6 +276,11 @@ namespace Manger
             }
         }
 
+        public bool HasSavedMoveFrame(int frameId)
+        {
+            return predictionHistoryIndex.ContainsKey(frameId);
+        }
+
         /// <summary>
         /// 从当前下发的权威帧中，找到属于本地玩家（自己）的操作，
         /// 然后调用 ConfirmAttacks，把那些“服务端已经收到并确认”的攻击请求从本地待发送队列（pendingAttacks）中删掉。
@@ -352,13 +316,6 @@ namespace Manger
             }
             selfAuthorityOperation = null;
             return false;
-        }
-
-        /// 【第三步：撕账本】 清除已经被服务器消化完的历史记录。
-
-        private void TrimPredictionHistoryThroughFrame(int frameId)
-        {
-            AcknowledgeMoveFrame(frameId);
         }
 
         // ═══════ 权威快照历史（供视觉子弹生成位置查询） ═══════
@@ -460,15 +417,12 @@ namespace Manger
                     float mz = entry.Input.MoveY;
                     bool zeroInput = Mathf.Abs(mx) <= 1e-6f && Mathf.Abs(mz) <= 1e-6f;
 
-                    // 移动公式与 HYLDPlayerManger.ApplyPlayerOperation 一致：
-                    // dir = (-moveX, 0, moveY)  -> 经过 Fixed3 -> magnitude -> move = dir * 移动速度 * frameTime
-                    LZJ.Fixed3 tempDir = new LZJ.Fixed3(-mx, 0f, mz);
-                    LZJ.Fixed moveMagnitude = tempDir.magnitude;
-                    LZJ.Fixed3 move = tempDir * HYLDStaticValue.Players[selfPlayerIndex].移动速度 * Server.NetConfigValue.frameTime;
-                    pos = (new LZJ.Fixed3(pos) + move).ToVector3();
-                    replayMoveMagnitude = moveMagnitude.ToFloat();
-                    replayMoveDir = replayMoveMagnitude < 0.001f ? Vector3.zero : tempDir.ToVector3();
-                    replayedCount++;
+                    int coveredFrames = Mathf.Max(1, entry.CoveredFrames);
+                    Vector3 tempDir = BattleFloatMath.ToMoveDirection(mx, mz, 1);
+                    pos += tempDir * HYLDStaticValue.Players[selfPlayerIndex].移动速度 * Server.NetConfigValue.frameTime * coveredFrames;
+                    replayMoveMagnitude = tempDir.magnitude;
+                    replayMoveDir = replayMoveMagnitude < 0.001f ? Vector3.zero : tempDir;
+                    replayedCount += coveredFrames;
                     if (zeroInput)
                     {
                         replayedZeroCount++;

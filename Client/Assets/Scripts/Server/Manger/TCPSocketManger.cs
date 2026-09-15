@@ -23,6 +23,9 @@ namespace Server
         private Socket _socket => _client.Client;
         private NetworkStream _stream;
         private TCPSocketMessage _message;
+        private readonly object _sendLock = new object();
+        private bool _isSending;
+        private bool _sendFailed;
         //public TCPSocketManger(GameFace face) : base(face) { }
         public void OnInit()
         {
@@ -49,6 +52,12 @@ namespace Server
               
                 _client.Connect(NetConfigValue.ServiceIP, Server.NetConfigValue.ServiceTCPPort);
                 _stream = _client.GetStream();
+                lock (_sendLock)
+                {
+                    writeQueue.Clear();
+                    _isSending = false;
+                    _sendFailed = false;
+                }
                 Logging.HYLDDebug.Trace($"TCP连接成功  本机：{_client.Client.LocalEndPoint}  服务器:{_client.Client.RemoteEndPoint}");
                 Logging.HYLDDebug.Log("连接成功");
                 HYLDManger.Instance.ShowMessage("连接成功");
@@ -71,10 +80,37 @@ namespace Server
         /// </summary>
         public void CloseSocket()
         {
-            if (_socket != null && _socket.Connected)
+            CloseSocket("CloseSocket");
+        }
+
+        private void CloseSocket(string reason)
+        {
+            HYLDStaticValue.是否为连接状态 = false;
+            lock (_sendLock)
             {
-                HYLDStaticValue.是否为连接状态 = false; 
-                _socket.Close();
+                _isSending = false;
+                _sendFailed = true;
+                writeQueue.Clear();
+            }
+
+            Socket socket = null;
+            try
+            {
+                socket = _client?.Client;
+            }
+            catch (Exception ex)
+            {
+                Logging.HYLDDebug.LogError($"[TCP][CloseSocketError] reason={reason} stage=get-socket ex={ex}");
+            }
+
+            Logging.HYLDDebug.Trace($"[TCP][CloseSocket] reason={reason} hasSocket={socket != null} socketConnected={(socket != null && socket.Connected)}");
+            try
+            {
+                socket?.Close();
+            }
+            catch (Exception ex)
+            {
+                Logging.HYLDDebug.LogError($"[TCP][CloseSocketError] reason={reason} stage=close ex={ex}");
             }
         }
         /// <summary>
@@ -88,6 +124,7 @@ namespace Server
             {
                 while (true)
                 {
+                    _message.EnsureWritableSpace();
                     int len = await _stream.ReadAsync(_message.Data, _message.StartIndex, _message.RemainSize);
                     if (len == 0)
                     {
@@ -104,9 +141,9 @@ namespace Server
             catch (Exception ex)
             {
                 Debug.LogError(ex);
-                //Logging.HYLDDebug.LogError(ex);
+                Logging.HYLDDebug.LogError($"[TCP][ReceiveLoopException] {ex}");
             } finally {
-                CloseSocket();
+                CloseSocket("ReceiveLoop finally");
             }
         }
         private void HandleRequest(MainPack pack)
@@ -119,53 +156,128 @@ namespace Server
             //5.发送消息
             try
             {
+                bool hasClient = _client != null;
+                bool hasSocket = hasClient && _client.Client != null;
+                bool connected = hasSocket && _client.Client.Connected;
+                int pendingBefore;
+                lock (_sendLock)
+                {
+                    pendingBefore = writeQueue.Count;
+                }
+                Logging.HYLDDebug.Trace($"[TCP][SendAttempt] connectedFlag={HYLDStaticValue.是否为连接状态} hasClient={hasClient} hasSocket={hasSocket} socketConnected={connected} sendFailed={_sendFailed} isSending={_isSending} queue={pendingBefore} request={pack.Requestcode} action={pack.Actioncode}");
+                if (!hasClient || !hasSocket || !connected || _sendFailed)
+                {
+                    Logging.HYLDDebug.LogError($"[TCP][SendBlocked] connectedFlag={HYLDStaticValue.是否为连接状态} hasClient={hasClient} hasSocket={hasSocket} socketConnected={connected} sendFailed={_sendFailed} request={pack.Requestcode} action={pack.Actioncode}");
+                    CloseSocket($"SendBlocked request={pack.Requestcode} action={pack.Actioncode}");
+                    return;
+                }
+
                 byte[] sendbyte = TCPSocketMessage.PackData(pack);
                 ByteArray ba = new ByteArray(sendbyte);
-                int count = 0;
-                lock (writeQueue)
+                bool shouldStartSend = false;
+                int queueAfter;
+                lock (_sendLock)
                 {
                     writeQueue.Enqueue(ba);
-                    count = writeQueue.Count;
+                    queueAfter = writeQueue.Count;
+                    if (!_isSending)
+                    {
+                        _isSending = true;
+                        shouldStartSend = true;
+                    }
                 }
-                if (count == 1)
+
+                Logging.HYLDDebug.Trace($"[TCP][SendQueued] bytes={sendbyte.Length} queue={queueAfter} start={shouldStartSend} request={pack.Requestcode} action={pack.Actioncode}");
+                if (shouldStartSend)
                 {
-                    //Console.WriteLine(writeQueue.Count);
-                    _socket.BeginSend(sendbyte, 0, sendbyte.Length, 0, SendBackCall, _socket);
+                    StartQueueHeadSend();
                 }
-                //Console.WriteLine("[Send]" + BitConverter.ToString(sendbyte));
             }
             catch (Exception ex)
             {
-                Console.WriteLine("!!!!!!!!![Send] Error!!!!!!!!!");
-                Console.WriteLine(ex);
+                Logging.HYLDDebug.LogError($"[TCP][SendError] connectedFlag={HYLDStaticValue.是否为连接状态} request={pack.Requestcode} action={pack.Actioncode} ex={ex}");
+                CloseSocket($"SendError request={pack.Requestcode} action={pack.Actioncode}");
             }
         }
+
+        private void StartQueueHeadSend()
+        {
+            ByteArray head = null;
+            int queueCount;
+            lock (_sendLock)
+            {
+                queueCount = writeQueue.Count;
+                if (_sendFailed || queueCount == 0)
+                {
+                    _isSending = false;
+                    return;
+                }
+                head = writeQueue.Peek();
+            }
+
+            try
+            {
+                Socket socket = _client?.Client;
+                if (socket == null || !socket.Connected)
+                {
+                    Logging.HYLDDebug.LogError($"[TCP][SendStartBlocked] hasSocket={socket != null} socketConnected={(socket != null && socket.Connected)} queue={queueCount}");
+                    CloseSocket("SendStartBlocked");
+                    return;
+                }
+
+                Logging.HYLDDebug.Trace($"[TCP][SendStart] bytes={head.Lenth} readIdx={head.readIdx} queue={queueCount} local={socket.LocalEndPoint} remote={socket.RemoteEndPoint}");
+                socket.BeginSend(head.bytes, head.readIdx, head.Lenth, 0, SendBackCall, socket);
+            }
+            catch (Exception ex)
+            {
+                Logging.HYLDDebug.LogError($"[TCP][SendStartError] queue={queueCount} ex={ex}");
+                CloseSocket("SendStartError");
+            }
+        }
+
         private void SendBackCall(IAsyncResult ar)
         {
-
-            Socket socket = (Socket)ar.AsyncState;
-            int count = socket.EndSend(ar);
-            ByteArray ba;
-            lock (writeQueue)
+            try
             {
-                ba = writeQueue.Peek();
-            }
-            ba.readIdx += count;
-            ///完整发送了消息
-            if (ba.Lenth == 0)
-            {
-                lock (writeQueue)
+                Socket socket = (Socket)ar.AsyncState;
+                int count = socket.EndSend(ar);
+                ByteArray next = null;
+                int queueAfter;
+                lock (_sendLock)
                 {
-                    ba = null;
-                    writeQueue.Dequeue();
-                    if (writeQueue.Count != 0)
-                        ba = writeQueue.Peek();
+                    if (writeQueue.Count == 0)
+                    {
+                        throw new InvalidOperationException("Send callback completed with empty queue.");
+                    }
+
+                    ByteArray current = writeQueue.Peek();
+                    current.readIdx += count;
+                    if (current.Lenth == 0)
+                    {
+                        writeQueue.Dequeue();
+                    }
+
+                    queueAfter = writeQueue.Count;
+                    if (queueAfter == 0)
+                    {
+                        _isSending = false;
+                    }
+                    else
+                    {
+                        next = writeQueue.Peek();
+                    }
+                }
+
+                Logging.HYLDDebug.Trace($"[TCP][SendCallback] sent={count} queue={queueAfter} hasNext={next != null} socketConnected={socket.Connected}");
+                if (next != null)
+                {
+                    StartQueueHeadSend();
                 }
             }
-
-            if (ba != null)
+            catch (Exception ex)
             {
-                socket.BeginSend(ba.bytes, ba.readIdx, ba.Lenth, 0, SendBackCall, socket);
+                Logging.HYLDDebug.LogError($"[TCP][SendCallbackError] ex={ex}");
+                CloseSocket("SendCallbackError");
             }
 
         }

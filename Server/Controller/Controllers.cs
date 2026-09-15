@@ -424,6 +424,7 @@ namespace Server.Controller
             {
                 playerids.Add(player.Id);
             }
+            Logging.Debug.Log($"[Matching][AddRequest] clientUid={client?.UID} clientState={client?.PlayerState} fightPattern={fightPattern} playerCount={playerids.Count} players={string.Join(",", playerids)} activeClient={(client != null && server.GetActiveClient(client.UID) != null)}");
             /*
              1.2AddMatchingPlayer将当前玩家和信息加入到匹配队列
              */

@@ -24,7 +24,8 @@ namespace Manger
             public LocalPlayerInput Input;
             public Vector3 StartPosition;
             public Vector3 PredictedPosition;
-            public bool ForceNoCombine;
+            public Vector3 PredictedVelocity;
+            public int CoveredFrames;
             public bool SentAsNewMove;
             public string ImportantReason;
         }

@@ -107,12 +107,6 @@ public class CommandManger
         }
     }
 
-    public void AddCommad_Move(LZJ.Fixed dx, LZJ.Fixed dy)
-    {
-        latestMoveX = dx.ToFloat();
-        latestMoveY = dy.ToFloat();
-    }
-
     public void Execute(int commandFrameId)
     {
         // 每个发送帧都先应用最新移动输入（避免摇杆事件频率影响）

@@ -94,8 +94,8 @@ public class HYLDStaticValue :MonoBehaviour
     #region 添加英雄
 
     #region net帧同步交互部分
-    public static LZJ.Fixed PlayerMoveX;
-    public static LZJ.Fixed PlayerMoveY;
+    public static float PlayerMoveX;
+    public static float PlayerMoveY;
 
     #endregion
     
@@ -115,7 +115,6 @@ public class HYLDStaticValue :MonoBehaviour
          BlueBP = 50000;
 
     // Debug.LogError("11");
-    //Logging.HYLDDebug.Log($"float {15 * 6.154646}  fixed:{(new LZJ.Fixed(15) * 6.154646f).ToFloat()}");
     //zyk增加部分      名字              名字     定位  血量 移速 进攻距离 子弹预制体 距离 宽度 子弹数量 伤害 角度 速度 每次发射数量 [间隔] 
     //Heros.Add(HeroName.BoKe,   new Hero("波克",  "战士",4680, 8,     3,5,       shells[0], 6,    1,     4,    260,  30,  10,     4));//ok
     //Heros.Add(HeroName.LuoSha, new Hero("罗莎",  "坦克",6750, 8,     1,3,       shells[3], 3,   0.5f,   3,    575,  60,  11,     1));//ok
@@ -332,7 +331,7 @@ public class PlayerInformation
     public bool isPoisoning = false;
     public bool 被控制 = false;
     public bool 可以按大招 = false;
-    public float 最大能量 = 3000;
+    public float 最大能量 = 200;
     public float 当前能量 = 0;
     public float 移动速度 = -1;
     public int 炮台数量 = 0;

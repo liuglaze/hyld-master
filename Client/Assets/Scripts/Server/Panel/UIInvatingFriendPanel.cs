@@ -635,6 +635,7 @@ namespace MVC
             //loginPack.Username = HYLDStaticValue.UseName;
             //pack.Loginpack = loginPack;
             //pack.Str = PlayerNameText.text;
+            Logging.HYLDDebug.Trace($"[Matching][ClickStart] connected={HYLDStaticValue.是否为连接状态} uid={HYLDStaticValue.PlayerUID} roomFriendCount={_RoomFriendsDic.Count} request={pack.Requestcode} action={pack.Actioncode} players={pack.Playerspack.Count}");
             Logging.HYLDDebug.Log("StartMathching :" + pack);
             Requests[8].SendRequest(pack);
         }

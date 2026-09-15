@@ -24,7 +24,7 @@ namespace SocketProto {
     static SocketProtoReflection() {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
-            "ChFTb2NrZXRQcm90by5wcm90bxILU29ja2V0UHJvdG8i1gQKCE1haW5QYWNr",
+            "ChFTb2NrZXRQcm90by5wcm90bxILU29ja2V0UHJvdG8ilgUKCE1haW5QYWNr",
             "Ei0KC3JlcXVlc3Rjb2RlGAEgASgOMhguU29ja2V0UHJvdG8uUmVxdWVzdENv",
             "ZGUSKwoKYWN0aW9uY29kZRgCIAEoDjIXLlNvY2tldFByb3RvLkFjdGlvbkNv",
             "ZGUSKwoKcmV0dXJuY29kZRgDIAEoDjIXLlNvY2tldFByb3RvLlJldHVybkNv",
@@ -38,114 +38,122 @@ namespace SocketProto {
             "a2V0UHJvdG8uQ2hhdFBhY2sSNwoQYmF0dGxlcGxheWVycGFjaxgMIAMoCzId",
             "LlNvY2tldFByb3RvLkJhdHRsZVBsYXllclBhY2sSKwoKYmF0dGxlSW5mbxgN",
             "IAEoCzIXLlNvY2tldFByb3RvLkJhdHRsZUluZm8SEQoJdGltZXN0YW1wGA4g",
-            "ASgDIj4KCENoYXRQYWNrEhIKCnBsYXllcm5hbWUYASABKAkSDwoHbWVzc2Fn",
-            "ZRgCIAEoCRINCgVzdGF0ZRgDIAEoBSIvCglMb2dpblBhY2sSEAoIdXNlcm5h",
-            "bWUYASABKAkSEAoIcGFzc3dvcmQYAiABKAkiYQoIUm9vbVBhY2sSDgoGcm9v",
-            "bWlkGAEgASgJEg4KBm1heG51bRgCIAEoBRIOCgZjdXJudW0YAyABKAUSJQoF",
-            "c3RhdGUYBCABKA4yFi5Tb2NrZXRQcm90by5Sb29tU3RhdGUihQEKEEJhdHRs",
-            "ZVBsYXllclBhY2sSCgoCaWQYASABKAUSDgoGdGVhbWlkGAIgASgFEg4KBnJv",
-            "b21pZBgDIAEoBRISCgpwbGF5ZXJuYW1lGAQgASgJEh8KBGhlcm8YBSABKA4y",
-            "ES5Tb2NrZXRQcm90by5IZXJvEhAKCGJhdHRsZWlkGAYgASgFIqoBCg5CYXR0",
-            "bGVSb29tUGFjaxIOCgZyb29taWQYASABKAkSDgoGbWF4bnVtGAIgASgFEg4K",
-            "BmN1cm51bRgDIAEoBRIvCgxmaWdodHBhdHRlcm4YBCABKA4yGS5Tb2NrZXRQ",
-            "cm90by5GaWdodFBhdHRlcm4SNwoQYmF0dGxlcGxheWVycGFjaxgFIAMoCzId",
-            "LlNvY2tldFByb3RvLkJhdHRsZVBsYXllclBhY2siZwoORnJpZW5kUm9vbVBh",
-            "Y2sSDgoGcm9vbWlkGAEgASgJEg4KBm1heG51bRgCIAEoBRIOCgZjdXJudW0Y",
-            "AyABKAUSJQoFc3RhdGUYBCABKA4yFi5Tb2NrZXRQcm90by5Sb29tU3RhdGUi",
-            "uQEKClBsYXllclBhY2sSEAoIdXNlcm5hbWUYASABKAkSEgoKcGxheWVybmFt",
-            "ZRgCIAEoCRIKCgJpZBgDIAEoBRInCgVzdGF0ZRgEIAEoDjIYLlNvY2tldFBy",
-            "b3RvLlBsYXllclN0YXRlEh8KBGhlcm8YBSABKA4yES5Tb2NrZXRQcm90by5I",
-            "ZXJvEi8KDGZpZ2h0cGF0dGVybhgGIAEoDjIZLlNvY2tldFByb3RvLkZpZ2h0",
-            "UGF0dGVybiLYAQoKQmF0dGxlSW5mbxIUCgxzZXJ2ZXJfZnJhbWUYASABKAUS",
-            "EQoJcmFuZF9zZWVkGAIgASgFEjMKDGJhdHRsZV91c2VycxgDIAMoCzIdLlNv",
-            "Y2tldFByb3RvLkJhdHRsZVBsYXllclBhY2sSNAoMY2xpZW50X2lucHV0GAog",
-            "ASgLMh4uU29ja2V0UHJvdG8uQmF0dGxlQ2xpZW50SW5wdXQSNgoNc2VydmVy",
-            "X3VwZGF0ZRgUIAEoCzIfLlNvY2tldFByb3RvLkJhdHRsZVNlcnZlclVwZGF0",
-            "ZSLCAQoRQmF0dGxlQ2xpZW50SW5wdXQSGAoQYmF0dGxlX3BsYXllcl9pZBgB",
-            "IAEoBRITCgtjbGllbnRfdGljaxgCIAEoBRIaChJhY2tlZF9zZXJ2ZXJfZnJh",
-            "bWUYAyABKAUSDgoGcnR0X21zGAQgASgFEiYKBW1vdmVzGAogAygLMhcuU29j",
-            "a2V0UHJvdG8uQ2xpZW50TW92ZRIqCgdhdHRhY2tzGAsgAygLMhkuU29ja2V0",
-            "UHJvdG8uQ2xpZW50QXR0YWNrIt4BChJCYXR0bGVTZXJ2ZXJVcGRhdGUSKAoG",
-            "ZnJhbWVzGAEgAygLMhguU29ja2V0UHJvdG8uQmF0dGxlRnJhbWUSLAoIbW92",
-            "ZV9hY2sYAiABKAsyGi5Tb2NrZXRQcm90by5Nb3ZlQWNrUmVzdWx0EikKCmhp",
-            "dF9ldmVudHMYAyADKAsyFS5Tb2NrZXRQcm90by5IaXRFdmVudBIYChBzdGF0",
-            "ZV9iYXNlX2ZyYW1lGAQgASgFEisKC2F0dGFja19hY2tzGAUgAygLMhYuU29j",
-            "a2V0UHJvdG8uQXR0YWNrQWNrIpcBCgtCYXR0bGVGcmFtZRIUCgxzZXJ2ZXJf",
-            "ZnJhbWUYASABKAUSNAoNcGxheWVyX2lucHV0cxgCIAMoCzIdLlNvY2tldFBy",
-            "b3RvLlBsYXllckZyYW1lSW5wdXQSPAoNcGxheWVyX3N0YXRlcxgDIAMoCzIl",
-            "LlNvY2tldFByb3RvLkF1dGhvcml0YXRpdmVQbGF5ZXJTdGF0ZSJ4ChBQbGF5",
-            "ZXJGcmFtZUlucHV0EhgKEGJhdHRsZV9wbGF5ZXJfaWQYASABKAUSDgoGbW92",
-            "ZV94GAIgASgCEg4KBm1vdmVfeRgDIAEoAhIqCgdhdHRhY2tzGAQgAygLMhku",
-            "U29ja2V0UHJvdG8uU2VydmVyQXR0YWNrIo4BCgxDbGllbnRBdHRhY2sSEQoJ",
-            "YXR0YWNrX2lkGAEgASgFEhkKEWF0dGFja19tb3ZlX2ZyYW1lGAIgASgFEhAK",
-            "CHRvd2FyZF94GAMgASgCEhAKCHRvd2FyZF95GAQgASgCEiwKC2F0dGFja190",
-            "eXBlGAUgASgOMhcuU29ja2V0UHJvdG8uQXR0YWNrVHlwZSKMAgoMU2VydmVy",
-            "QXR0YWNrEhEKCWF0dGFja19pZBgBIAEoBRIhChlhdHRhY2tlcl9iYXR0bGVf",
-            "cGxheWVyX2lkGAIgASgFEhkKEWF0dGFja19tb3ZlX2ZyYW1lGAMgASgFEhoK",
-            "EnNwYXduX3NlcnZlcl9mcmFtZRgEIAEoBRIQCgh0b3dhcmRfeBgFIAEoAhIQ",
-            "Cgh0b3dhcmRfeRgGIAEoAhITCgtzcGF3bl9wb3NfeBgHIAEoAhITCgtzcGF3",
-            "bl9wb3NfeRgIIAEoAhITCgtzcGF3bl9wb3NfehgJIAEoAhIsCgthdHRhY2tf",
-            "dHlwZRgKIAEoDjIXLlNvY2tldFByb3RvLkF0dGFja1R5cGUitQEKCkNsaWVu",
-            "dE1vdmUSEgoKbW92ZV9mcmFtZRgBIAEoBRIOCgZtb3ZlX3gYAiABKAISDgoG",
-            "bW92ZV95GAMgASgCEhcKD3ByZWRpY3RlZF9wb3NfeBgEIAEoAhIXCg9wcmVk",
-            "aWN0ZWRfcG9zX3kYBSABKAISFwoPcHJlZGljdGVkX3Bvc196GAYgASgCEigK",
-            "CW1vdmVfdHlwZRgHIAEoDjIVLlNvY2tldFByb3RvLk1vdmVUeXBlItgBCg1N",
-            "b3ZlQWNrUmVzdWx0EhEKCWJhdHRsZV9pZBgBIAEoBRIYChBhY2tlZF9tb3Zl",
-            "X2ZyYW1lGAIgASgFEhUKDWFja19nb29kX21vdmUYAyABKAgSFQoNY29ycmVj",
-            "dF9wb3NfeBgEIAEoAhIVCg1jb3JyZWN0X3Bvc195GAUgASgCEhUKDWNvcnJl",
-            "Y3RfcG9zX3oYBiABKAISGQoRZnJhbWVfZGlzY3JlcGFuY3kYByABKAUSIwob",
-            "cmVzb2x2aW5nX2ZyYW1lX2Rpc2NyZXBhbmN5GAggASgIIsMBCghIaXRFdmVu",
-            "dBIRCglhdHRhY2tfaWQYASABKAUSGgoSYXR0YWNrZXJfYmF0dGxlX2lkGAIg",
-            "ASgFEhgKEHZpY3RpbV9iYXR0bGVfaWQYAyABKAUSDgoGZGFtYWdlGAQgASgF",
-            "EhQKDGhpdF9mcmFtZV9pZBgFIAEoBRIRCgloaXRfcG9zX3gYBiABKAISEQoJ",
-            "aGl0X3Bvc195GAcgASgCEhEKCWhpdF9wb3NfehgIIAEoAhIPCgdpc19raWxs",
-            "GAkgASgIIpEBCglBdHRhY2tBY2sSGAoQYmF0dGxlX3BsYXllcl9pZBgBIAEo",
-            "BRIRCglhdHRhY2tfaWQYAiABKAUSEAoIYWNjZXB0ZWQYAyABKAgSEgoKbWFu",
-            "YV9hZnRlchgEIAEoBRIVCg1yZWplY3RfcmVhc29uGAUgASgJEhoKEnN1cGVy",
-            "X2VuZXJneV9hZnRlchgGIAEoBSKvAQoYQXV0aG9yaXRhdGl2ZVBsYXllclN0",
-            "YXRlEhEKCWJhdHRsZV9pZBgBIAEoBRINCgVwb3NfeBgCIAEoAhINCgVwb3Nf",
-            "eRgDIAEoAhINCgVwb3NfehgEIAEoAhIKCgJocBgFIAEoBRIPCgdpc19kZWFk",
-            "GAYgASgIEhIKCnN0YXRlX21hc2sYByABKA0SDAoEbWFuYRgIIAEoBRIUCgxz",
-            "dXBlcl9lbmVyZ3kYCSABKAUqhgEKC1JlcXVlc3RDb2RlEg8KC1JlcXVlc3RO",
-            "b25lEAASCAoEVXNlchABEggKBFJvb20QAhIKCgZGcmllbmQQAxIOCgpGcmll",
-            "bmRSb29tEAQSDAoIUGluZ1BvbmcQBRIMCghNYXRjaGluZxAGEgoKBkJhdHRs",
-            "ZRAHEg4KCkNsZWFyU2VuY2UQCCq1BgoKQWN0aW9uQ29kZRIOCgpBY3Rpb25O",
-            "b25lEAASCQoFTG9nb24QARIJCgVMb2dpbhACEg4KCkNyZWF0ZVJvb20QAxIM",
-            "CghGaW5kUm9vbRAEEg4KClBsYXllckxpc3QQBRIMCghKb2luUm9vbRAGEggK",
-            "BEV4aXQQBxIICgRDaGF0EAgSEQoNQXBseUFkZEZyaWVuZBAJEhAKDEludml0",
-            "ZUZyaWVuZBAKEgwKCEZpbmROYW1lEAsSDgoKVXBkYXRlTmFtZRAMEhMKD0Fj",
-            "Y2VwdEFkZEZyaWVuZBANEhMKD1JlamVjdEFkZEZyaWVuZBAOEhIKDkZpbmRQ",
-            "bGF5ZXJJbmZvEA8SEwoPRmluZEZyaWVuZHNJbmZvEBASDwoLRnJpZW5kTG9n",
-            "aW4QERIQCgxGcmllbmRMb2dvdXQQEhIWChJBY2NlcHRJbnZhdGVGcmllbmQQ",
-            "ExIWChJSZWplY3RJbnZhdGVGcmllbmQQFBIWChJDYW5jYWxJbnZhdGVGcmll",
-            "bmQQFRIMCghFeGl0Um9vbRAWEhUKEUdldEZyaWVuZFJvb21JbmZvEBcSCAoE",
-            "UGluZxAYEggKBFBvbmcQGRIOCgpDaGFuZ2VIZXJvEBoSGgoWVXBEYXRlQWN0",
-            "aXZlRnJpZW5kSW5mbxAbEhUKEUFkZE1hdGNoaW5nUGxheWVyEBwSGAoUUmVt",
-            "b3ZlTWF0Y2hpbmdQbGF5ZXIQHRIUChBTdGFydEVudGVyQmF0dGxlEB4SDwoL",
-            "QmF0dGxlUmVhZHkQHxIPCgtCYXR0bGVTdGFydBAgEiQKIEJhdHRsZVB1c2hE",
-            "b3dtQWxsRnJhbWVPcGVhcnRpb25zECESIgoeQmF0dGxlUHVzaERvd21QbGF5",
-            "ZXJPcGVhcnRpb25zECISHQoZQ2xpZW50U2VuZENsZWFyU2VuY2VSZWFkeRAj",
-            "EhYKEkFsbENsZWFyU2VuY2VSZWFkeRAkEhYKEkNsaWVudFNlbmRHYW1lT3Zl",
-            "chAlEhoKFkJhdHRsZVB1c2hEb3dtR2FtZU92ZXIQJhIQCgxCYXR0bGVSZXZp",
-            "ZXcQJxIbChdCYXR0bGVQdXNoRG93bkhpdEV2ZW50cxAoKk8KClJldHVybkNv",
-            "ZGUSDgoKUmV0dXJuTm9uZRAAEgsKB1N1Y2NlZWQQARIICgRGYWlsEAISCwoH",
-            "Tm90Um9vbRADEg0KCUFkZEZyaWVuZBAEKjcKCVJvb21TdGF0ZRIOCgpSb29t",
-            "Tm9ybWFsEAASDAoIUm9vbUZ1bGwQARIMCghSb29tR2FtZRACKmkKC1BsYXll",
-            "clN0YXRlEhAKDFBsYXllck9ubGluZRAAEhEKDVBsYXllck91dGxpbmUQARIO",
-            "CgpQbGF5ZXJHYW1lEAISEAoMUGxheWVyT25Sb29tEAMSEwoPUGxheWVyT25J",
-            "bnZhdGVkEAQq6wEKBEhlcm8SCQoFWHVlTGkQABIKCgZLZUVyVGUQARIKCgZQ",
-            "ZWlQZWkQAhIJCgVQYW5OaRADEggKBEJhTGkQBBILCgdHb25nTml1EAUSCgoG",
-            "RGFMaUVyEAYSCAoER2VFchAHEgsKB0J1THVvS2UQCBIOCgpCYW9Qb01haUtl",
-            "EAkSBwoDQUJvEAoSCAoERGlLZRALEgkKBUJlaVlhEAwSCAoEVGFMYRANEgsK",
-            "B01haUtlU2kQDhILCgdTaVBhaUtlEA8SCQoFSGVpWWEQEBIJCgVMaUFuZxAR",
-            "EggKBFBhTXUQEhIJCgVSdWlLZRATKiwKDEZpZ2h0UGF0dGVybhIRCg1CYW9T",
-            "aGlaaGVuZ0JhEAASCQoFU2hlamkQASokCghNb3ZlVHlwZRILCgdOZXdNb3Zl",
-            "EAASCwoHT2xkTW92ZRABKiMKCkF0dGFja1R5cGUSCgoGTm9ybWFsEAASCQoF",
-            "U3VwZXIQAWIGcHJvdG8z"));
+            "ASgDEj4KFWJhdHRsZV9uZXRfc2ltX2NvbmZpZxgPIAEoCzIfLlNvY2tldFBy",
+            "b3RvLkJhdHRsZU5ldFNpbUNvbmZpZyI+CghDaGF0UGFjaxISCgpwbGF5ZXJu",
+            "YW1lGAEgASgJEg8KB21lc3NhZ2UYAiABKAkSDQoFc3RhdGUYAyABKAUiLwoJ",
+            "TG9naW5QYWNrEhAKCHVzZXJuYW1lGAEgASgJEhAKCHBhc3N3b3JkGAIgASgJ",
+            "ImEKCFJvb21QYWNrEg4KBnJvb21pZBgBIAEoCRIOCgZtYXhudW0YAiABKAUS",
+            "DgoGY3VybnVtGAMgASgFEiUKBXN0YXRlGAQgASgOMhYuU29ja2V0UHJvdG8u",
+            "Um9vbVN0YXRlIoUBChBCYXR0bGVQbGF5ZXJQYWNrEgoKAmlkGAEgASgFEg4K",
+            "BnRlYW1pZBgCIAEoBRIOCgZyb29taWQYAyABKAUSEgoKcGxheWVybmFtZRgE",
+            "IAEoCRIfCgRoZXJvGAUgASgOMhEuU29ja2V0UHJvdG8uSGVybxIQCghiYXR0",
+            "bGVpZBgGIAEoBSKqAQoOQmF0dGxlUm9vbVBhY2sSDgoGcm9vbWlkGAEgASgJ",
+            "Eg4KBm1heG51bRgCIAEoBRIOCgZjdXJudW0YAyABKAUSLwoMZmlnaHRwYXR0",
+            "ZXJuGAQgASgOMhkuU29ja2V0UHJvdG8uRmlnaHRQYXR0ZXJuEjcKEGJhdHRs",
+            "ZXBsYXllcnBhY2sYBSADKAsyHS5Tb2NrZXRQcm90by5CYXR0bGVQbGF5ZXJQ",
+            "YWNrImcKDkZyaWVuZFJvb21QYWNrEg4KBnJvb21pZBgBIAEoCRIOCgZtYXhu",
+            "dW0YAiABKAUSDgoGY3VybnVtGAMgASgFEiUKBXN0YXRlGAQgASgOMhYuU29j",
+            "a2V0UHJvdG8uUm9vbVN0YXRlIrkBCgpQbGF5ZXJQYWNrEhAKCHVzZXJuYW1l",
+            "GAEgASgJEhIKCnBsYXllcm5hbWUYAiABKAkSCgoCaWQYAyABKAUSJwoFc3Rh",
+            "dGUYBCABKA4yGC5Tb2NrZXRQcm90by5QbGF5ZXJTdGF0ZRIfCgRoZXJvGAUg",
+            "ASgOMhEuU29ja2V0UHJvdG8uSGVybxIvCgxmaWdodHBhdHRlcm4YBiABKA4y",
+            "GS5Tb2NrZXRQcm90by5GaWdodFBhdHRlcm4i2AEKCkJhdHRsZUluZm8SFAoM",
+            "c2VydmVyX2ZyYW1lGAEgASgFEhEKCXJhbmRfc2VlZBgCIAEoBRIzCgxiYXR0",
+            "bGVfdXNlcnMYAyADKAsyHS5Tb2NrZXRQcm90by5CYXR0bGVQbGF5ZXJQYWNr",
+            "EjQKDGNsaWVudF9pbnB1dBgKIAEoCzIeLlNvY2tldFByb3RvLkJhdHRsZUNs",
+            "aWVudElucHV0EjYKDXNlcnZlcl91cGRhdGUYFCABKAsyHy5Tb2NrZXRQcm90",
+            "by5CYXR0bGVTZXJ2ZXJVcGRhdGUibQoSQmF0dGxlTmV0U2ltQ29uZmlnEhgK",
+            "EGJhdHRsZV9wbGF5ZXJfaWQYASABKAUSEQoJZHJvcF9yYXRlGAIgASgCEhQK",
+            "DGRlbGF5X21pbl9tcxgDIAEoBRIUCgxkZWxheV9tYXhfbXMYBCABKAUiwgEK",
+            "EUJhdHRsZUNsaWVudElucHV0EhgKEGJhdHRsZV9wbGF5ZXJfaWQYASABKAUS",
+            "EwoLY2xpZW50X3RpY2sYAiABKAUSGgoSYWNrZWRfc2VydmVyX2ZyYW1lGAMg",
+            "ASgFEg4KBnJ0dF9tcxgEIAEoBRImCgVtb3ZlcxgKIAMoCzIXLlNvY2tldFBy",
+            "b3RvLkNsaWVudE1vdmUSKgoHYXR0YWNrcxgLIAMoCzIZLlNvY2tldFByb3Rv",
+            "LkNsaWVudEF0dGFjayLeAQoSQmF0dGxlU2VydmVyVXBkYXRlEigKBmZyYW1l",
+            "cxgBIAMoCzIYLlNvY2tldFByb3RvLkJhdHRsZUZyYW1lEiwKCG1vdmVfYWNr",
+            "GAIgASgLMhouU29ja2V0UHJvdG8uTW92ZUFja1Jlc3VsdBIpCgpoaXRfZXZl",
+            "bnRzGAMgAygLMhUuU29ja2V0UHJvdG8uSGl0RXZlbnQSGAoQc3RhdGVfYmFz",
+            "ZV9mcmFtZRgEIAEoBRIrCgthdHRhY2tfYWNrcxgFIAMoCzIWLlNvY2tldFBy",
+            "b3RvLkF0dGFja0FjayKXAQoLQmF0dGxlRnJhbWUSFAoMc2VydmVyX2ZyYW1l",
+            "GAEgASgFEjQKDXBsYXllcl9pbnB1dHMYAiADKAsyHS5Tb2NrZXRQcm90by5Q",
+            "bGF5ZXJGcmFtZUlucHV0EjwKDXBsYXllcl9zdGF0ZXMYAyADKAsyJS5Tb2Nr",
+            "ZXRQcm90by5BdXRob3JpdGF0aXZlUGxheWVyU3RhdGUieAoQUGxheWVyRnJh",
+            "bWVJbnB1dBIYChBiYXR0bGVfcGxheWVyX2lkGAEgASgFEg4KBm1vdmVfeBgC",
+            "IAEoAhIOCgZtb3ZlX3kYAyABKAISKgoHYXR0YWNrcxgEIAMoCzIZLlNvY2tl",
+            "dFByb3RvLlNlcnZlckF0dGFjayKOAQoMQ2xpZW50QXR0YWNrEhEKCWF0dGFj",
+            "a19pZBgBIAEoBRIZChFhdHRhY2tfbW92ZV9mcmFtZRgCIAEoBRIQCgh0b3dh",
+            "cmRfeBgDIAEoAhIQCgh0b3dhcmRfeRgEIAEoAhIsCgthdHRhY2tfdHlwZRgF",
+            "IAEoDjIXLlNvY2tldFByb3RvLkF0dGFja1R5cGUijAIKDFNlcnZlckF0dGFj",
+            "axIRCglhdHRhY2tfaWQYASABKAUSIQoZYXR0YWNrZXJfYmF0dGxlX3BsYXll",
+            "cl9pZBgCIAEoBRIZChFhdHRhY2tfbW92ZV9mcmFtZRgDIAEoBRIaChJzcGF3",
+            "bl9zZXJ2ZXJfZnJhbWUYBCABKAUSEAoIdG93YXJkX3gYBSABKAISEAoIdG93",
+            "YXJkX3kYBiABKAISEwoLc3Bhd25fcG9zX3gYByABKAISEwoLc3Bhd25fcG9z",
+            "X3kYCCABKAISEwoLc3Bhd25fcG9zX3oYCSABKAISLAoLYXR0YWNrX3R5cGUY",
+            "CiABKA4yFy5Tb2NrZXRQcm90by5BdHRhY2tUeXBlIoACCgpDbGllbnRNb3Zl",
+            "EhIKCm1vdmVfZnJhbWUYASABKAUSDgoGbW92ZV94GAIgASgCEg4KBm1vdmVf",
+            "eRgDIAEoAhIXCg9wcmVkaWN0ZWRfcG9zX3gYBCABKAISFwoPcHJlZGljdGVk",
+            "X3Bvc195GAUgASgCEhcKD3ByZWRpY3RlZF9wb3NfehgGIAEoAhIoCgltb3Zl",
+            "X3R5cGUYByABKA4yFS5Tb2NrZXRQcm90by5Nb3ZlVHlwZRIXCg9wcmVkaWN0",
+            "ZWRfdmVsX3gYCCABKAISFwoPcHJlZGljdGVkX3ZlbF95GAkgASgCEhcKD3By",
+            "ZWRpY3RlZF92ZWxfehgKIAEoAiKdAgoNTW92ZUFja1Jlc3VsdBIRCgliYXR0",
+            "bGVfaWQYASABKAUSGAoQYWNrZWRfbW92ZV9mcmFtZRgCIAEoBRIVCg1hY2tf",
+            "Z29vZF9tb3ZlGAMgASgIEhUKDWNvcnJlY3RfcG9zX3gYBCABKAISFQoNY29y",
+            "cmVjdF9wb3NfeRgFIAEoAhIVCg1jb3JyZWN0X3Bvc196GAYgASgCEhkKEWZy",
+            "YW1lX2Rpc2NyZXBhbmN5GAcgASgFEiMKG3Jlc29sdmluZ19mcmFtZV9kaXNj",
+            "cmVwYW5jeRgIIAEoCBIVCg1jb3JyZWN0X3ZlbF94GAkgASgCEhUKDWNvcnJl",
+            "Y3RfdmVsX3kYCiABKAISFQoNY29ycmVjdF92ZWxfehgLIAEoAiLDAQoISGl0",
+            "RXZlbnQSEQoJYXR0YWNrX2lkGAEgASgFEhoKEmF0dGFja2VyX2JhdHRsZV9p",
+            "ZBgCIAEoBRIYChB2aWN0aW1fYmF0dGxlX2lkGAMgASgFEg4KBmRhbWFnZRgE",
+            "IAEoBRIUCgxoaXRfZnJhbWVfaWQYBSABKAUSEQoJaGl0X3Bvc194GAYgASgC",
+            "EhEKCWhpdF9wb3NfeRgHIAEoAhIRCgloaXRfcG9zX3oYCCABKAISDwoHaXNf",
+            "a2lsbBgJIAEoCCKRAQoJQXR0YWNrQWNrEhgKEGJhdHRsZV9wbGF5ZXJfaWQY",
+            "ASABKAUSEQoJYXR0YWNrX2lkGAIgASgFEhAKCGFjY2VwdGVkGAMgASgIEhIK",
+            "Cm1hbmFfYWZ0ZXIYBCABKAUSFQoNcmVqZWN0X3JlYXNvbhgFIAEoCRIaChJz",
+            "dXBlcl9lbmVyZ3lfYWZ0ZXIYBiABKAUirwEKGEF1dGhvcml0YXRpdmVQbGF5",
+            "ZXJTdGF0ZRIRCgliYXR0bGVfaWQYASABKAUSDQoFcG9zX3gYAiABKAISDQoF",
+            "cG9zX3kYAyABKAISDQoFcG9zX3oYBCABKAISCgoCaHAYBSABKAUSDwoHaXNf",
+            "ZGVhZBgGIAEoCBISCgpzdGF0ZV9tYXNrGAcgASgNEgwKBG1hbmEYCCABKAUS",
+            "FAoMc3VwZXJfZW5lcmd5GAkgASgFKoYBCgtSZXF1ZXN0Q29kZRIPCgtSZXF1",
+            "ZXN0Tm9uZRAAEggKBFVzZXIQARIICgRSb29tEAISCgoGRnJpZW5kEAMSDgoK",
+            "RnJpZW5kUm9vbRAEEgwKCFBpbmdQb25nEAUSDAoITWF0Y2hpbmcQBhIKCgZC",
+            "YXR0bGUQBxIOCgpDbGVhclNlbmNlEAgq0AYKCkFjdGlvbkNvZGUSDgoKQWN0",
+            "aW9uTm9uZRAAEgkKBUxvZ29uEAESCQoFTG9naW4QAhIOCgpDcmVhdGVSb29t",
+            "EAMSDAoIRmluZFJvb20QBBIOCgpQbGF5ZXJMaXN0EAUSDAoISm9pblJvb20Q",
+            "BhIICgRFeGl0EAcSCAoEQ2hhdBAIEhEKDUFwbHlBZGRGcmllbmQQCRIQCgxJ",
+            "bnZpdGVGcmllbmQQChIMCghGaW5kTmFtZRALEg4KClVwZGF0ZU5hbWUQDBIT",
+            "Cg9BY2NlcHRBZGRGcmllbmQQDRITCg9SZWplY3RBZGRGcmllbmQQDhISCg5G",
+            "aW5kUGxheWVySW5mbxAPEhMKD0ZpbmRGcmllbmRzSW5mbxAQEg8KC0ZyaWVu",
+            "ZExvZ2luEBESEAoMRnJpZW5kTG9nb3V0EBISFgoSQWNjZXB0SW52YXRlRnJp",
+            "ZW5kEBMSFgoSUmVqZWN0SW52YXRlRnJpZW5kEBQSFgoSQ2FuY2FsSW52YXRl",
+            "RnJpZW5kEBUSDAoIRXhpdFJvb20QFhIVChFHZXRGcmllbmRSb29tSW5mbxAX",
+            "EggKBFBpbmcQGBIICgRQb25nEBkSDgoKQ2hhbmdlSGVybxAaEhoKFlVwRGF0",
+            "ZUFjdGl2ZUZyaWVuZEluZm8QGxIVChFBZGRNYXRjaGluZ1BsYXllchAcEhgK",
+            "FFJlbW92ZU1hdGNoaW5nUGxheWVyEB0SFAoQU3RhcnRFbnRlckJhdHRsZRAe",
+            "Eg8KC0JhdHRsZVJlYWR5EB8SDwoLQmF0dGxlU3RhcnQQIBIkCiBCYXR0bGVQ",
+            "dXNoRG93bUFsbEZyYW1lT3BlYXJ0aW9ucxAhEiIKHkJhdHRsZVB1c2hEb3dt",
+            "UGxheWVyT3BlYXJ0aW9ucxAiEh0KGUNsaWVudFNlbmRDbGVhclNlbmNlUmVh",
+            "ZHkQIxIWChJBbGxDbGVhclNlbmNlUmVhZHkQJBIWChJDbGllbnRTZW5kR2Ft",
+            "ZU92ZXIQJRIaChZCYXR0bGVQdXNoRG93bUdhbWVPdmVyECYSEAoMQmF0dGxl",
+            "UmV2aWV3ECcSGwoXQmF0dGxlUHVzaERvd25IaXRFdmVudHMQKBIZChVCYXR0",
+            "bGVTZXROZXRTaW1Db25maWcQKSpPCgpSZXR1cm5Db2RlEg4KClJldHVybk5v",
+            "bmUQABILCgdTdWNjZWVkEAESCAoERmFpbBACEgsKB05vdFJvb20QAxINCglB",
+            "ZGRGcmllbmQQBCo3CglSb29tU3RhdGUSDgoKUm9vbU5vcm1hbBAAEgwKCFJv",
+            "b21GdWxsEAESDAoIUm9vbUdhbWUQAippCgtQbGF5ZXJTdGF0ZRIQCgxQbGF5",
+            "ZXJPbmxpbmUQABIRCg1QbGF5ZXJPdXRsaW5lEAESDgoKUGxheWVyR2FtZRAC",
+            "EhAKDFBsYXllck9uUm9vbRADEhMKD1BsYXllck9uSW52YXRlZBAEKusBCgRI",
+            "ZXJvEgkKBVh1ZUxpEAASCgoGS2VFclRlEAESCgoGUGVpUGVpEAISCQoFUGFu",
+            "TmkQAxIICgRCYUxpEAQSCwoHR29uZ05pdRAFEgoKBkRhTGlFchAGEggKBEdl",
+            "RXIQBxILCgdCdUx1b0tlEAgSDgoKQmFvUG9NYWlLZRAJEgcKA0FCbxAKEggK",
+            "BERpS2UQCxIJCgVCZWlZYRAMEggKBFRhTGEQDRILCgdNYWlLZVNpEA4SCwoH",
+            "U2lQYWlLZRAPEgkKBUhlaVlhEBASCQoFTGlBbmcQERIICgRQYU11EBISCQoF",
+            "UnVpS2UQEyosCgxGaWdodFBhdHRlcm4SEQoNQmFvU2hpWmhlbmdCYRAAEgkK",
+            "BVNoZWppEAEqJAoITW92ZVR5cGUSCwoHTmV3TW92ZRAAEgsKB09sZE1vdmUQ",
+            "ASojCgpBdHRhY2tUeXBlEgoKBk5vcm1hbBAAEgkKBVN1cGVyEAFiBnByb3Rv",
+            "Mw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::SocketProto.RequestCode), typeof(global::SocketProto.ActionCode), typeof(global::SocketProto.ReturnCode), typeof(global::SocketProto.RoomState), typeof(global::SocketProto.PlayerState), typeof(global::SocketProto.Hero), typeof(global::SocketProto.FightPattern), typeof(global::SocketProto.MoveType), typeof(global::SocketProto.AttackType), }, null, new pbr::GeneratedClrTypeInfo[] {
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MainPack), global::SocketProto.MainPack.Parser, new[]{ "Requestcode", "Actioncode", "Returncode", "Loginpack", "Str", "Roompack", "Friendspack", "UserInfopack", "Friendroompack", "Playerspack", "Chatpack", "Battleplayerpack", "BattleInfo", "Timestamp" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MainPack), global::SocketProto.MainPack.Parser, new[]{ "Requestcode", "Actioncode", "Returncode", "Loginpack", "Str", "Roompack", "Friendspack", "UserInfopack", "Friendroompack", "Playerspack", "Chatpack", "Battleplayerpack", "BattleInfo", "Timestamp", "BattleNetSimConfig" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ChatPack), global::SocketProto.ChatPack.Parser, new[]{ "Playername", "Message", "State" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.LoginPack), global::SocketProto.LoginPack.Parser, new[]{ "Username", "Password" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.RoomPack), global::SocketProto.RoomPack.Parser, new[]{ "Roomid", "Maxnum", "Curnum", "State" }, null, null, null, null),
@@ -154,14 +162,15 @@ namespace SocketProto {
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.FriendRoomPack), global::SocketProto.FriendRoomPack.Parser, new[]{ "Roomid", "Maxnum", "Curnum", "State" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.PlayerPack), global::SocketProto.PlayerPack.Parser, new[]{ "Username", "Playername", "Id", "State", "Hero", "Fightpattern" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleInfo), global::SocketProto.BattleInfo.Parser, new[]{ "ServerFrame", "RandSeed", "BattleUsers", "ClientInput", "ServerUpdate" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleNetSimConfig), global::SocketProto.BattleNetSimConfig.Parser, new[]{ "BattlePlayerId", "DropRate", "DelayMinMs", "DelayMaxMs" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleClientInput), global::SocketProto.BattleClientInput.Parser, new[]{ "BattlePlayerId", "ClientTick", "AckedServerFrame", "RttMs", "Moves", "Attacks" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleServerUpdate), global::SocketProto.BattleServerUpdate.Parser, new[]{ "Frames", "MoveAck", "HitEvents", "StateBaseFrame", "AttackAcks" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.BattleFrame), global::SocketProto.BattleFrame.Parser, new[]{ "ServerFrame", "PlayerInputs", "PlayerStates" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.PlayerFrameInput), global::SocketProto.PlayerFrameInput.Parser, new[]{ "BattlePlayerId", "MoveX", "MoveY", "Attacks" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ClientAttack), global::SocketProto.ClientAttack.Parser, new[]{ "AttackId", "AttackMoveFrame", "TowardX", "TowardY", "AttackType" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ServerAttack), global::SocketProto.ServerAttack.Parser, new[]{ "AttackId", "AttackerBattlePlayerId", "AttackMoveFrame", "SpawnServerFrame", "TowardX", "TowardY", "SpawnPosX", "SpawnPosY", "SpawnPosZ", "AttackType" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ClientMove), global::SocketProto.ClientMove.Parser, new[]{ "MoveFrame", "MoveX", "MoveY", "PredictedPosX", "PredictedPosY", "PredictedPosZ", "MoveType" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MoveAckResult), global::SocketProto.MoveAckResult.Parser, new[]{ "BattleId", "AckedMoveFrame", "AckGoodMove", "CorrectPosX", "CorrectPosY", "CorrectPosZ", "FrameDiscrepancy", "ResolvingFrameDiscrepancy" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.ClientMove), global::SocketProto.ClientMove.Parser, new[]{ "MoveFrame", "MoveX", "MoveY", "PredictedPosX", "PredictedPosY", "PredictedPosZ", "MoveType", "PredictedVelX", "PredictedVelY", "PredictedVelZ" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.MoveAckResult), global::SocketProto.MoveAckResult.Parser, new[]{ "BattleId", "AckedMoveFrame", "AckGoodMove", "CorrectPosX", "CorrectPosY", "CorrectPosZ", "FrameDiscrepancy", "ResolvingFrameDiscrepancy", "CorrectVelX", "CorrectVelY", "CorrectVelZ" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.HitEvent), global::SocketProto.HitEvent.Parser, new[]{ "AttackId", "AttackerBattleId", "VictimBattleId", "Damage", "HitFrameId", "HitPosX", "HitPosY", "HitPosZ", "IsKill" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AttackAck), global::SocketProto.AttackAck.Parser, new[]{ "BattlePlayerId", "AttackId", "Accepted", "ManaAfter", "RejectReason", "SuperEnergyAfter" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::SocketProto.AuthoritativePlayerState), global::SocketProto.AuthoritativePlayerState.Parser, new[]{ "BattleId", "PosX", "PosY", "PosZ", "Hp", "IsDead", "StateMask", "Mana", "SuperEnergy" }, null, null, null, null)
@@ -225,6 +234,7 @@ namespace SocketProto {
     [pbr::OriginalName("BattlePushDowmGameOver")] BattlePushDowmGameOver = 38,
     [pbr::OriginalName("BattleReview")] BattleReview = 39,
     [pbr::OriginalName("BattlePushDownHitEvents")] BattlePushDownHitEvents = 40,
+    [pbr::OriginalName("BattleSetNetSimConfig")] BattleSetNetSimConfig = 41,
   }
 
   public enum ReturnCode {
@@ -329,6 +339,7 @@ namespace SocketProto {
       battleplayerpack_ = other.battleplayerpack_.Clone();
       battleInfo_ = other.battleInfo_ != null ? other.battleInfo_.Clone() : null;
       timestamp_ = other.timestamp_;
+      battleNetSimConfig_ = other.battleNetSimConfig_ != null ? other.battleNetSimConfig_.Clone() : null;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -486,6 +497,17 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "battle_net_sim_config" field.</summary>
+    public const int BattleNetSimConfigFieldNumber = 15;
+    private global::SocketProto.BattleNetSimConfig battleNetSimConfig_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public global::SocketProto.BattleNetSimConfig BattleNetSimConfig {
+      get { return battleNetSimConfig_; }
+      set {
+        battleNetSimConfig_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as MainPack);
@@ -513,6 +535,7 @@ namespace SocketProto {
       if(!battleplayerpack_.Equals(other.battleplayerpack_)) return false;
       if (!object.Equals(BattleInfo, other.BattleInfo)) return false;
       if (Timestamp != other.Timestamp) return false;
+      if (!object.Equals(BattleNetSimConfig, other.BattleNetSimConfig)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -533,6 +556,7 @@ namespace SocketProto {
       hash ^= battleplayerpack_.GetHashCode();
       if (battleInfo_ != null) hash ^= BattleInfo.GetHashCode();
       if (Timestamp != 0L) hash ^= Timestamp.GetHashCode();
+      if (battleNetSimConfig_ != null) hash ^= BattleNetSimConfig.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -587,6 +611,10 @@ namespace SocketProto {
         output.WriteRawTag(112);
         output.WriteInt64(Timestamp);
       }
+      if (battleNetSimConfig_ != null) {
+        output.WriteRawTag(122);
+        output.WriteMessage(BattleNetSimConfig);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -626,6 +654,9 @@ namespace SocketProto {
       }
       if (Timestamp != 0L) {
         size += 1 + pb::CodedOutputStream.ComputeInt64Size(Timestamp);
+      }
+      if (battleNetSimConfig_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(BattleNetSimConfig);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -681,6 +712,12 @@ namespace SocketProto {
       }
       if (other.Timestamp != 0L) {
         Timestamp = other.Timestamp;
+      }
+      if (other.battleNetSimConfig_ != null) {
+        if (battleNetSimConfig_ == null) {
+          BattleNetSimConfig = new global::SocketProto.BattleNetSimConfig();
+        }
+        BattleNetSimConfig.MergeFrom(other.BattleNetSimConfig);
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -759,6 +796,13 @@ namespace SocketProto {
           }
           case 112: {
             Timestamp = input.ReadInt64();
+            break;
+          }
+          case 122: {
+            if (battleNetSimConfig_ == null) {
+              BattleNetSimConfig = new global::SocketProto.BattleNetSimConfig();
+            }
+            input.ReadMessage(BattleNetSimConfig);
             break;
           }
         }
@@ -2551,6 +2595,219 @@ namespace SocketProto {
 
   }
 
+  public sealed partial class BattleNetSimConfig : pb::IMessage<BattleNetSimConfig> {
+    private static readonly pb::MessageParser<BattleNetSimConfig> _parser = new pb::MessageParser<BattleNetSimConfig>(() => new BattleNetSimConfig());
+    private pb::UnknownFieldSet _unknownFields;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pb::MessageParser<BattleNetSimConfig> Parser { get { return _parser; } }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public static pbr::MessageDescriptor Descriptor {
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[9]; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    pbr::MessageDescriptor pb::IMessage.Descriptor {
+      get { return Descriptor; }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public BattleNetSimConfig() {
+      OnConstruction();
+    }
+
+    partial void OnConstruction();
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public BattleNetSimConfig(BattleNetSimConfig other) : this() {
+      battlePlayerId_ = other.battlePlayerId_;
+      dropRate_ = other.dropRate_;
+      delayMinMs_ = other.delayMinMs_;
+      delayMaxMs_ = other.delayMaxMs_;
+      _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public BattleNetSimConfig Clone() {
+      return new BattleNetSimConfig(this);
+    }
+
+    /// <summary>Field number for the "battle_player_id" field.</summary>
+    public const int BattlePlayerIdFieldNumber = 1;
+    private int battlePlayerId_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int BattlePlayerId {
+      get { return battlePlayerId_; }
+      set {
+        battlePlayerId_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "drop_rate" field.</summary>
+    public const int DropRateFieldNumber = 2;
+    private float dropRate_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float DropRate {
+      get { return dropRate_; }
+      set {
+        dropRate_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "delay_min_ms" field.</summary>
+    public const int DelayMinMsFieldNumber = 3;
+    private int delayMinMs_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int DelayMinMs {
+      get { return delayMinMs_; }
+      set {
+        delayMinMs_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "delay_max_ms" field.</summary>
+    public const int DelayMaxMsFieldNumber = 4;
+    private int delayMaxMs_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int DelayMaxMs {
+      get { return delayMaxMs_; }
+      set {
+        delayMaxMs_ = value;
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override bool Equals(object other) {
+      return Equals(other as BattleNetSimConfig);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public bool Equals(BattleNetSimConfig other) {
+      if (ReferenceEquals(other, null)) {
+        return false;
+      }
+      if (ReferenceEquals(other, this)) {
+        return true;
+      }
+      if (BattlePlayerId != other.BattlePlayerId) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(DropRate, other.DropRate)) return false;
+      if (DelayMinMs != other.DelayMinMs) return false;
+      if (DelayMaxMs != other.DelayMaxMs) return false;
+      return Equals(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override int GetHashCode() {
+      int hash = 1;
+      if (BattlePlayerId != 0) hash ^= BattlePlayerId.GetHashCode();
+      if (DropRate != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(DropRate);
+      if (DelayMinMs != 0) hash ^= DelayMinMs.GetHashCode();
+      if (DelayMaxMs != 0) hash ^= DelayMaxMs.GetHashCode();
+      if (_unknownFields != null) {
+        hash ^= _unknownFields.GetHashCode();
+      }
+      return hash;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public override string ToString() {
+      return pb::JsonFormatter.ToDiagnosticString(this);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void WriteTo(pb::CodedOutputStream output) {
+      if (BattlePlayerId != 0) {
+        output.WriteRawTag(8);
+        output.WriteInt32(BattlePlayerId);
+      }
+      if (DropRate != 0F) {
+        output.WriteRawTag(21);
+        output.WriteFloat(DropRate);
+      }
+      if (DelayMinMs != 0) {
+        output.WriteRawTag(24);
+        output.WriteInt32(DelayMinMs);
+      }
+      if (DelayMaxMs != 0) {
+        output.WriteRawTag(32);
+        output.WriteInt32(DelayMaxMs);
+      }
+      if (_unknownFields != null) {
+        _unknownFields.WriteTo(output);
+      }
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public int CalculateSize() {
+      int size = 0;
+      if (BattlePlayerId != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(BattlePlayerId);
+      }
+      if (DropRate != 0F) {
+        size += 1 + 4;
+      }
+      if (DelayMinMs != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(DelayMinMs);
+      }
+      if (DelayMaxMs != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeInt32Size(DelayMaxMs);
+      }
+      if (_unknownFields != null) {
+        size += _unknownFields.CalculateSize();
+      }
+      return size;
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(BattleNetSimConfig other) {
+      if (other == null) {
+        return;
+      }
+      if (other.BattlePlayerId != 0) {
+        BattlePlayerId = other.BattlePlayerId;
+      }
+      if (other.DropRate != 0F) {
+        DropRate = other.DropRate;
+      }
+      if (other.DelayMinMs != 0) {
+        DelayMinMs = other.DelayMinMs;
+      }
+      if (other.DelayMaxMs != 0) {
+        DelayMaxMs = other.DelayMaxMs;
+      }
+      _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
+    }
+
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public void MergeFrom(pb::CodedInputStream input) {
+      uint tag;
+      while ((tag = input.ReadTag()) != 0) {
+        switch(tag) {
+          default:
+            _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
+            break;
+          case 8: {
+            BattlePlayerId = input.ReadInt32();
+            break;
+          }
+          case 21: {
+            DropRate = input.ReadFloat();
+            break;
+          }
+          case 24: {
+            DelayMinMs = input.ReadInt32();
+            break;
+          }
+          case 32: {
+            DelayMaxMs = input.ReadInt32();
+            break;
+          }
+        }
+      }
+    }
+
+  }
+
   public sealed partial class BattleClientInput : pb::IMessage<BattleClientInput> {
     private static readonly pb::MessageParser<BattleClientInput> _parser = new pb::MessageParser<BattleClientInput>(() => new BattleClientInput());
     private pb::UnknownFieldSet _unknownFields;
@@ -2559,7 +2816,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[9]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[10]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -2812,7 +3069,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[10]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[11]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3035,7 +3292,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[11]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[12]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3204,7 +3461,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[12]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[13]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3409,7 +3666,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[13]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[14]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -3650,7 +3907,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[14]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[15]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4031,7 +4288,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[15]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[16]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4055,6 +4312,9 @@ namespace SocketProto {
       predictedPosY_ = other.predictedPosY_;
       predictedPosZ_ = other.predictedPosZ_;
       moveType_ = other.moveType_;
+      predictedVelX_ = other.predictedVelX_;
+      predictedVelY_ = other.predictedVelY_;
+      predictedVelZ_ = other.predictedVelZ_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -4140,6 +4400,39 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "predicted_vel_x" field.</summary>
+    public const int PredictedVelXFieldNumber = 8;
+    private float predictedVelX_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float PredictedVelX {
+      get { return predictedVelX_; }
+      set {
+        predictedVelX_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "predicted_vel_y" field.</summary>
+    public const int PredictedVelYFieldNumber = 9;
+    private float predictedVelY_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float PredictedVelY {
+      get { return predictedVelY_; }
+      set {
+        predictedVelY_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "predicted_vel_z" field.</summary>
+    public const int PredictedVelZFieldNumber = 10;
+    private float predictedVelZ_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float PredictedVelZ {
+      get { return predictedVelZ_; }
+      set {
+        predictedVelZ_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as ClientMove);
@@ -4160,6 +4453,9 @@ namespace SocketProto {
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedPosY, other.PredictedPosY)) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedPosZ, other.PredictedPosZ)) return false;
       if (MoveType != other.MoveType) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedVelX, other.PredictedVelX)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedVelY, other.PredictedVelY)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(PredictedVelZ, other.PredictedVelZ)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -4173,6 +4469,9 @@ namespace SocketProto {
       if (PredictedPosY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedPosY);
       if (PredictedPosZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedPosZ);
       if (MoveType != global::SocketProto.MoveType.NewMove) hash ^= MoveType.GetHashCode();
+      if (PredictedVelX != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedVelX);
+      if (PredictedVelY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedVelY);
+      if (PredictedVelZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(PredictedVelZ);
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -4214,6 +4513,18 @@ namespace SocketProto {
         output.WriteRawTag(56);
         output.WriteEnum((int) MoveType);
       }
+      if (PredictedVelX != 0F) {
+        output.WriteRawTag(69);
+        output.WriteFloat(PredictedVelX);
+      }
+      if (PredictedVelY != 0F) {
+        output.WriteRawTag(77);
+        output.WriteFloat(PredictedVelY);
+      }
+      if (PredictedVelZ != 0F) {
+        output.WriteRawTag(85);
+        output.WriteFloat(PredictedVelZ);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -4242,6 +4553,15 @@ namespace SocketProto {
       }
       if (MoveType != global::SocketProto.MoveType.NewMove) {
         size += 1 + pb::CodedOutputStream.ComputeEnumSize((int) MoveType);
+      }
+      if (PredictedVelX != 0F) {
+        size += 1 + 4;
+      }
+      if (PredictedVelY != 0F) {
+        size += 1 + 4;
+      }
+      if (PredictedVelZ != 0F) {
+        size += 1 + 4;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -4274,6 +4594,15 @@ namespace SocketProto {
       }
       if (other.MoveType != global::SocketProto.MoveType.NewMove) {
         MoveType = other.MoveType;
+      }
+      if (other.PredictedVelX != 0F) {
+        PredictedVelX = other.PredictedVelX;
+      }
+      if (other.PredictedVelY != 0F) {
+        PredictedVelY = other.PredictedVelY;
+      }
+      if (other.PredictedVelZ != 0F) {
+        PredictedVelZ = other.PredictedVelZ;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -4314,6 +4643,18 @@ namespace SocketProto {
             MoveType = (global::SocketProto.MoveType) input.ReadEnum();
             break;
           }
+          case 69: {
+            PredictedVelX = input.ReadFloat();
+            break;
+          }
+          case 77: {
+            PredictedVelY = input.ReadFloat();
+            break;
+          }
+          case 85: {
+            PredictedVelZ = input.ReadFloat();
+            break;
+          }
         }
       }
     }
@@ -4328,7 +4669,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[16]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[17]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4353,6 +4694,9 @@ namespace SocketProto {
       correctPosZ_ = other.correctPosZ_;
       frameDiscrepancy_ = other.frameDiscrepancy_;
       resolvingFrameDiscrepancy_ = other.resolvingFrameDiscrepancy_;
+      correctVelX_ = other.correctVelX_;
+      correctVelY_ = other.correctVelY_;
+      correctVelZ_ = other.correctVelZ_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -4449,6 +4793,39 @@ namespace SocketProto {
       }
     }
 
+    /// <summary>Field number for the "correct_vel_x" field.</summary>
+    public const int CorrectVelXFieldNumber = 9;
+    private float correctVelX_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float CorrectVelX {
+      get { return correctVelX_; }
+      set {
+        correctVelX_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "correct_vel_y" field.</summary>
+    public const int CorrectVelYFieldNumber = 10;
+    private float correctVelY_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float CorrectVelY {
+      get { return correctVelY_; }
+      set {
+        correctVelY_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "correct_vel_z" field.</summary>
+    public const int CorrectVelZFieldNumber = 11;
+    private float correctVelZ_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    public float CorrectVelZ {
+      get { return correctVelZ_; }
+      set {
+        correctVelZ_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public override bool Equals(object other) {
       return Equals(other as MoveAckResult);
@@ -4470,6 +4847,9 @@ namespace SocketProto {
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(CorrectPosZ, other.CorrectPosZ)) return false;
       if (FrameDiscrepancy != other.FrameDiscrepancy) return false;
       if (ResolvingFrameDiscrepancy != other.ResolvingFrameDiscrepancy) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(CorrectVelX, other.CorrectVelX)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(CorrectVelY, other.CorrectVelY)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(CorrectVelZ, other.CorrectVelZ)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -4484,6 +4864,9 @@ namespace SocketProto {
       if (CorrectPosZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(CorrectPosZ);
       if (FrameDiscrepancy != 0) hash ^= FrameDiscrepancy.GetHashCode();
       if (ResolvingFrameDiscrepancy != false) hash ^= ResolvingFrameDiscrepancy.GetHashCode();
+      if (CorrectVelX != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(CorrectVelX);
+      if (CorrectVelY != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(CorrectVelY);
+      if (CorrectVelZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(CorrectVelZ);
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -4529,6 +4912,18 @@ namespace SocketProto {
         output.WriteRawTag(64);
         output.WriteBool(ResolvingFrameDiscrepancy);
       }
+      if (CorrectVelX != 0F) {
+        output.WriteRawTag(77);
+        output.WriteFloat(CorrectVelX);
+      }
+      if (CorrectVelY != 0F) {
+        output.WriteRawTag(85);
+        output.WriteFloat(CorrectVelY);
+      }
+      if (CorrectVelZ != 0F) {
+        output.WriteRawTag(93);
+        output.WriteFloat(CorrectVelZ);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -4560,6 +4955,15 @@ namespace SocketProto {
       }
       if (ResolvingFrameDiscrepancy != false) {
         size += 1 + 1;
+      }
+      if (CorrectVelX != 0F) {
+        size += 1 + 4;
+      }
+      if (CorrectVelY != 0F) {
+        size += 1 + 4;
+      }
+      if (CorrectVelZ != 0F) {
+        size += 1 + 4;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -4595,6 +4999,15 @@ namespace SocketProto {
       }
       if (other.ResolvingFrameDiscrepancy != false) {
         ResolvingFrameDiscrepancy = other.ResolvingFrameDiscrepancy;
+      }
+      if (other.CorrectVelX != 0F) {
+        CorrectVelX = other.CorrectVelX;
+      }
+      if (other.CorrectVelY != 0F) {
+        CorrectVelY = other.CorrectVelY;
+      }
+      if (other.CorrectVelZ != 0F) {
+        CorrectVelZ = other.CorrectVelZ;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -4639,6 +5052,18 @@ namespace SocketProto {
             ResolvingFrameDiscrepancy = input.ReadBool();
             break;
           }
+          case 77: {
+            CorrectVelX = input.ReadFloat();
+            break;
+          }
+          case 85: {
+            CorrectVelY = input.ReadFloat();
+            break;
+          }
+          case 93: {
+            CorrectVelZ = input.ReadFloat();
+            break;
+          }
         }
       }
     }
@@ -4653,7 +5078,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[17]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[18]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -5006,7 +5431,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[18]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[19]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -5275,7 +5700,7 @@ namespace SocketProto {
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     public static pbr::MessageDescriptor Descriptor {
-      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[19]; }
+      get { return global::SocketProto.SocketProtoReflection.Descriptor.MessageTypes[20]; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]

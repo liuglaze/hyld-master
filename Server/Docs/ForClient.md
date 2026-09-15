@@ -101,10 +101,11 @@ Program.cs -> Server/Server.cs -> Server/Client.cs -> Controller/ControllerMange
 7. 战斗已开始后若某客户端继续重发 `BattleReady`，服务端会视为其可能漏收首个 `BattleStart`，并对该 endpoint **单播补发** `BattleStart`（不重复 `BeginBattle`）：`Server/Battle.cs:196`
 8. 帧下发与补帧：`Server/BattleController.Network.cs:50`（`SendUnsyncedFrames`）
 9. **Pong 路由**：`Server/ClientUdp.cs:250`（Ping 识别 → Pong 构造）。Pong 发送**经过 NetSim**（`LZJUDP.SimDropRate/SimDelayMinMs/SimDelayMaxMs`），确保客户端 RTT 测量反映真实模拟延迟。NetSim 参数由 `BattleController.BeginBattle`（Battle.cs:224）写入、`HandleBattleEnd`（BattleController.Network.cs:183）清零
-10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_input.moves` 上报 `OldMove + NewMove`，攻击通过 `BattleInfo.client_input.attacks` 独立上报。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；每包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序排列。服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastAcceptedMoveFrame` 的旧包丢弃，`moveFrame > serverFrame + 2` 直接拒绝；合法 move 只入队为 pending segment。BattleLoop 每个 ServerFrame 对每个玩家最多消化 3 帧 pending move 并推进 `playerPositions`。下行 `BattleInfo.server_update.move_ack.acked_move_frame` 等于 `lastSimulatedMoveFrame`，客户端只裁剪已经被服务端权威位置实际模拟过的 SavedMove；`ack_good_move=false` 时客户端使用 `correct_pos_x/y/z` 拉回并重放未确认 SavedMove。
+10. **NetSim 调参包**：`ActionCode.BattleSetNetSimConfig`，携带 `MainPack.battle_net_sim_config`。客户端只发配置，服务端立即更新 battle-scoped NetSim，仍然作用于上下行同一套模拟参数。
+10. **移动上行（CMC-style）**：客户端通过 `BattleInfo.client_input.moves` 上报 `OldMove + NewMove`，`ClientMove` 包含 `move_frame/move_x/move_y/predicted_pos_x/y/z/move_type/predicted_vel_x/y/z`；攻击通过 `BattleInfo.client_input.attacks` 独立上报。普通帧可先挂起为 `pendingMove`，下一帧合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove；每包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序排列。服务端先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`。`moveFrame <= lastReceivedMoveFrame` 的旧包丢弃；不再按 `moveFrame - lastReceivedMoveFrame` 做 future lead 拒收。合法 move 只要不旧于接收水位，就会入队为 pending client move。BattleLoop 里每条 move 先计算 `serverDeltaSinceLastProcessedMove = frameid - lastServerFrameWhenProcessedMove`，表示距离上一次处理该玩家 move，服务器真实经过了多少帧。正常态按 `baseFrames = min(clientDelta, MaxDeltaFramesPerMove)` 直接模拟，并用 `debt = max(0, debt + clientDelta - serverDeltaSinceLastProcessedMove)` 累计帧差；进入 resolving 的当前 move 立刻用 `serverBoundFrames = min(baseFrames, serverDeltaSinceLastProcessedMove)` 限制，再按 `MoveDiscrepancyResolutionRate + paybackCarry` 偿还 debt，最终 `framesToApply` 不低于 `MinMoveQuantum=1`。同一个 ServerFrame 连续处理多条 move 时，第一条可能看到 `serverDeltaSinceLastProcessedMove=1`，后续 move 因上一条已更新处理时间，通常自然看到 0。`NewMove` 完整消化后服务端比较权威位置与 `predicted_pos`，误差不超过 `MovementMaxPositionError=0.6f` 时回 `ack_good_move=true`，否则回 `ack_good_move=false + correct_pos/correct_vel`。客户端仅在 ack 帧仍存在于本地 SavedMove 时处理 MoveAck，找不到则忽略。
 11. **PlayerStates 增量下行**：服务端每个 ServerFrame 仍发送当前权威帧，`server_frame` 持续递增；但 `BattleFrame.player_states` 按接收客户端的已确认状态基准裁剪字段。客户端必须按 `AuthoritativePlayerState.state_mask` 合并：bit0=position(`pos_x/y/z`)，bit1=`hp`，bit2=`is_dead`，bit3=`mana`，bit4=`super_energy`。`BattleServerUpdate.state_base_frame` 表示本次增量基准帧，仅用于联调观测。
-12. **客户端首权威门控**：客户端收到 `BattleStart` 后先进入战斗网络泵，首个有效权威帧到达前不发送 `ClientMove`；首权威帧消费成功后才开启本地 `BattleTick`。若下行权威帧超过 1000ms 未刷新，或客户端 SavedMove 历史满，客户端会暂停继续生成预测 tick。
-13. **攻击资源确认**：客户端上行普通攻击和子弹型大招都在 `BattleInfo.client_input.attacks`，用 `attack_type` 区分。服务端先做过期、去重和资源检查；普通攻击扣 `mana`，大招要求 `super_energy >= 3000` 且服务端存在子弹型大招配置，通过后清零。资源不足或不支持时回 `BattleInfo.server_update.attack_acks`，客户端应对本玩家 ack 覆写 `playerManaValue=mana_after`、`当前能量=super_energy_after` 并移除对应 pending 攻击。
+12. **客户端首权威门控**：客户端收到 `BattleStart` 后先进入战斗网络泵，首个有效权威帧到达前不发送 `ClientMove`；首权威帧消费成功后才开启本地 `BattleTick`。若下行权威帧超过 1800ms 未刷新，客户端会暂停继续生成预测 tick；若客户端 SavedMove 历史满，则清空旧未确认历史并继续从当前位置预测。
+13. **攻击资源确认**：客户端上行普通攻击和子弹型大招都在 `BattleInfo.client_input.attacks`，用 `attack_type` 区分。服务端先做过期、去重和资源检查；普通攻击扣 `mana`，大招要求 `super_energy >= 500` 且服务端存在子弹型大招配置，通过后清零。资源不足或不支持时回 `BattleInfo.server_update.attack_acks`，客户端应对本玩家 ack 覆写 `playerManaValue=mana_after`、`当前能量=super_energy_after` 并移除对应 pending 攻击。
 
 > 关键前提：客户端必须先成功发 `BattleReady`，否则后续 UDP 包无法命中 battle 路由。
 >
@@ -265,7 +266,7 @@ dir.z *= sign
 - **帧序保护**：`_lastAuthHpFrameId` 跳过乱序到达的旧批次（UDP 包乱序时防止 HP 回弹）
 - **攻击超时**：服务端 `MaxAcceptableAttackDelay=8`，超过此帧数的延迟攻击被 REJECT
 - **普通蓝量**：服务端开局初始化 90；默认普通攻击消耗 30，贝亚消耗 90；按英雄装弹速度每格恢复 30，不超过 90。客户端可预测扣蓝，但最终以 `AttackAck.mana_after` 和 `PlayerStates.mana` 为准。
-- **大招能量**：服务端开局初始化 0，最大 3000；命中时按实际伤害 `damage / 2` 给攻击者充能并封顶。子弹型大招通过后清零；客户端可预测清零，但最终以 `AttackAck.super_energy_after` 和 `PlayerStates.super_energy` 为准。
+- **大招能量**：服务端开局初始化 0，最大 500；命中时按实际伤害 `damage / 2` 给攻击者充能并封顶。子弹型大招通过后清零；客户端可预测清零，但最终以 `AttackAck.super_energy_after` 和 `PlayerStates.super_energy` 为准。
 
 ---
 

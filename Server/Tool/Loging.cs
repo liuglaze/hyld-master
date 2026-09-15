@@ -1,7 +1,9 @@
-﻿using System;
+using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 
 namespace Logging
 {
@@ -10,15 +12,24 @@ namespace Logging
         public static string prefix = "";
         public static string TraceSavePath;
         public static int traceDumpLen = 128 * 1024;
-        static StringBuilder _traceSb = new StringBuilder();
+
+        private static readonly ConcurrentQueue<string> _traceQueue = new ConcurrentQueue<string>();
+        private static readonly AutoResetEvent _traceSignal = new AutoResetEvent(false);
+        private static readonly ManualResetEventSlim _flushComplete = new ManualResetEventSlim(true);
+        private static readonly object _writerLock = new object();
+        private static readonly StringBuilder _traceSb = new StringBuilder();
         private static Stream _stream;
+        private static Thread _writerThread;
+        private static long _queuedCount;
+        private static long _writtenCount;
 
         public static void Trace(string msg, bool isNeedLogTrace = false, bool isNewLine = true)
         {
+            StringBuilder sb = new StringBuilder();
             if (isNewLine)
-                _traceSb.AppendLine(msg);
+                sb.AppendLine(msg);
             else
-                _traceSb.Append(msg);
+                sb.Append(msg);
 
             if (isNeedLogTrace)
             {
@@ -31,17 +42,92 @@ namespace Logging
                     var methodName = frame.GetMethod()?.Name ?? "null";
                     var fileName = frame.GetFileName() ?? "unknown";
                     var lineNum = frame.GetFileLineNumber();
-                    _traceSb.AppendLine($"at {typeName}  ::  {methodName}   in   {fileName}   :line   {lineNum}");
+                    sb.AppendLine($"at {typeName}  ::  {methodName}   in   {fileName}   :line   {lineNum}");
                 }
             }
-            if (_traceSb.Length > traceDumpLen)
-                FlushTrace();
+
+            EnsureWriterThread();
+            _flushComplete.Reset();
+            Interlocked.Increment(ref _queuedCount);
+            _traceQueue.Enqueue(sb.ToString());
+            _traceSignal.Set();
         }
 
         public static void FlushTrace()
         {
             if (string.IsNullOrEmpty(TraceSavePath))
                 return;
+
+            EnsureWriterThread();
+            _traceSignal.Set();
+            while (Volatile.Read(ref _writtenCount) < Volatile.Read(ref _queuedCount))
+            {
+                _flushComplete.Wait(100);
+            }
+
+            lock (_writerLock)
+            {
+                FlushBufferToDisk();
+                _stream?.Flush();
+            }
+        }
+
+        private static void EnsureWriterThread()
+        {
+            if (_writerThread != null)
+                return;
+
+            lock (_writerLock)
+            {
+                if (_writerThread != null)
+                    return;
+
+                _writerThread = new Thread(LogWriterLoop)
+                {
+                    IsBackground = true,
+                    Name = "ServerLogWriter",
+                };
+                _writerThread.Start();
+            }
+        }
+
+        private static void LogWriterLoop()
+        {
+            while (true)
+            {
+                DrainTraceQueue();
+                _traceSignal.WaitOne(100);
+            }
+        }
+
+        private static void DrainTraceQueue()
+        {
+            lock (_writerLock)
+            {
+                int drained = 0;
+                while (_traceQueue.TryDequeue(out string msg))
+                {
+                    _traceSb.Append(msg);
+                    drained++;
+                    Interlocked.Increment(ref _writtenCount);
+
+                    if (_traceSb.Length > traceDumpLen)
+                        FlushBufferToDisk();
+                }
+
+                if (drained > 0)
+                    FlushBufferToDisk();
+
+                if (Volatile.Read(ref _writtenCount) >= Volatile.Read(ref _queuedCount))
+                    _flushComplete.Set();
+            }
+        }
+
+        private static void FlushBufferToDisk()
+        {
+            if (string.IsNullOrEmpty(TraceSavePath) || _traceSb.Length == 0)
+                return;
+
             if (_stream == null)
             {
                 var dir = Path.GetDirectoryName(TraceSavePath);
@@ -49,11 +135,13 @@ namespace Logging
                     Directory.CreateDirectory(dir);
                 _stream = File.Open(TraceSavePath, FileMode.OpenOrCreate, FileAccess.Write);
             }
+
             var bytes = UTF8Encoding.Default.GetBytes(_traceSb.ToString());
             _stream.Write(bytes, 0, bytes.Length);
             _stream.Flush();
             _traceSb.Clear();
         }
+
         [Flags]
         public enum LogSeverity
         {
@@ -79,7 +167,6 @@ namespace Logging
 
         public static event EventHandler<LogEventArgs> OnMessage = DefaultServerLogHandler;
 
-        // 统一主接口
         public static void Log(object message, LogSeverity severity = LogSeverity.Info, params object[] args)
         {
             string formatted = message == null ? "" : message.ToString();
@@ -89,21 +176,18 @@ namespace Logging
                 for (int i = 0; i < args.Length; i++)
                 {
                     var arg = args[i];
-                    // 为每个参数添加类名，以提高可读性
                     formattedArgs[i] = arg != null ? $"{arg.GetType().Name}: {arg}" : "null";
                 }
                 formatted = string.Format(formatted, formattedArgs);
             }
+
             string fullMsg = prefix + formatted;
-            // 同时写入文件（复用 Trace 的文件缓冲机制）
             string timestampedMsg = $"[{DateTime.Now:HH:mm:ss.fff}] {fullMsg}";
             Trace(timestampedMsg);
             if (OnMessage != null && (LogSeverityLevel & severity) != 0)
                 OnMessage.Invoke(null, new LogEventArgs(severity, fullMsg));
         }
 
-
-        // 默认日志输出（带堆栈）
         public static void DefaultServerLogHandler(object sender, LogEventArgs logArgs)
         {
             if ((LogSeverity.Error & logArgs.LogSeverity) != 0
@@ -125,7 +209,5 @@ namespace Logging
             }
             Console.WriteLine(logArgs.Message);
         }
-
-        
     }
 }

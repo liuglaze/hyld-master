@@ -18,6 +18,7 @@
 - TCP `7778`：登录、好友、房间、匹配
 - UDP `7777`：战斗实时消息（`BattleReady`、帧操作、`Ping/Pong`、`GameOver`）
 - `Server/ClientUdp.cs`（LZJUDP 类）：UDP 收发与战斗路由
+- 战斗结束后 `BattleManage.FinishBattle` 会通过 TCP 下发 `BattleReview` 完整帧历史；该包可能超过 1024 字节，服务端/客户端 TCP 半包缓冲都必须按包头扩容，不能用固定小缓冲接收。
 
 ## 3. 关键文件索引（函数级）
 
@@ -30,7 +31,7 @@
 - `BeginBattle`:224 — 初始化所有战斗状态、HP、出生位置、ClientMove 时间轴、启动 BattleLoop 线程
 - `BattleLoop`:320 — 帧循环：累加器驱动 + 每帧 CollectAndBroadcastCurrentFrame + GameOver 检测
 - `CollectAndBroadcastCurrentFrame`:393 — 读取最新合法 ClientMove 移动意图/攻击 → 记录位置快照 → 打包权威状态 → 生成子弹 → 碰撞检测 → 广播
-- `UpdatePlayerPositions`:497 — 历史保留函数；当前 CMC-style 移动位置推进发生在 `ApplyPendingMoveSegments`
+- `UpdatePlayerPositions`:497 — 历史保留函数；当前 CMC-style 移动位置推进发生在 `ApplyPendingClientMoves`
 - `RecordPositionSnapshot`:526 — 记录位置到环形历史缓冲区（V2 延迟补偿）
 - `TryGetPositionSnapshot`:543 — 按帧号查询历史位置快照
 - `HandlePlayerDisconnect`:135 — 玩家断线：标记断线、触发 GameOver
@@ -56,7 +57,7 @@
 **Server/BattleManage.cs**（243 行） — 战斗管理单例
 
 - `TryBeginBattle`:106 — 创建 BattleContext + BattleController，注册 uid 映射
-- `FinishBattle`:191 — 清理映射、构造回放包、TCP 下发 BattleReview
+- `FinishBattle`:191 — 清理映射、恢复参战玩家 `PlayerOnline` 状态、刷新好友活跃信息、构造回放包、TCP 下发 BattleReview
 - `HandleClientDisconnect`:168 — 检测战斗中玩家断线，转发到 BattleController
 - `TryGetBattleIDByUID`:38 — uid → battleId
 - `TryGetBattlePlayerId`:89 — uid → battlePlayerId
@@ -100,6 +101,7 @@
 - `TryResolveBattleID`:166 — BattleReady 建映射、后续包按端点路由
 - `RecvThread`:250 — UDP 接收：解包 → Ping/Pong 拦截 → 路由到 BattleController
 - `Send`:108 — 序列化 + SendTo
+- `BattleSetNetSimConfig`：客户端调参控制包，更新 battle-scoped NetSim
 
 ### 3.3 业务控制器
 
@@ -195,7 +197,7 @@ BattleLoop (Battle.cs:320) — 后台线程 16ms 步进
     → UpdatePlayerOperation (Network.cs:103):
       1. ClientAckedFrame 单调更新（客户端已应用的最新 ServerFrame）
       2. ClientMove 按 moveFrame 单调处理：先处理 OldMove，再按包内顺序处理所有非 OldMove；旧帧丢弃，超前过多拒绝
-      3. 合法 ClientMove 按帧差入队为 pending move segment，同时保存当前移动意图供权威帧广播
+      3. 合法 ClientMove 入队为 pending client move，同时保存当前移动意图供权威帧广播
       4. 攻击去重（dic_lastProcessedAttackId）
       5. 攻击超时（frameDelay > MaxAcceptableAttackDelay=8 → REJECT）
       6. 攻击资源门控：普通攻击蓝量足够才扣蓝；子弹型大招能量满且有服务端配置才清零并进入 pendingAttacks；不足回 `AttackAck(accepted=false, reject_reason="mana"|"super_energy"|"unsupported_super")`
@@ -237,6 +239,7 @@ oneGameOver = true（来源：击杀 / 断线）
   5. SendFinishBattle (Network.cs:224) → UDP 广播 GameOver（winnerTeamId）
   6. BattleManage.FinishBattle (BattleManage.cs:191)
     → 清理 uid 映射
+    → 恢复在线参战玩家 PlayerState=PlayerOnline，并刷新好友活跃信息
     → TCP 下发 BattleReview（含完整帧历史回放数据）
 ```
 
@@ -250,20 +253,28 @@ oneGameOver = true（来源：击杀 / 断线）
   - `AckedServerFrame`：客户端上行 `BattleInfo.client_input.acked_server_frame`，表示客户端已应用到的最新 ServerFrame。
   - `AckedMoveFrame`：服务端下行 `BattleInfo.server_update.move_ack.acked_move_frame`，表示权威位置已实际模拟到的 ClientMoveFrame。
 - 协议字段：`BattleInfo.client_input.moves` 携带 `ClientMove`；`BattleInfo.client_input.attacks` 携带 `ClientAttack`；`BattleInfo.server_update.move_ack` 携带服务端对本地玩家 Move 的确认/修正结果。
-- 客户端每个预测 tick 生成 SavedMove；普通帧可先挂起为 `pendingMove`，下一帧若可合并则只发 current `NewMove`，不可合并则同包按顺序发送 pending + current 两个 `NewMove`（DualMove）。每个上行包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序发送。
-- 服务端状态（Battle.cs）：`dic_lastAcceptedMoveFrame`、`dic_lastSimulatedMoveFrame`、`dic_pendingMoveSegments`、`dic_lastProcessedMoveInput`、`dic_lastMoveAck`。
+- 客户端每个预测 tick 生成 SavedMove；普通帧可先挂起为 `pendingMove`，下一帧若存在 pending 且 current 是新帧，则同包按顺序发送 pending + current 两个 `NewMove`（DualMove）。当前暂不做真正 SavedMove 合并。每个上行包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序发送。
+- 服务端状态（Battle.cs）：`dic_lastReceivedMoveFrame`、`dic_lastAckedMoveFrame`、`dic_pendingClientMoves`、`dic_lastProcessedMoveInput`、`dic_lastProcessedClientMoveFrame`、`dic_lastMoveAck`。
 - 接收（BattleController.Network.cs `UpdatePlayerOperation` / `ProcessClientMove`）：
-  - 先处理所有 `OldMove`，再按包内顺序处理所有非 `OldMove`；客户端 DualMove 用两个顺序 `NewMove` 表达。
-  - `moveFrame <= lastAcceptedMoveFrame` 直接丢弃并打印 `[ClientMove][STALE]`。
-  - `moveFrame > frameid + 2` 直接拒绝并打印 `[ClientMove][REJECT_FUTURE]`。
-  - 合法 move 按 `moveFrame - lastAcceptedMoveFrame` 入队为 pending segment，并更新 `lastAcceptedMoveFrame`。
-  - BattleLoop 每个 ServerFrame 对每个玩家最多消化 3 帧 pending move，推进 `playerPositions` 与 `lastSimulatedMoveFrame`。
-  - `NewMove` 对应 segment 完整消化后，比较权威位置与 `ClientMove.predicted_pos_x/y/z`，误差小于阈值下发 `ack_good_move=true`，否则下发 `ack_good_move=false + correct_pos_x/y/z`。
+  - 先收集所有 `OldMove` 并按 `move_frame` 升序处理，再按包内顺序处理所有非 `OldMove`；客户端 DualMove 用两个顺序 `NewMove` 表达。
+  - 非 `OldMove` 的 `moveFrame <= lastReceivedMoveFrame` 直接丢弃并打印 `[ClientMove][STALE_RECEIVED]`；`OldMove` 只在已有 pending move 覆盖该帧时丢弃。
+  - 不再按 `moveFrame - lastReceivedMoveFrame` 做 future lead 拒收；合法 move 只要不旧于接收水位，就会入队等待 BattleLoop 模拟。
+  - 合法 move 入队为 pending client move，并在入队成功后只允许单调更新 `lastReceivedMoveFrame = max(lastReceivedMoveFrame, moveFrame)`；OldMove 低于当前 received 水位时不能回退该水位。
+  - BattleLoop 固定阶段按 `MoveFrame` 升序处理 pending move，并一次性处理完当前 pending 队列。
+  - 每条 move 处理前计算 `serverDeltaSinceLastProcessedMove = frameid - lastServerFrameWhenProcessedMove`，表示距离上一次处理该玩家 move，服务器真实经过了多少帧；处理完这条 move 后立即把 `lastServerFrameWhenProcessedMove` 更新为当前 `frameid`。
+  - 正常态先按 `baseFrames = min(clientDelta, MaxDeltaFramesPerMove)` 直接模拟；误差用 `rawError = clientDelta - serverDeltaSinceLastProcessedMove` 进入 debt，`debt = max(0, debt + rawError)`，客户端慢下来时允许抵消之前的正误差。
+  - 当 debt 大于 0 后切入 resolving；触发 resolving 的当前 move 立刻走偿还分支，不等下一条 move。
+  - resolving 态用 `serverBoundFrames = min(baseFrames, serverDeltaSinceLastProcessedMove)` 限制当前 move，再用 `MoveDiscrepancyResolutionRate` 和 `paybackCarry` 按整数帧偿还 debt；最终 `framesToApply` 不低于 `MinMoveQuantum=1`，对应 UE 的 `MIN_TICK_TIME`。
+  - 同一个 ServerFrame 内连续处理 move 时，第一条可能看到 `serverDeltaSinceLastProcessedMove=1`，后面的 move 因上一条已更新处理时间，通常自然看到 0；这里没有全局服务器帧资源池。
+  - 如果高帧 move 先到，例如 100 后收到 104，则使用 104 的输入一次性覆盖模拟 101-104；迟到 101-103 会被丢弃。
+  - `OldMove` 完整模拟不写最终 MoveAck。
+  - 非 `OldMove` 完整模拟后，使用 `moveFrame` 作为 `acked_move_frame`，再比较权威位置与 `ClientMove.predicted_pos_x/y/z`；误差不超过 `MovementMaxPositionError=0.6f` 时下发 `ack_good_move=true`，否则下发 `ack_good_move=false + correct_pos_x/y/z + correct_vel_x/y/z`。
+  - 非 `OldMove` 产生 correction 后不再让后续 good ack 覆盖本批 correction；服务端继续模拟后续 pending move。
 - 消费（Battle.cs `CollectAndBroadcastCurrentFrame`）：
   - 每个 ServerFrame 读取当前移动意图用于权威帧广播和动画参数。
-  - 每帧慢消化 pending move 后记录当前权威位置。
+  - 每帧完成 pending move 一次性模拟后记录当前权威位置。
   - `RecordPositionSnapshot(frameid)` 记录当前服务端权威位置历史。
-- Ack：`ClientAckedFrame` 表示客户端已消费到的服务端权威帧；移动确认/修正单独使用 `MoveAckResult`，`AckedMoveFrame = lastSimulatedMoveFrame`，只确认已模拟的 SavedMove。
+- Ack：`ClientAckedFrame` 表示客户端已消费到的服务端权威帧；移动确认/修正单独使用 `MoveAckResult`，`AckedMoveFrame = moveFrame`，只确认完整模拟的非 `OldMove` SavedMove。
 
 ### 5.2 Ping/Pong
 
@@ -274,11 +285,12 @@ oneGameOver = true（来源：击杀 / 断线）
 
 ## 6. 网络模拟（NetSim，测试用）
 
-- 常量位于 `Server/Server/Battle.cs:87-91`：当前压测档为 `SimDropRate=0.10f`, `SimDelayMinMs=80`, `SimDelayMaxMs=120`；当前帧重复下发参数为 `CurrentFrameRepeatSendCount=3`
+- 常量位于 `Server/Server/Battle.cs:87-91`：当前默认档为 `DefaultSimDropRate=0.10f`, `DefaultSimDelayMinMs=30`, `DefaultSimDelayMaxMs=60`；当前帧重复下发参数为 `CurrentFrameRepeatSendCount=3`
 - 战斗期 UDP 统一经 `LZJUDP` battle-scoped NetSim 入口处理；`SendUnsyncedFrames` 只负责组织当前权威帧内容并重复发送，不再按 `ClientAckedFrame` 组织最近窗口补帧
 - `Ping/Pong`、上行操作、下行权威帧共享同一套战斗期 NetSim 参数；`BattleStart/GameOver` 也进入统一框架但采用控制包策略
 - `ClientUdp.cs` 已从“每包 `ThreadPool + Sleep`”改为“单独调度线程 + 延迟队列”，避免 ThreadPool 排队抖动污染 RTT 测量
 - 当前实测：在 `8% + 70~100ms` 与 `10% + 80~120ms` 两档下，战斗整体仍保持可演示的顺滑度，说明早期“前期爆卡、后期突然顺滑”的主因已不再是 NetSim 调度污染
+- 客户端可以通过 `ActionCode.BattleSetNetSimConfig` 动态调整当前战斗的 `drop_rate`、`delay_min_ms`、`delay_max_ms`；服务端按 `0~1`、`0~2000ms`、`min<=max` 处理并立即生效
 - 发布前需将 `SimDropRate` 设为 0
 
 ## 7. 状态所有权

@@ -17,9 +17,13 @@ namespace Server
 		private readonly Dictionary<string, EndpointRouteInfo> _endpointRouteMap = new Dictionary<string, EndpointRouteInfo>();
 		private readonly object _handlersLock = new object();
 		private readonly object _simRandomLock = new object();
+		private readonly object _netSimConfigLock = new object();
+		private readonly object _netSimStatsLock = new object();
 		private readonly object _scheduledNetSimLock = new object();
 		private readonly AutoResetEvent _scheduledNetSimSignal = new AutoResetEvent(false);
 		private readonly List<ScheduledNetSimItem> _scheduledNetSimItems = new List<ScheduledNetSimItem>();
+		private readonly Dictionary<int, BattleNetSimRuntimeConfig> _battleNetSimConfigs = new Dictionary<int, BattleNetSimRuntimeConfig>();
+		private readonly Dictionary<int, BattleNetSimStats> _battleNetSimStats = new Dictionary<int, BattleNetSimStats>();
 
 		private class EndpointRouteInfo
 		{
@@ -44,27 +48,45 @@ namespace Server
 
 		private sealed class ScheduledNetSimItem
 		{
+			public int BattleId;
+			public NetSimTrafficDirection Direction;
 			public long DueAtTick;
 			public Action Execute;
 		}
 
-		// ---- NetSim 公共参数（由 BattleController 生命周期写入） ----
-		// 战斗期间战斗相关 UDP 包共享同一模拟参数，确保 RTT 与权威帧/上行操作处于同一口径
-		public static volatile float SimDropRate = 0f;
-		public static volatile int SimDelayMinMs = 0;
-		public static volatile int SimDelayMaxMs = 0;
-		private static readonly Random _simRandom = new Random();
-
-		public static void ApplyBattleNetSimConfig(float dropRate, int delayMinMs, int delayMaxMs)
+		private sealed class BattleNetSimRuntimeConfig
 		{
-			SimDropRate = dropRate;
-			SimDelayMinMs = delayMinMs;
-			SimDelayMaxMs = delayMaxMs;
+			public float DropRate;
+			public int DelayMinMs;
+			public int DelayMaxMs;
+
+			public bool IsActive => DropRate > 0f || DelayMinMs > 0 || DelayMaxMs > 0;
 		}
 
-		public static void ClearBattleNetSimConfig()
+		private sealed class BattleNetSimStats
 		{
-			ApplyBattleNetSimConfig(0f, 0, 0);
+			public long WindowStartTick;
+			public int UplinkScheduled;
+			public int DownlinkScheduled;
+			public int Dropped;
+			public int Delayed;
+			public int SentImmediate;
+			public int SendErrors;
+			public int SchedulerErrors;
+			public int MaxQueueLength;
+			public int MaxLagMs;
+		}
+
+		private static readonly Random _simRandom = new Random();
+
+		public static void ApplyBattleNetSimConfig(int battleId, float dropRate, int delayMinMs, int delayMaxMs)
+		{
+			Instance.ApplyBattleNetSimConfigInternal(battleId, dropRate, delayMinMs, delayMaxMs);
+		}
+
+		public static void ClearBattleNetSimConfig(int battleId)
+		{
+			Instance.ClearBattleNetSimConfigInternal(battleId);
 		}
 
 		private static LZJUDP singleInstance;
@@ -104,6 +126,7 @@ namespace Server
 					_endpointRouteMap.Remove(endpointKey);
 				}
 			}
+			ClearBattleNetSimConfigInternal(battleID);
 			Logging.Debug.Log($"[LZJUDP] UnregisterBattle: battleID={battleID}");
 		}
 
@@ -199,6 +222,7 @@ namespace Server
 				case ActionCode.BattleStart:
 				case ActionCode.ClientSendGameOver:
 				case ActionCode.BattlePushDowmGameOver:
+				case ActionCode.BattleSetNetSimConfig:
 					return NetSimPacketStrategy.Control;
 
 				case ActionCode.BattleReady:
@@ -209,43 +233,214 @@ namespace Server
 			}
 		}
 
-		private bool IsBattleNetSimActive()
+		private void ApplyBattleNetSimConfigInternal(int battleId, float dropRate, int delayMinMs, int delayMaxMs)
 		{
-			return SimDropRate > 0f || SimDelayMinMs > 0 || SimDelayMaxMs > 0;
+			if (battleId <= 0)
+			{
+				return;
+			}
+
+			lock (_netSimConfigLock)
+			{
+				_battleNetSimConfigs[battleId] = new BattleNetSimRuntimeConfig
+				{
+					DropRate = dropRate,
+					DelayMinMs = delayMinMs,
+					DelayMaxMs = delayMaxMs,
+				};
+			}
 		}
 
-		private int NextDelayMs()
+		private void ClearBattleNetSimConfigInternal(int battleId)
 		{
-			if (SimDelayMaxMs <= 0)
+			if (battleId <= 0)
+			{
+				return;
+			}
+
+			lock (_netSimConfigLock)
+			{
+				_battleNetSimConfigs.Remove(battleId);
+			}
+			lock (_netSimStatsLock)
+			{
+				_battleNetSimStats.Remove(battleId);
+			}
+		}
+
+		private bool TryGetBattleNetSimConfig(int battleId, out BattleNetSimRuntimeConfig config)
+		{
+			config = null;
+			if (battleId <= 0)
+			{
+				return false;
+			}
+			lock (_netSimConfigLock)
+			{
+				return _battleNetSimConfigs.TryGetValue(battleId, out config) && config != null && config.IsActive;
+			}
+		}
+
+		private int NextDelayMs(BattleNetSimRuntimeConfig config)
+		{
+			if (config == null || config.DelayMaxMs <= 0)
 			{
 				return 0;
 			}
 
 			lock (_simRandomLock)
 			{
-				return _simRandom.Next(SimDelayMinMs, SimDelayMaxMs + 1);
+				return _simRandom.Next(config.DelayMinMs, config.DelayMaxMs + 1);
 			}
 		}
 
-		private bool ShouldDrop(NetSimPacketStrategy strategy)
+		private bool ShouldDrop(NetSimPacketStrategy strategy, BattleNetSimRuntimeConfig config)
 		{
-			if (strategy != NetSimPacketStrategy.Data || SimDropRate <= 0f)
+			if (strategy != NetSimPacketStrategy.Data || config == null || config.DropRate <= 0f)
 			{
 				return false;
 			}
 
 			lock (_simRandomLock)
 			{
-				return _simRandom.NextDouble() < SimDropRate;
+				return _simRandom.NextDouble() < config.DropRate;
 			}
 		}
 
-		private void LogNetSimDecision(NetSimTrafficDirection direction, ActionCode actionCode, int battleId, string endpoint, NetSimPacketStrategy strategy, string decision, int delayMs = 0)
+		private BattleNetSimStats GetNetSimStatsLocked(int battleId)
 		{
-			Logging.Debug.Log($"[BattleNetSim] dir={direction} action={actionCode} battleId={battleId} endpoint={endpoint ?? "unknown"} strategy={strategy} decision={decision} delayMs={delayMs}");
+			if (!_battleNetSimStats.TryGetValue(battleId, out BattleNetSimStats stats))
+			{
+				stats = new BattleNetSimStats
+				{
+					WindowStartTick = Environment.TickCount64,
+				};
+				_battleNetSimStats[battleId] = stats;
+			}
+			return stats;
 		}
 
-		private void ScheduleNetSimAction(int delayMs, Action action)
+		private void RecordNetSimDecision(int battleId, NetSimTrafficDirection direction, string decision, int queueLength = 0, int lagMs = 0)
+		{
+			if (battleId <= 0)
+			{
+				return;
+			}
+
+			lock (_netSimStatsLock)
+			{
+				BattleNetSimStats stats = GetNetSimStatsLocked(battleId);
+				if (direction == NetSimTrafficDirection.Uplink)
+				{
+					stats.UplinkScheduled++;
+				}
+				else
+				{
+					stats.DownlinkScheduled++;
+				}
+
+				switch (decision)
+				{
+					case "drop":
+						stats.Dropped++;
+						break;
+					case "delay":
+						stats.Delayed++;
+						break;
+					case "send_now":
+						stats.SentImmediate++;
+						break;
+					case "send_error":
+						stats.SendErrors++;
+						break;
+					case "scheduler_error":
+						stats.SchedulerErrors++;
+						break;
+				}
+
+				if (queueLength > stats.MaxQueueLength)
+				{
+					stats.MaxQueueLength = queueLength;
+				}
+				if (lagMs > stats.MaxLagMs)
+				{
+					stats.MaxLagMs = lagMs;
+				}
+
+				FlushNetSimStatsIfDueLocked(battleId, stats);
+			}
+		}
+
+		private void RecordNetSimSchedulerLag(int battleId, int lagMs)
+		{
+			if (battleId <= 0 || lagMs <= 0)
+			{
+				return;
+			}
+
+			lock (_netSimStatsLock)
+			{
+				BattleNetSimStats stats = GetNetSimStatsLocked(battleId);
+				if (lagMs > stats.MaxLagMs)
+				{
+					stats.MaxLagMs = lagMs;
+				}
+				FlushNetSimStatsIfDueLocked(battleId, stats);
+			}
+		}
+
+		private void RecordNetSimSchedulerError(int battleId)
+		{
+			if (battleId <= 0)
+			{
+				return;
+			}
+
+			lock (_netSimStatsLock)
+			{
+				BattleNetSimStats stats = GetNetSimStatsLocked(battleId);
+				stats.SchedulerErrors++;
+				FlushNetSimStatsIfDueLocked(battleId, stats);
+			}
+		}
+
+		private void RecordNetSimSendError(int battleId)
+		{
+			if (battleId <= 0)
+			{
+				return;
+			}
+
+			lock (_netSimStatsLock)
+			{
+				BattleNetSimStats stats = GetNetSimStatsLocked(battleId);
+				stats.SendErrors++;
+				FlushNetSimStatsIfDueLocked(battleId, stats);
+			}
+		}
+
+		private void FlushNetSimStatsIfDueLocked(int battleId, BattleNetSimStats stats)
+		{
+			long nowTick = Environment.TickCount64;
+			if (nowTick - stats.WindowStartTick < 1000)
+			{
+				return;
+			}
+
+			Logging.Debug.Log($"[BattleNetSim][Stats] battleId={battleId} up={stats.UplinkScheduled} down={stats.DownlinkScheduled} drop={stats.Dropped} delay={stats.Delayed} sendNow={stats.SentImmediate} sendErr={stats.SendErrors} schedulerErr={stats.SchedulerErrors} maxQueue={stats.MaxQueueLength} maxLagMs={stats.MaxLagMs}");
+			stats.WindowStartTick = nowTick;
+			stats.UplinkScheduled = 0;
+			stats.DownlinkScheduled = 0;
+			stats.Dropped = 0;
+			stats.Delayed = 0;
+			stats.SentImmediate = 0;
+			stats.SendErrors = 0;
+			stats.SchedulerErrors = 0;
+			stats.MaxQueueLength = 0;
+			stats.MaxLagMs = 0;
+		}
+
+		private void ScheduleNetSimAction(int battleId, NetSimTrafficDirection direction, int delayMs, Action action)
 		{
 			if (delayMs <= 0)
 			{
@@ -254,14 +449,19 @@ namespace Server
 			}
 
 			long dueAtTick = Environment.TickCount64 + delayMs;
+			int queueLength;
 			lock (_scheduledNetSimLock)
 			{
 				_scheduledNetSimItems.Add(new ScheduledNetSimItem
 				{
+					BattleId = battleId,
+					Direction = direction,
 					DueAtTick = dueAtTick,
 					Execute = action,
 				});
+				queueLength = _scheduledNetSimItems.Count;
 			}
+			RecordNetSimDecision(battleId, direction, "delay", queueLength);
 			_scheduledNetSimSignal.Set();
 		}
 
@@ -296,10 +496,13 @@ namespace Server
 				{
 					try
 					{
+						int lagMs = (int)Math.Max(0, Environment.TickCount64 - dueItem.DueAtTick);
+						RecordNetSimSchedulerLag(dueItem.BattleId, lagMs);
 						dueItem.Execute?.Invoke();
 					}
 					catch (Exception ex)
 					{
+						RecordNetSimSchedulerError(dueItem.BattleId);
 						Logging.Debug.Log($"[BattleNetSim] scheduler_execute_error msg={ex.Message}");
 					}
 					continue;
@@ -333,6 +536,7 @@ namespace Server
 					case ActionCode.BattleStart:
 					case ActionCode.BattlePushDowmAllFrameOpeartions:
 					case ActionCode.BattlePushDowmGameOver:
+					case ActionCode.BattleSetNetSimConfig:
 						string endpointKey = GetEndpointKey(point);
 						if (!string.IsNullOrEmpty(endpointKey))
 						{
@@ -357,25 +561,30 @@ namespace Server
 		private bool TryScheduleBattleNetSim(MainPack pack, string endpoint, NetSimTrafficDirection direction)
 		{
 			NetSimPacketStrategy strategy = GetPacketStrategy(pack.Actioncode);
-			if (direction != NetSimTrafficDirection.Downlink || strategy == NetSimPacketStrategy.None || !IsBattleNetSimActive())
+			if (direction != NetSimTrafficDirection.Downlink || strategy == NetSimPacketStrategy.None)
 			{
 				return false;
 			}
 
 			int battleId = TryGetBattleIdForNetSim(pack, new IPEndPoint(IPAddress.Parse(endpoint.Split(':')[0]), int.Parse(endpoint.Split(':')[1])));
-			if (ShouldDrop(strategy))
+			if (!TryGetBattleNetSimConfig(battleId, out BattleNetSimRuntimeConfig config))
 			{
-				LogNetSimDecision(direction, pack.Actioncode, battleId, endpoint, strategy, "drop");
+				return false;
+			}
+
+			if (ShouldDrop(strategy, config))
+			{
+				RecordNetSimDecision(battleId, direction, "drop");
 				return true;
 			}
 
-			int delayMs = NextDelayMs();
+			int delayMs = NextDelayMs(config);
 			if (delayMs > 0)
 			{
-				LogNetSimDecision(direction, pack.Actioncode, battleId, endpoint, strategy, "delay", delayMs);
 				MainPack delayedPack = pack;
 				string delayedEndpoint = endpoint;
-				ScheduleNetSimAction(delayMs, () =>
+				int delayedBattleId = battleId;
+				ScheduleNetSimAction(battleId, direction, delayMs, () =>
 				{
 					try
 					{
@@ -383,44 +592,51 @@ namespace Server
 					}
 					catch (Exception ex)
 					{
+						RecordNetSimSendError(delayedBattleId);
 						Logging.Debug.Log($"[BattleNetSim] dir={direction} action={delayedPack.Actioncode} endpoint={delayedEndpoint} decision=send_error msg={ex.Message}");
 					}
 				});
 				return true;
 			}
 
+			RecordNetSimDecision(battleId, direction, "send_now");
 			return false;
 		}
 
 		private bool TryScheduleBattleNetSim(MainPack pack, EndPoint point, NetSimTrafficDirection direction)
 		{
 			NetSimPacketStrategy strategy = GetPacketStrategy(pack.Actioncode);
-			if (direction != NetSimTrafficDirection.Uplink || strategy == NetSimPacketStrategy.None || !IsBattleNetSimActive())
+			if (direction != NetSimTrafficDirection.Uplink || strategy == NetSimPacketStrategy.None)
 			{
 				return false;
 			}
 
 			string endpointKey = GetEndpointKey(point);
 			int battleId = TryGetBattleIdForNetSim(pack, point);
-			if (ShouldDrop(strategy))
+			if (!TryGetBattleNetSimConfig(battleId, out BattleNetSimRuntimeConfig config))
 			{
-				LogNetSimDecision(direction, pack.Actioncode, battleId, endpointKey, strategy, "drop");
+				return false;
+			}
+
+			if (ShouldDrop(strategy, config))
+			{
+				RecordNetSimDecision(battleId, direction, "drop");
 				return true;
 			}
 
-			int delayMs = NextDelayMs();
+			int delayMs = NextDelayMs(config);
 			if (delayMs > 0)
 			{
-				LogNetSimDecision(direction, pack.Actioncode, battleId, endpointKey, strategy, "delay", delayMs);
 				MainPack delayedPack = pack;
 				EndPoint delayedPoint = ClonePoint(point);
-				ScheduleNetSimAction(delayMs, () =>
+				ScheduleNetSimAction(battleId, direction, delayMs, () =>
 				{
 					ProcessInboundBattlePacket(delayedPack, delayedPoint);
 				});
 				return true;
 			}
 
+			RecordNetSimDecision(battleId, direction, "send_now");
 			return false;
 		}
 
@@ -450,6 +666,14 @@ namespace Server
 
 				case ActionCode.ClientSendGameOver:
 					return int.TryParse(pack.Str, out battlePlayerId) && battlePlayerId > 0;
+
+				case ActionCode.BattleSetNetSimConfig:
+					if (pack.BattleNetSimConfig == null)
+					{
+						return false;
+					}
+					battlePlayerId = pack.BattleNetSimConfig.BattlePlayerId;
+					return battlePlayerId > 0;
 
 				default:
 					return false;
@@ -514,6 +738,7 @@ namespace Server
 
 					case ActionCode.BattlePushDowmPlayerOpeartions:
 					case ActionCode.ClientSendGameOver:
+					case ActionCode.BattleSetNetSimConfig:
 						if (string.IsNullOrEmpty(endpointKey))
 						{
 							return false;

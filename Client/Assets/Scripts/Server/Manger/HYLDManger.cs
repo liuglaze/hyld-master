@@ -30,6 +30,11 @@ public class HYLDManger : Singleton<HYLDManger>
         if (HYLDStaticValue.isNet)
         {
             base.Awake();
+            if (!IsSingletonInstance)
+            {
+                return;
+            }
+
             NetConfigValue.ServiceIP = IPManager.GetIP(ADDRESSFAM.IPv4);
 
             // ★ 日志目录：桌面/HYLDLogs/2026-03-15_14时30分22秒/
@@ -150,6 +155,11 @@ public class HYLDManger : Singleton<HYLDManger>
 
     private void OnDestroy()
     {
+        if (!IsSingletonInstance)
+        {
+            return;
+        }
+
         Server.RequestManger.RemoveAllRequest();
         Logging.HYLDDebug.Shutdown();
         if(HYLDStaticValue.isNet && _socketManger != null)

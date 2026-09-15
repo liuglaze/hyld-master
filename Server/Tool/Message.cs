@@ -12,6 +12,7 @@ namespace Server.Tool
     {
         
         private byte[] buffer = new byte[1024];
+        private const int MaxTcpPackSize = 16 * 1024 * 1024;
 
         private int startindex;
 
@@ -38,6 +39,45 @@ namespace Server.Tool
                 return buffer.Length - startindex;
             }
         }
+
+        public void EnsureWritableSpace()
+        {
+            if (Remsize > 0)
+            {
+                return;
+            }
+
+            ResizeBuffer(buffer.Length * 2);
+        }
+
+        private void EnsureCapacity(int size)
+        {
+            if (size <= buffer.Length)
+            {
+                return;
+            }
+
+            int newSize = buffer.Length;
+            while (newSize < size)
+            {
+                newSize *= 2;
+            }
+
+            ResizeBuffer(newSize);
+        }
+
+        private void ResizeBuffer(int size)
+        {
+            if (size > MaxTcpPackSize)
+            {
+                throw new InvalidOperationException($"TCP pack too large, required={size}, max={MaxTcpPackSize}");
+            }
+
+            byte[] newBuffer = new byte[size];
+            Array.Copy(buffer, 0, newBuffer, 0, startindex);
+            buffer = newBuffer;
+        }
+
         /// <summary>
         /// 解析数据 已处理粘包，半包问题 大小端问题
         /// </summary>
@@ -53,6 +93,12 @@ namespace Server.Tool
                 if (startindex <= 4) return;
                 //C#中的BitConverter.ToUInt32()方法用于返回从字节数组中指定位置的四个字节转换而来的32位无符号整数。
                 int count = BitConverter.ToInt32(buffer, 0);
+                if (count < 0 || count > MaxTcpPackSize)
+                {
+                    throw new InvalidOperationException($"Invalid TCP pack length: {count}");
+                }
+
+                EnsureCapacity(count + 4);
                 //Logging.Debug.Log("消息处理  " + startindex + "  ???>=????  " + (count + 4));
                 ///如果包的信息和
                 if (startindex >= (count + 4))

@@ -47,7 +47,13 @@ namespace Server
             }
             else if (pack.Actioncode == ActionCode.BattleReview)
             {
-                HYLDManger.Instance.AddBattleReview(pack);
+                NetGlobal.Instance.AddAction(() =>
+                {
+                    if (HYLDManger.Instance != null)
+                    {
+                        HYLDManger.Instance.AddBattleReview(pack);
+                    }
+                });
                 return;
             }
             if (pack.Actioncode == ActionCode.ActionNone) return;

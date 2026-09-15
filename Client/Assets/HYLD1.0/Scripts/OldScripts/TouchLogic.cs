@@ -12,7 +12,6 @@ using System.Collections.Generic;
 using System.Collections;
 using UnityEngine.UI;
 using UnityEngine;
-using LZJ;
 public class TouchLogic : MonoBehaviour 
 {
 	public Slider 能量条;
@@ -86,8 +85,8 @@ public class TouchLogic : MonoBehaviour
 			float prevMoveX = _lastLoggedMoveX;
 			float prevMoveY = _lastLoggedMoveY;
 			isMoveInputActive = false;
-			HYLDStaticValue.PlayerMoveX  = Fixed.Zero;
-			HYLDStaticValue.PlayerMoveY  = Fixed.Zero;
+			HYLDStaticValue.PlayerMoveX  = 0f;
+			HYLDStaticValue.PlayerMoveY  = 0f;
 			CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
 			Logging.HYLDDebug.FrameTrace($"[StopInput][JoystickRelease] axis=(0.0000,0.0000) prevMove=({prevMoveX:F4},{prevMoveY:F4}) startDz={MoveStartDeadZone:F2} stopDz={MoveStopDeadZone:F2}");
 			_lastLoggedMoveZero = true;
@@ -114,8 +113,8 @@ public class TouchLogic : MonoBehaviour
 			// 现在攻击统一走 CommandManger → EnqueueAttack 队列，
 			// 不再用 fireState 做输入门控，fireState 只用于逻辑层驱动发射
 			// 摇杆位移太小时忽略（两个轴都接近零 = 没有有效方向）
-			Logging.HYLDDebug.FrameTrace($"[AttackInput] joystick={move.joystickName} FirePosX={FirePositionX.ToFloat():F4} FirePosY={FirePositionY.ToFloat():F4}");
-			if (MathFixed.Abs(FirePositionX) <= 0.02f && MathFixed.Abs(FirePositionY) <= 0.02f)
+			Logging.HYLDDebug.FrameTrace($"[AttackInput] joystick={move.joystickName} FirePosX={FirePositionX:F4} FirePosY={FirePositionY:F4}");
+			if (Mathf.Abs(FirePositionX) <= 0.02f && Mathf.Abs(FirePositionY) <= 0.02f)
 			{
 				Logging.HYLDDebug.FrameTrace("[AttackInput] REJECTED by dead zone");
 				return;
@@ -136,17 +135,17 @@ public class TouchLogic : MonoBehaviour
 					return;
 				}
 				Logging.HYLDDebug.FrameTrace("[SuperInput] ACCEPTED -> AddCommad_SuperAttack");
-				CommandManger.Instance.AddCommad_SuperAttack(FirePositionX.ToFloat(), FirePositionY.ToFloat());
+				CommandManger.Instance.AddCommad_SuperAttack(FirePositionX, FirePositionY);
 				return;
 			}
 
 			Logging.HYLDDebug.FrameTrace("[AttackInput] ACCEPTED -> AddCommad_Attack");
-			CommandManger.Instance.AddCommad_Attack(FirePositionX.ToFloat(), FirePositionY.ToFloat());
+			CommandManger.Instance.AddCommad_Attack(FirePositionX, FirePositionY);
 		}
 	}
 
-	private Fixed FirePositionY=Fixed.Zero;
-	private Fixed FirePositionX=Fixed.Zero;
+	private float FirePositionY = 0f;
+	private float FirePositionX = 0f;
 	private LineRenderer selfFireLineRenderer;
 
 	private const float MoveStartDeadZone = 0.18f;
@@ -188,18 +187,11 @@ public class TouchLogic : MonoBehaviour
 				return;
 			}
 
-			FirePositionY = new Fixed( move.joystickAxis.y);
+			FirePositionX = move.joystickAxis.x;
+			FirePositionY = move.joystickAxis.y;
 			
-			FirePositionX = new Fixed(move.joystickAxis.x);
-			Fixed R = FirePositionX * FirePositionX + FirePositionY * FirePositionY;
 			selfFireLineRenderer.enabled = true;
-			Vector3 temp =
-				LZJ.MathFixed.Vector32UnitVector3((selfPlayer.playerPositon),
-					(selfPlayer.playerPositon+new Vector3(FirePositionX.ToFloat(),1,FirePositionY.ToFloat())));
-			temp.y = temp.z;
-			temp.z = temp.x;
-			temp.x = -temp.y;
-			temp.y = 0;
+			Vector3 temp = BattleFloatMath.ToWorldDirection(FirePositionX, FirePositionY, 1);
 			shootDistance = selfPlayer.hero.shootDistance;
 			
 			//Logging.HYLDDebug.Log(shootDistance);
@@ -270,8 +262,8 @@ public class TouchLogic : MonoBehaviour
 
 			if (!isMoveInputActive)
 			{
-				HYLDStaticValue.PlayerMoveX = Fixed.Zero;
-				HYLDStaticValue.PlayerMoveY = Fixed.Zero;
+				HYLDStaticValue.PlayerMoveX = 0f;
+				HYLDStaticValue.PlayerMoveY = 0f;
 				CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
 				if (!_lastLoggedMoveZero)
 				{
@@ -283,25 +275,24 @@ public class TouchLogic : MonoBehaviour
 				return;
 			}
 
-			// 用 float 做归一化，避免 Fixed*Fixed 乘法 bug（缺少右移）
 			float mag = Mathf.Sqrt(axisX * axisX + axisY * axisY);
 
 			if (mag > 0.001f)
 			{
 				float normX = axisX / mag;
 				float normY = axisY / mag;
-				HYLDStaticValue.PlayerMoveX = new Fixed(normX);
-				HYLDStaticValue.PlayerMoveY = new Fixed(normY);
+				HYLDStaticValue.PlayerMoveX = normX;
+				HYLDStaticValue.PlayerMoveY = normY;
 			}
 			else
 			{
-				HYLDStaticValue.PlayerMoveX = Fixed.Zero;
-				HYLDStaticValue.PlayerMoveY = Fixed.Zero;
+				HYLDStaticValue.PlayerMoveX = 0f;
+				HYLDStaticValue.PlayerMoveY = 0f;
 			}
 
 			CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
-			float currentMoveX = HYLDStaticValue.PlayerMoveX.ToFloat();
-			float currentMoveY = HYLDStaticValue.PlayerMoveY.ToFloat();
+			float currentMoveX = HYLDStaticValue.PlayerMoveX;
+			float currentMoveY = HYLDStaticValue.PlayerMoveY;
 			if (_lastLoggedMoveZero)
 			{
 				Logging.HYLDDebug.FrameTrace($"[StopInput][ResumeMove] axis=({axisX:F4},{axisY:F4}) normMove=({currentMoveX:F4},{currentMoveY:F4}) mag={mag:F4} startDz={MoveStartDeadZone:F2} stopDz={MoveStopDeadZone:F2}");

@@ -154,7 +154,7 @@ namespace Manger
             PlayerInformation player = HYLDStaticValue.Players[playerIndex];
             int sign = GetTeamRelativeSign(playerIndex);
 
-            LZJ.Fixed3 movementDir = ApplyMovementInput(player, opt, sign);
+            Vector3 movementDir = ApplyMovementInput(player, opt, sign);
             AdvancePlayerPosition(player, movementDir);
             ApplyAttackFacing(player, opt, sign);
         }
@@ -166,35 +166,35 @@ namespace Manger
                 : 1;
         }
 
-        private LZJ.Fixed3 ApplyMovementInput(PlayerInformation player, BattleData.LocalPlayerInput opt, int sign)
+        private Vector3 ApplyMovementInput(PlayerInformation player, BattleData.LocalPlayerInput opt, int sign)
         {
             player.playerMoveX = sign * opt.MoveX;
             player.playerMoveY = sign * opt.MoveY;
 
-            LZJ.Fixed3 movementDir = new LZJ.Fixed3(-player.playerMoveX, 0f, player.playerMoveY);
-            LZJ.Fixed movementMagnitude = movementDir.magnitude;
+            Vector3 movementDir = BattleFloatMath.ToMoveDirection(opt.MoveX, opt.MoveY, sign);
+            float movementMagnitude = movementDir.magnitude;
 
             // ★ 停步时显式清零 moveDir，防止渲染层 LookAt 继续朝旧方向、Animator 继续跑步
-            if (movementMagnitude.ToFloat() < 0.001f)
+            if (movementMagnitude < 0.001f)
             {
                 player.playerMoveDir = Vector3.zero;
                 player.playerMoveMagnitude = 0f;
             }
             else
             {
-                player.playerMoveDir = movementDir.ToVector3();
-                player.playerMoveMagnitude = movementMagnitude.ToFloat();
+                player.playerMoveDir = movementDir;
+                player.playerMoveMagnitude = movementMagnitude;
             }
 
             return movementDir;
         }
 
-        private void AdvancePlayerPosition(PlayerInformation player, LZJ.Fixed3 movementDir)
+        private void AdvancePlayerPosition(PlayerInformation player, Vector3 movementDir)
         {
             // 移动公式：dir * 移动速度(units/sec) * frameTime(sec)
             Vector3 before = player.playerPositon;
-            LZJ.Fixed3 move = movementDir * player.移动速度 * Server.NetConfigValue.frameTime;
-            player.playerPositon = (new LZJ.Fixed3(player.playerPositon) + move).ToVector3();
+            Vector3 move = movementDir * player.移动速度 * Server.NetConfigValue.frameTime;
+            player.playerPositon += move;
             float delta = Vector3.Distance(before, player.playerPositon);
             int selfIndex = HYLDStaticValue.playerSelfIDInServer;
             bool isSelf = selfIndex >= 0
@@ -202,7 +202,7 @@ namespace Manger
                 && ReferenceEquals(player, HYLDStaticValue.Players[selfIndex]);
             if (isSelf && delta >= BattleData.LocalPositionJumpTraceThreshold)
             {
-                Logging.HYLDDebug.FrameTrace($"[LocalPosJump][PredictAdvance] isSelf={isSelf} selfIndex={selfIndex} delta={delta:F3} move=({move.x.ToFloat():F3},{move.y.ToFloat():F3},{move.z.ToFloat():F3}) before=({before.x:F2},{before.y:F2},{before.z:F2}) after=({player.playerPositon.x:F2},{player.playerPositon.y:F2},{player.playerPositon.z:F2})");
+                Logging.HYLDDebug.FrameTrace($"[LocalPosJump][PredictAdvance] isSelf={isSelf} selfIndex={selfIndex} delta={delta:F3} move=({move.x:F3},{move.y:F3},{move.z:F3}) before=({before.x:F2},{before.y:F2},{before.z:F2}) after=({player.playerPositon.x:F2},{player.playerPositon.y:F2},{player.playerPositon.z:F2})");
             }
         }
 
@@ -217,11 +217,7 @@ namespace Manger
                 ? FireState.ShotgunSuper
                 : FireState.PstolNormal;
 
-            Vector3 temp = LZJ.MathFixed.xAndY2UnitVector3(lastAttack.TowardY, lastAttack.TowardX);
-            temp.x *= -1 * sign;
-            temp.z *= sign;
-
-            player.fireTowards = temp;
+            player.fireTowards = BattleFloatMath.ToWorldDirection(lastAttack.TowardX, lastAttack.TowardY, sign);
         }
        
     }

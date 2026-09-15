@@ -5,7 +5,9 @@
 ## 1. 项目现状
 
 - 项目是演进式代码库：Assets/Scripts 新链路与 Assets/HYLD1.0/Scripts/OldScripts 历史逻辑并存。
+- 客户端log位置:C:\Users\18238\Desktop\HYLDLogs
 - 联机主要模式：大厅/登录多为 TCP；战斗帧同步主要走 UDP。
+- 战斗结束后服务端会通过 TCP 下发 `BattleReview` 完整回放；该包可能超过 1024 字节，客户端 TCP 半包缓冲按包头扩容，收到后切回主线程保存回放，不能因回放大包导致大厅 TCP 断开。
 - 战斗逻辑帧时长：ConstValue.frameTime = 0.016f（16ms，约 60fps 逻辑帧）。
 
 ## 2. 坐标系与摄像机
@@ -44,16 +46,16 @@ Assets/Scripts/Manger/CommandManger.cs
 
 Assets/Scripts/Server/Manger/Battle/BattleManger.cs
 
-- **驱动方式**：已从 `InvokeRepeating("Send_operation", _time, _time)` 改为 `Update()` 中累加器驱动。BattleStart 后先进入 `_battleNetworkActive`，只做 DrainAndDispatch 与 Ping；首个有效权威帧消费成功后才开启 `_battleTickActive`。`_tickAccumulator += Time.deltaTime`，当 `_tickAccumulator >= currentTickInterval` 时调用 `BattleTick()`（原 Send_operation 逻辑），每帧最多执行 `maxCatchupPerUpdate=3` 次 tick。
+- **驱动方式**：已从 `InvokeRepeating("Send_operation", _time, _time)` 改为 `Update()` 中累加器驱动。BattleStart 后先进入 `_battleNetworkActive`，只做 DrainAndDispatch 与 Ping；首个有效权威帧消费成功后才开启 `_battleTickActive`。`_tickAccumulator += Time.deltaTime`，当 `_tickAccumulator >= currentTickInterval` 时调用 `BattleTick()`（原 Send_operation 逻辑）。常规每帧最多执行 `maxCatchupPerUpdate=3` 次 tick；明显落后目标帧时放宽到 `maxCatchupPerUpdateWhenBehind=8` 次。
 - **动态 Tick 调节**：首个权威帧后先以固定 `frameTime` 推进并发送连续 `ClientMove`；RTT 就绪后，`currentTickInterval = 0.016f / actualSpeedFactor`，`actualSpeedFactor` 由 `AdjustTickInterval()` 每帧平滑调整（详见 §X 动态追帧系统）。动态目标就绪后，预测帧达到 `targetFrame + 1` 时硬阻断新的 `BattleTick`。
 - **BattleReady / BattleStart 握手语义**：客户端在初始化完成后每 200ms 重发一次 `BattleReady`；收到 `BattleStart` 后停止重发并进入“等待首权威帧”状态，不立刻发送 `ClientMove`。服务端已支持：若首次 `BattleStart` 丢失，客户端继续重发的 `BattleReady` 会触发服务端单播补发 `BattleStart`。
-- **战斗包结构**：外层仍是单个 `MainPack.battleInfo`。上行输入写入 `BattleInfo.client_input`（`battle_player_id/client_tick/acked_server_frame/rtt_ms/moves/attacks`）；下行权威写入 `BattleInfo.server_update`（`frames/move_ack/hit_events/state_base_frame`）。旧 `selfOperation`、顶层 `client_moves`、顶层 `move_ack`、顶层 `hit_events` 已删除。
-- **Update 管线顺序**：DrainAndDispatch → Ping 调度 → 若首权威帧未到则等待 → CalcTargetFrame + AdjustTickInterval（RTT 未就绪则固定 tick）→ 累加器循环（while tick）。若权威帧超过 1000ms 未刷新，或 SavedMove 历史达到 `PredictionHistoryWindowSize`，暂停预测 tick；收到新权威帧或 MoveAck 裁剪历史后从下一帧继续。
+- **战斗包结构**：外层仍是单个 `MainPack.battleInfo`。上行输入写入 `BattleInfo.client_input`（`battle_player_id/client_tick/acked_server_frame/rtt_ms/moves/attacks`）；下行权威写入 `BattleInfo.server_update`（`frames/move_ack/hit_events/state_base_frame/attack_acks`）。旧 `selfOperation`、顶层 `client_moves`、顶层 `move_ack`、顶层 `hit_events` 已删除。
+- **Update 管线顺序**：DrainAndDispatch → Ping 调度 → 若首权威帧未到则等待 → CalcTargetFrame + AdjustTickInterval（RTT 未就绪则固定 tick）→ 累加器循环（while tick）。若权威帧超过 1800ms 未刷新，暂停预测 tick；SavedMove 历史达到 `PredictionHistoryWindowSize` 时按 UE CMC 风格清空旧未确认历史，不回滚角色、不暂停预测。
 - 联机预测路径（IsPredictionEnabled=true），BattleTick() 内部逻辑：
   1. DrainAndDispatch() -> 消费 UDP 队列中已收到的权威帧
   2. ResetOperation -> CommandManger.Execute
   3. **本地预测子弹**：检测本帧是否有新攻击输入，若有则立即 SpawnVisualBullet（不等权威帧），通过 `_predictedBulletAttackIds` 记录已预测的 AttackId
-  4. RecordPredictedHistory(nextFrame) -> 记录本帧 SavedMove（输入 + 预测起点/终点）
+  4. RecordPredictedHistory(nextFrame) -> 记录本帧 SavedMove（输入 + 预测起点/终点/速度）
   5. OnLogicUpdate(nextFrame, localOps, isBuzhen=true, isReconciliation=false) -> 推进逻辑
   6. CommitPredictedFrame(nextFrame) -> 提交预测帧号
   7. 关键输入判定：若本帧发生停步边沿（non-zero -> zero）或新增攻击，则标记 critical input
@@ -61,11 +63,12 @@ Assets/Scripts/Server/Manger/Battle/BattleManger.cs
 
 **SavedMove + Pending/DualMove（CMC-style）**：
 
-- 每个 BattleTick 生成项目内 `SavedMove`，记录移动输入、预测起点和预测终点。
-- 客户端维护 `pendingMove`：普通帧先挂起当前 SavedMove，下一帧若 pending/current 连续且输入足够接近，则合并为一个 `NewMove`；不可合并时同包按顺序发送 pending + current 两个 `NewMove`，等价于 DualMove。
+- 每个 BattleTick 生成项目内 `SavedMove`，记录移动输入、本地预测帧号、预测起点、预测终点、预测速度和 `CoveredFrames`；当前 `CoveredFrames=1`。
+- 客户端维护 `pendingMove`：普通帧先挂起当前 SavedMove，下一帧若存在 pending 且 current 是新帧，则同包按顺序发送 pending + current 两个 `NewMove`，等价于 DualMove；当前暂不做真正 SavedMove 合并。
 - 关键输入（停步边沿或新增攻击）立即 flush pending，并沿用同帧 burst-send。
 - 每个上行包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序发送；OldMove 不重复选择当前帧或 pendingMove。
 - DualMove 不新增 proto 枚举；服务端先处理 `OldMove`，再按包内顺序处理所有非 `OldMove`。
+- SavedMove 爆仓时清空 `predictionHistory`、`predictionHistoryIndex` 和 `pendingMove`，角色当前位置与 `predicted_frameID` 不回滚；爆仓前旧 MoveAck/correction 因找不到对应 SavedMove 会被忽略。
 
 ### 3.4 权威帧接收入口
 
@@ -83,7 +86,7 @@ OnLogicUpdate_sync_FrameIdCheck 收到权威帧批次后：
 1. **ApplyAuthoritativePositions**：取批次最后一帧的 player_states，远端玩家直接应用服务端权威位置；本地玩家逻辑位置只由 MoveAck 修正
 2. **更新 sync_frameID**
 3. **ApplyAttackAcks**：AttackAck 移除已确认/拒绝的攻击并校正普通蓝量和大招能量
-4. **ConsumeMoveAck**：`ack_good_move=true` 只裁剪 SavedMove；`ack_good_move=false` 拉回 `correct_pos_x/y/z` 并 Replay
+4. **ConsumeMoveAck**：先要求 `acked_move_frame` 命中本地 SavedMove；找不到则忽略。`ack_good_move=true` 只裁剪 SavedMove；`ack_good_move=false` 拉回 `correct_pos_x/y/z` 并 Replay
 5. **ReplayUnconfirmedInputs**：仅在服务端明确 correction 后，以修正位置为起点重放剩余 SavedMove
 6. **RecordAuthoritySnapshotForFrame**：记录权威快照供视觉子弹定位
 7. **生成视觉子弹**：遍历权威帧中各玩家攻击操作，跳过已本地预测的（_predictedBulletAttackIds 去重）
@@ -357,6 +360,12 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 - `DrainAndDispatch`:101 — 主线程排空队列、逐包 Handle 分发
 - `SendOperation`:114 — 构建战斗操作包并发送
 
+**Assets/Scripts/Server/UI/BattleFrameHud.cs** — 战斗调试 HUD
+
+- 运行时创建左上角面板，常显预测帧/目标帧/同步帧/RTT/抖动/权威年龄/预测历史占用
+- 仅在 `UNITY_EDITOR || DEVELOPMENT_BUILD` 下显示 NetSim 调参控件
+- `BattleSetNetSimConfig` 按钮将丢包率和延迟上报给服务端
+
 **Assets/Scripts/Server/ConstValue.cs**（37 行） — 网络配置常量（纯静态字段）
 
 **Assets/Scripts/Server/SocketProto.cs** — 协议定义（生成代码）
@@ -389,7 +398,7 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 | 参数                                    | 值                      | 文件                    |
 | --------------------------------------- | ----------------------- | ----------------------- |
 | frameTime                               | 0.016f (16ms, 约 60fps) | ConstValue.cs           |
-| PredictionHistoryWindowSize             | 20                      | ConstValue.cs           |
+| PredictionHistoryWindowSize             | 40                      | ConstValue.cs           |
 | EnablePredictionReconciliationPipeline  | true                    | ConstValue.cs           |
 | ReconciliationPositionThreshold         | 0.6f (仅监控)           | ConstValue.cs           |
 | canPlayerRestoreHealthTime              | 2 秒                    | ConstValue.cs           |
@@ -397,21 +406,20 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 | MaxAcceptableAttackDelay（服务端）      | 8                       | Battle.cs               |
 | 普通攻击蓝量上限                        | 90                      | HeroConfig.cs / PlayerLogic |
 | 普通攻击蓝耗                            | 默认 30，贝亚 90        | HeroConfig.cs / HYLDStaticValue.cs |
-| 大招能量上限                            | 3000                    | HeroConfig.cs / PlayerInformation |
+| 大招能量上限                            | 500                     | HeroConfig.cs / PlayerInformation |
 | inputBufferSize（客户端兼容参数）       | 4                       | ConstValue.cs           |
 | targetFrameSafetyFrames                 | 1                       | ConstValue.cs           |
-| adjustRate                              | 0.05f                   | ConstValue.cs           |
+| adjustRate                              | 0.08f                   | ConstValue.cs           |
 | minSpeedFactor                          | 0.85f                   | ConstValue.cs           |
-| maxSpeedFactor                          | 1.15f                   | ConstValue.cs           |
+| maxSpeedFactor                          | 1.35f                   | ConstValue.cs           |
 | MaxPredictedLeadBeyondTarget            | 1                       | BattleManger.cs         |
-| AuthorityStalePauseMs                   | 1000ms                  | BattleManger.cs         |
-| smoothRate                              | 5.0f                    | ConstValue.cs           |
+| AuthorityStalePauseMs                   | 1800ms                  | BattleManger.cs         |
+| smoothRate                              | 8.0f                    | ConstValue.cs           |
 | maxCatchupPerUpdate                     | 3                       | ConstValue.cs           |
+| maxCatchupPerUpdateWhenBehind           | 8                       | ConstValue.cs           |
 | pingIntervalMs                          | 200f                    | ConstValue.cs           |
-| moveCombineMagnitudeThreshold           | 0.01f                   | ConstValue.cs           |
-| moveCombineDotThreshold                 | 0.996f                  | ConstValue.cs           |
-| BattleNetSim.DropRate（服务端压测档）   | 0.10f                   | Server/Server/Battle.cs |
-| BattleNetSim.DelayRange（服务端压测档） | 80~120ms                | Server/Server/Battle.cs |
+| BattleNetSim.DropRate（服务端默认档）   | 0.10f                   | Server/Server/Battle.cs |
+| BattleNetSim.DelayRange（服务端默认档） | 30~60ms                 | Server/Server/Battle.cs |
 
 ## 8. 动态追帧系统（dynamic-tick-adjustment）
 
@@ -423,6 +431,7 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 
 - **客户端**：战斗中每 200ms 通过 `UDPSocketManger` 发送 Ping 包（`ActionCode.Ping`，`timestamp = 当前毫秒时间戳`）
 - **服务端**：`ClientUdp.cs` 将战斗期 UDP 包统一送入 `LZJUDP` 的 battle-scoped NetSim 入口。`Ping` 作为上行数据包先参与统一延迟/丢包判定，随后服务端构造 `Pong`（`ActionCode.Pong`，`timestamp` 原样回传）并按同一套 NetSim 参数作为下行数据包发送；`BattleStart` / `BattlePushDowmGameOver` 也进入同一框架，但采用更保守的控制包策略。`ClientUdp.cs` 的延迟执行已从每包 `ThreadPool + Sleep` 改为统一调度线程 + 延迟队列，避免调度排队抖动污染 RTT。这样 RTT、上行操作和权威帧共享同一口径的战斗期网络模型；非战斗 UDP 仍绕过该模拟
+- **调参 UI**：`BattleFrameHud` 在战斗场景内直接发 `ActionCode.BattleSetNetSimConfig`，客户端不做本地 NetSim；服务端收到后立即更新 battle-scoped 参数。
 - **EWMA 平滑**：`smoothedRTT = (1-α)*smoothedRTT + α*rttSample`（α=0.125），`rttVariance = (1-β)*rttVariance + β*|rttSample-smoothedRTT|`（β=0.25）。异常样本（<=0 或 >2000ms）丢弃
 - **Proto 扩展**：`MainPack` 新增 `int64 timestamp = 14`
 
@@ -433,19 +442,26 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 - **Lerp 平滑**：`actualSpeedFactor = Lerp(actual, target, smoothRate * deltaTime)`，防止帧间跳变
 - **Tick 间隔**：`currentTickInterval = 0.016f / actualSpeedFactor`
 - **超前硬限制**：`predicted_frameID >= targetFrame + 1` 时跳过本轮累加器循环，不再产出新的预测 tick
-- **预测暂停**：权威帧超过 1000ms 未刷新，或 `PredictionHistoryCount >= PredictionHistoryWindowSize` 时暂停生成新的预测 tick；恢复时清空累加器，不补跑暂停期间累计的 tick
-- **累加器驱动**：`Update()` 中 `_tickAccumulator += Time.deltaTime`，`while(accumulator >= interval)` 调用 `BattleTick()`，每帧最多 3 次
+- **预测暂停/爆仓**：权威帧超过 1800ms 未刷新时暂停生成新的预测 tick；`PredictionHistoryCount >= PredictionHistoryWindowSize` 时清空旧 SavedMove 历史并继续预测。
+- **累加器驱动**：`Update()` 中 `_tickAccumulator += Time.deltaTime`，`while(accumulator >= interval)` 调用 `BattleTick()`；常规每帧最多 3 次，落后目标帧较多时最多 8 次
 
 ### 8.4 服务端 ClientMove 时间轴
 
-- **数据结构**（Battle.cs / BattleController.Network.cs）：每个玩家维护 `dic_lastAcceptedMoveFrame`、`dic_lastSimulatedMoveFrame`、`dic_pendingMoveSegments`、`dic_lastProcessedMoveInput` 和最新 `MoveAckResult`
+- **数据结构**（Battle.cs / BattleController.Network.cs）：每个玩家维护 `dic_lastReceivedMoveFrame`、`dic_lastAckedMoveFrame`、`dic_pendingClientMoves`、`dic_lastProcessedMoveInput`、`dic_lastProcessedClientMoveFrame`、`dic_lastServerFrameWhenProcessedMove`、帧差 debt/carry 和最新 `MoveAckResult`
 - **接收**（`UpdatePlayerOperation` / `ProcessClientMove`）：
-  - 先处理 `OldMove`，再处理 `NewMove`
-  - `moveFrame <= lastAcceptedMoveFrame` 直接丢弃并记录 `[ClientMove][STALE]`
-  - `moveFrame > frameid + 2` 直接拒绝并记录 `[ClientMove][REJECT_FUTURE]`
-  - 合法 move 按 `moveFrame - lastAcceptedMoveFrame` 入队为 pending segment，并更新 `lastAcceptedMoveFrame`
-  - BattleLoop 每个 ServerFrame 对每个玩家最多消化 3 帧 pending move，推进 `playerPositions` 与 `lastSimulatedMoveFrame`
-  - `NewMove` 对应 segment 完整消化后，比较权威位置与 `ClientMove.predicted_pos_x/y/z`，误差在阈值内下发 `ack_good_move=true`，否则下发 `ack_good_move=false + correct_pos_x/y/z`
+  - 先收集 `OldMove` 并按 `move_frame` 升序处理，再按包内顺序处理非 `OldMove`
+  - 任意 `OldMove/NewMove` 的 `moveFrame <= lastReceivedMoveFrame` 直接丢弃并记录 `[ClientMove][STALE_RECEIVED]`
+  - 不再按 `moveFrame - lastReceivedMoveFrame` 做 future lead 拒收；合法 move 只要不旧于接收水位，就会入队等待 BattleLoop 模拟
+  - 合法 move 入队为 pending client move，入队成功后只允许单调更新 `lastReceivedMoveFrame = max(lastReceivedMoveFrame, moveFrame)`；任何旧帧都不能回退该水位
+  - BattleLoop 固定阶段按 `MoveFrame` 升序处理 pending move；每个玩家每个 ServerFrame 最多处理 8 条 pending move
+  - 每条 move 处理前计算 `serverDeltaSinceLastProcessedMove = frameid - lastServerFrameWhenProcessedMove`，表示距离上一次处理该玩家 move，服务器真实经过了多少帧；处理完当前 move 后立即更新 `lastServerFrameWhenProcessedMove = frameid`
+  - 正常态先按 `baseFrames = min(clientDelta, MaxDeltaFramesPerMove)` 直接模拟；误差用 `rawError = clientDelta - serverDeltaSinceLastProcessedMove` 进入 debt，`debt = max(0, debt + rawError)`，客户端慢下来时允许抵消之前的正误差
+  - 当 debt 大于 0 后切入 resolving；触发 resolving 的当前 move 立刻走偿还分支，不等下一条 move
+  - resolving 态用 `serverBoundFrames = min(baseFrames, serverDeltaSinceLastProcessedMove)` 限制当前 move，再用 `MoveDiscrepancyResolutionRate` 和 `paybackCarry` 按整数帧偿还 debt；最终 `framesToApply` 不低于 `MinMoveQuantum=1`，对应 UE 的 `MIN_TICK_TIME`
+  - 同一个 ServerFrame 内连续处理 `moveFrame=100/101/102` 时，第一条可能看到 `serverDeltaSinceLastProcessedMove=1`，后两条因为上一条已经更新处理时间，通常自然看到 0
+  - `OldMove` 完整模拟后不写最终 MoveAck；非 `OldMove` 完整模拟后以 `moveFrame` 作为 `acked_move_frame`
+  - 非 `OldMove` 完整模拟后，比较服务端权威位置与 `ClientMove.predicted_pos_x/y/z`；误差不超过 `MovementMaxPositionError=0.6f` 时下发 `ack_good_move=true`，否则下发 `ack_good_move=false + correct_pos_x/y/z + correct_vel_x/y/z`
+  - 同一 BattleLoop 内一旦非 `OldMove` 产生 correction，停止处理该玩家后续 pending move，避免更高帧 good ack 覆盖 correction，并同步三条 move 水位到 `acked_move_frame`
 - **BattleLoop**（`CollectAndBroadcastCurrentFrame`）：
   - 不再按最新移动意图额外推进位置
   - 每个 ServerFrame 只组织当前移动意图用于权威帧广播和动画参数
@@ -454,9 +470,9 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 ### 8.5 上报帧号与 MoveAck 适配
 
 - **客户端**：`uploadOperationId = nextFrame`，语义为“当前 BattleTick 真实推进并上报的本地逻辑帧号”；`targetFrame` 仅用于调节 Tick 频率。
-- **移动上行**：`BattleInfo.client_input.moves` 携带 `OldMove + NewMove`。普通帧可先挂起为 `pendingMove`；下一帧可合并为单个 `NewMove`，或同包按顺序发送两个 `NewMove` 表达 DualMove。每包最多附带 4 个未确认 important `OldMove`，按帧号升序排列。每个 `ClientMove.move_frame` 是客户端预测帧号。
+- **移动上行**：`BattleInfo.client_input.moves` 携带 `OldMove + NewMove`，`ClientMove` 包含 `move_frame/move_x/move_y/predicted_pos_x/y/z/move_type/predicted_vel_x/y/z`。普通帧可先挂起为 `pendingMove`；下一帧同包按顺序发送 pending + current 两个 `NewMove` 表达 DualMove，当前不做只发送 current 的真实合并。每包最多附带 4 个未确认 important `OldMove`，按帧号升序排列。每个 `ClientMove.move_frame` 是客户端预测帧号。
 - **攻击上行**：`BattleInfo.client_input.attacks` 携带 `ClientAttack`，字段为 `attack_id / attack_move_frame / toward_x / toward_y`。
-- **服务端权威移动 Ack**：服务端下行 `BattleInfo.server_update.move_ack`，其中 `acked_move_frame = lastSimulatedMoveFrame`，只确认已经被服务端权威位置实际模拟过的 SavedMove；`ack_good_move=false` 时携带 `correct_pos_x/y/z`。
+- **服务端权威移动 Ack**：服务端下行 `BattleInfo.server_update.move_ack`，通常 `acked_move_frame = lastProcessedClientMoveFrame`，确认已经被服务端权威位置实际模拟过的 SavedMove。`ack_good_move=false` 时携带 `correct_pos_x/y/z` 和 `correct_vel_x/y/z`。
 - **服务端权威帧 Ack**：客户端仍通过 `ClientAckedFrame` 上报已应用的最新 ServerFrame，用于服务端下行帧确认统计。
 
 ### 8.6 端到端数据流
@@ -474,7 +490,7 @@ BattleTick() × N 次 (累加器驱动)
                                                   ├─ OldMove 先于 NewMove
                                                   ├─ 旧 MoveFrame → STALE
                                                   ├─ 合法 MoveFrame → 服务端重模拟
-                                                  ├─ 误差检测 → MoveAck
+                                                  ├─ 模拟进度 → MoveAck
                                                   └─ ClientAckedFrame 更新权威帧确认
                                                 CollectAndBroadcast(frameid=F)
                                                   ├─ 广播当前移动意图

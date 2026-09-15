@@ -32,9 +32,10 @@ namespace Server
             writeIdx = defaultBetys.Length;
         }
     }
-    public class TCPSocketMessage
+	public class TCPSocketMessage
 	{
         private byte[] _data = new byte[1024];
+        private const int MaxTcpPackSize = 16 * 1024 * 1024;
 
         private int startIndex;//我们存取了多少个字节的数据在数组里面
 
@@ -62,6 +63,44 @@ namespace Server
             }
         }
 
+        public void EnsureWritableSpace()
+        {
+            if (RemainSize > 0)
+            {
+                return;
+            }
+
+            ResizeBuffer(_data.Length * 2);
+        }
+
+        private void EnsureCapacity(int size)
+        {
+            if (size <= _data.Length)
+            {
+                return;
+            }
+
+            int newSize = _data.Length;
+            while (newSize < size)
+            {
+                newSize *= 2;
+            }
+
+            ResizeBuffer(newSize);
+        }
+
+        private void ResizeBuffer(int size)
+        {
+            if (size > MaxTcpPackSize)
+            {
+                throw new InvalidOperationException($"TCP pack too large, required={size}, max={MaxTcpPackSize}");
+            }
+
+            byte[] newData = new byte[size];
+            Array.Copy(_data, 0, newData, 0, startIndex);
+            _data = newData;
+        }
+
         public void ReadBuffer(int len, Action<MainPack> HandleResponse)
         {
             startIndex += len;
@@ -69,6 +108,12 @@ namespace Server
             {
                 if (startIndex <= 4) return;
                 int count = BitConverter.ToInt32(_data, 0);
+                if (count < 0 || count > MaxTcpPackSize)
+                {
+                    throw new InvalidOperationException($"Invalid TCP pack length: {count}");
+                }
+
+                EnsureCapacity(count + 4);
                 //Logging.HYLDDebug.LogError("消息处理  " + startindex + "  ??>=??  " + (count + 4));
                 if ((startIndex-4) >= count )
                 {

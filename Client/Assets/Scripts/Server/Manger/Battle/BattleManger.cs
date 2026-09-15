@@ -37,13 +37,85 @@ namespace Manger
         private const int CriticalInputBurstSendCount = 3;
         // 客户端允许相对 targetFrame 的最大超前量；达到后不再继续生成新的 predicted tick。
         private const int MaxPredictedLeadBeyondTarget = 1;
-        private const float AuthorityStalePauseMs = 1000f;
+        private const float AuthorityStalePauseMs = 1800f;
         private bool _predictionPausedForAuthorityStale;
-        private bool _predictionPausedForHistoryFull;
         public Toolbox toolbox;
         public bool EnableDebugGameOverHotkey = true;
         public KeyCode DebugGameOverHotkey = KeyCode.F10;
         public bool DebugGameOverAsLose = false;
+
+        public int CurrentPredictedFrame
+        {
+            get { return Manger.BattleData.Instance.predicted_frameID; }
+        }
+
+        public int CurrentTargetFrame
+        {
+            get { return _lastComputedTargetFrame; }
+        }
+
+        public bool HasDynamicTarget
+        {
+            get { return _lastComputedTargetFrame > 0; }
+        }
+
+        public int CurrentSyncFrame
+        {
+            get { return Manger.BattleData.Instance.sync_frameID; }
+        }
+
+        public bool IsRttReady
+        {
+            get { return Manger.BattleData.Instance.IsRttInitialized; }
+        }
+
+        public float SmoothedRttMs
+        {
+            get { return Manger.BattleData.Instance.smoothedRTT; }
+        }
+
+        public float RttVarianceMs
+        {
+            get { return Manger.BattleData.Instance.rttVariance; }
+        }
+
+        public float AuthorityAgeMs
+        {
+            get { return GetAuthorityAgeMs(); }
+        }
+
+        public int PredictionHistoryCount
+        {
+            get { return Manger.BattleData.Instance.PredictionHistoryCount; }
+        }
+
+        public int PredictionHistoryWindowSize
+        {
+            get { return Server.NetConfigValue.PredictionHistoryWindowSize; }
+        }
+
+        public bool SendBattleNetSimConfig(float dropRate, int delayMinMs, int delayMaxMs)
+        {
+            if (BattleData.Instance.battleID <= 0)
+            {
+                return false;
+            }
+
+            MainPack pack = new MainPack();
+            pack.Requestcode = RequestCode.Battle;
+            pack.Actioncode = ActionCode.BattleSetNetSimConfig;
+            pack.BattleNetSimConfig = new BattleNetSimConfig
+            {
+                BattlePlayerId = BattleData.Instance.battleID,
+                DropRate = dropRate,
+                DelayMinMs = delayMinMs,
+                DelayMaxMs = delayMaxMs,
+            };
+            Server.UDPSocketManger.Instance.Send(pack);
+            Logging.HYLDDebug.FrameTrace($"[NetSim][ClientConfigSend] bp={BattleData.Instance.battleID} dropRate={dropRate:F3} delayMs={delayMinMs}~{delayMaxMs}");
+            return true;
+        }
+
         public virtual void Init()
         {
             //1.9更新战场数据，跳转战斗场景。进入战场，
@@ -63,6 +135,8 @@ namespace Manger
             playerManger.InitData();
             cameraManger.InitData();
             bulletManger.InitData();
+            BattleFrameHud frameHud = gameObject.AddComponent<BattleFrameHud>();
+            frameHud.Init(this);
 
             NetGlobal.Instance.Init();
         }
@@ -134,15 +208,27 @@ namespace Manger
             // ── 管线步骤 4: 累加器循环 ──
             // predicted_frameID 已达到 targetFrame + 1 时，本帧不再生成新的预测 tick。
 
-            _tickAccumulator += Time.deltaTime;
+            float tickDeltaTime = Time.deltaTime;
+            _tickAccumulator += tickDeltaTime;
 
-            // 防弹簇：累加器不超过 maxCatchupPerUpdate 次 tick 的量
-            float maxAccum = currentTickInterval * Server.NetConfigValue.maxCatchupPerUpdate;
+            int catchupLimit = Server.NetConfigValue.maxCatchupPerUpdate;
+            if (hasDynamicTarget)
+            {
+                int frameDiffForCatchup = targetFrame - Manger.BattleData.Instance.predicted_frameID;
+                if (frameDiffForCatchup > Server.NetConfigValue.maxCatchupPerUpdate)
+                {
+                    catchupLimit = Server.NetConfigValue.maxCatchupPerUpdateWhenBehind;
+                }
+            }
+
+            // 防弹簇：累加器不超过本帧允许追赶 tick 数的量。
+            float maxAccum = currentTickInterval * catchupLimit;
             if (_tickAccumulator > maxAccum)
             {
                 _tickAccumulator = maxAccum;
             }
 
+            int tickCountThisUpdate = 0;
             while (_tickAccumulator >= currentTickInterval)
             {
                 if (ShouldPausePredictionTick())
@@ -161,6 +247,11 @@ namespace Manger
 
                 BattleTick();
                 _tickAccumulator -= currentTickInterval;
+                tickCountThisUpdate++;
+                if (tickCountThisUpdate >= catchupLimit)
+                {
+                    break;
+                }
             }
         }
 
@@ -183,24 +274,6 @@ namespace Manger
                 _actualSpeedFactor = 1.0f;
                 currentTickInterval = Server.NetConfigValue.frameTime;
                 Logging.HYLDDebug.FrameTrace($"[AuthorityFreshness][ResumePrediction] reason=authority_fresh ageMs={GetAuthorityAgeMs():F1} sync={Manger.BattleData.Instance.sync_frameID} predicted={Manger.BattleData.Instance.predicted_frameID}");
-                return true;
-            }
-
-            bool historyFull = Manger.BattleData.Instance.PredictionHistoryCount >= Server.NetConfigValue.PredictionHistoryWindowSize;
-            if (historyFull)
-            {
-                if (!_predictionPausedForHistoryFull)
-                {
-                    _predictionPausedForHistoryFull = true;
-                    Logging.HYLDDebug.FrameTrace($"[AuthorityFreshness][PausePrediction] reason=prediction_history_full history={Manger.BattleData.Instance.PredictionHistoryCount}/{Server.NetConfigValue.PredictionHistoryWindowSize} sync={Manger.BattleData.Instance.sync_frameID} predicted={Manger.BattleData.Instance.predicted_frameID}");
-                }
-                return true;
-            }
-            if (_predictionPausedForHistoryFull)
-            {
-                _predictionPausedForHistoryFull = false;
-                _tickAccumulator = 0f;
-                Logging.HYLDDebug.FrameTrace($"[AuthorityFreshness][ResumePrediction] reason=history_has_room history={Manger.BattleData.Instance.PredictionHistoryCount}/{Server.NetConfigValue.PredictionHistoryWindowSize} sync={Manger.BattleData.Instance.sync_frameID} predicted={Manger.BattleData.Instance.predicted_frameID}");
                 return true;
             }
 
@@ -388,8 +461,7 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
                         // 协议里保存的是二维朝向分量，这里还原成世界空间方向。
                         // 本地视角下 x 需要取反，和当前战斗坐标系保持一致。
-                        Vector3 dir = LZJ.MathFixed.xAndY2UnitVector3(attackOp.TowardY, attackOp.TowardX);
-                        dir.x *= -1;
+                        Vector3 dir = BattleFloatMath.ToWorldDirection(attackOp.TowardX, attackOp.TowardY, 1);
 
                         FireState predictedFireState = attackOp.AttackType == AttackType.Super
                             ? FireState.ShotgunSuper
@@ -406,7 +478,6 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
             if (predictionPipelineEnabled)
             {
-                // 当前本地预测路径只消费自己的 selfOperation，不再额外包一层单元素操作列表。
                 Vector3 startPosition = Vector3.zero;
                 int selfIdxForMove = HYLDStaticValue.playerSelfIDInServer;
                 if (selfIdxForMove >= 0 && selfIdxForMove < HYLDStaticValue.Players.Count)
@@ -415,12 +486,14 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
                 }
                 ApplyLocalPredictedInputAndRefreshAllObjects(Manger.BattleData.Instance.selfOperation);
                 Vector3 predictedPosition = Vector3.zero;
+                Vector3 predictedVelocity = Vector3.zero;
                 if (selfIdxForMove >= 0 && selfIdxForMove < HYLDStaticValue.Players.Count)
                 {
                     predictedPosition = HYLDStaticValue.Players[selfIdxForMove].playerPositon;
+                    predictedVelocity = (predictedPosition - startPosition) / Server.NetConfigValue.frameTime;
                 }
-                // 记录“本帧输入 + 预测起点/终点”，用于 SavedMove、OldMove 和服务端误差校验。
-                Manger.BattleData.Instance.RecordPredictedHistory(nextFrame, Manger.BattleData.Instance.selfOperation, startPosition, predictedPosition);
+                // 记录本帧输入与预测结果，用于 SavedMove、OldMove、服务端误差判定和 correction replay。
+                Manger.BattleData.Instance.RecordPredictedHistory(nextFrame, Manger.BattleData.Instance.selfOperation, startPosition, predictedPosition, predictedVelocity);
                 // 推进完成后提交 predicted_frameID，表示客户端已经走到了 nextFrame。
                 Manger.BattleData.Instance.CommitPredictedFrame(nextFrame);
             }
@@ -577,7 +650,6 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             currentTickInterval = Server.NetConfigValue.frameTime;
             _actualSpeedFactor = 1.0f;
             _predictionPausedForAuthorityStale = false;
-            _predictionPausedForHistoryFull = false;
             TryStartBattleTickAfterFirstAuthority();
             StartCoroutine(WaitForFirstMessage());
         }
@@ -612,7 +684,6 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             currentTickInterval = Server.NetConfigValue.frameTime;
             _actualSpeedFactor = 1.0f;
             _predictionPausedForAuthorityStale = false;
-            _predictionPausedForHistoryFull = false;
             _battleTickActive = true;
             Logging.HYLDDebug.FrameTrace($"[BattleTick][StartAfterFirstAuthority] sync={BattleData.Instance.sync_frameID} predicted={BattleData.Instance.predicted_frameID} history={BattleData.Instance.PredictionHistoryCount}");
         }
@@ -660,7 +731,6 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             currentTickInterval = Server.NetConfigValue.frameTime;
             _actualSpeedFactor = 1.0f;
             _predictionPausedForAuthorityStale = false;
-            _predictionPausedForHistoryFull = false;
             this.CancelInvoke("Send_BattleReady");
             this.CancelInvoke("SendGameOver");
             Logging.HYLDDebug.FrameTrace($"[GameOver][StopSend] sendOperation=false sendBattleReady=false sendGameOver=false");
@@ -686,7 +756,6 @@ HandleMessage(probePack, System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             _battleNetworkActive = false;
             _battleTickActive = false;
             _predictionPausedForAuthorityStale = false;
-            _predictionPausedForHistoryFull = false;
             this.CancelInvoke("Send_BattleReady");
             this.CancelInvoke("SendGameOver");
             BattleData.Instance.ClearPredictionRuntimeState();

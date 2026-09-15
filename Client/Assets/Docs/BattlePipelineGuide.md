@@ -146,7 +146,7 @@ StartCoroutine(WaitForFirstMessage());        // :392 等待第一帧数据
    ```csharp
    float mag = Mathf.Sqrt(axisX * axisX + axisY * axisY);  // :210
    float normX = axisX / mag;                                // :214
-   HYLDStaticValue.PlayerMoveX = new Fixed(normX);           // :216
+   HYLDStaticValue.PlayerMoveX = normX;                      // :216
    ```
    归一化后写入全局静态变量，保证不同摇杆偏移量下移速恒定。
 
@@ -161,10 +161,10 @@ StartCoroutine(WaitForFirstMessage());        // :392 等待第一帧数据
 
 ```csharp
 // :67 死区过滤
-if (MathFixed.Abs(FirePositionX) <= 0.02f && MathFixed.Abs(FirePositionY) <= 0.02f)
+if (Mathf.Abs(FirePositionX) <= 0.02f && Mathf.Abs(FirePositionY) <= 0.02f)
     return;
 // :73 入队攻击命令
-CommandManger.Instance.AddCommad_Attack(FirePositionX.ToFloat(), FirePositionY.ToFloat());
+CommandManger.Instance.AddCommad_Attack(FirePositionX, FirePositionY);
 ```
 
 ### 射击瞄准线：`OnJoystickMove()` — `:115-179`
@@ -419,9 +419,8 @@ while (node != null)                              // :229
     if (entry.FrameId > authorityFrameId && entry.FrameId <= predicted_frameID)
     {
         // 移动公式与 HYLDPlayerManger.ApplyPlayerOperation 完全一致
-        LZJ.Fixed3 tempDir = new LZJ.Fixed3(-mx, 0f, mz);
-        LZJ.Fixed3 move = tempDir * 移动速度 * frameTime;
-        pos = (new LZJ.Fixed3(pos) + move).ToVector3();
+        Vector3 tempDir = BattleFloatMath.ToMoveDirection(mx, mz, 1);
+        pos += tempDir * 移动速度 * frameTime;
     }
 }
 Players[selfPlayerIndex].playerPositon = pos;     // :249
@@ -615,11 +614,11 @@ currentTickInterval = 0.016f / actualSpeedFactor;              // :243
 sign = (sameTeam ? 1 : -1);
 
 // :150 方向计算
-LZJ.Fixed3 tempDir = new LZJ.Fixed3(-moveX * sign, 0, moveY * sign);
+Vector3 tempDir = BattleFloatMath.ToMoveDirection(moveX, moveY, sign);
 
-// :166 移动公式（确定性）
+// :166 移动公式
 move = tempDir * 移动速度 * frameTime;
-playerPositon = (Fixed3(playerPositon) + move).ToVector3();
+playerPositon += move;
 
 // :170-180 攻击方向：取 AttackOperations 最后一个的 Towardx/Towardy
 ```

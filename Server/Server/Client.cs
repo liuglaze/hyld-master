@@ -144,6 +144,7 @@ namespace Server
             {
                 Logging.Debug.Log("开始接收  client:" + _socket.LocalEndPoint + "  ---  sever:" + _socket.RemoteEndPoint);
                 //数据存好
+                _message.EnsureWritableSpace();
                 _socket.BeginReceive(_message.Buffer, _message.StartIndex, _message.Remsize, SocketFlags.None, ReceiveCallBack, null);
             }
             catch (Exception EX)
@@ -188,9 +189,16 @@ namespace Server
 
                 byte[] sendbyte = Message.PackData(pack);
                 ByteArray ba = new ByteArray(sendbyte);
+                bool isImportantTcpPack = pack.Actioncode == ActionCode.BattleReview
+                    || pack.Actioncode == ActionCode.UpDateActiveFriendInfo
+                    || pack.Actioncode == ActionCode.AddMatchingPlayer;
                 lock (writeQueue)
                 {
                     writeQueue.Enqueue(ba);
+                    if (isImportantTcpPack)
+                    {
+                        Logging.Debug.Log($"[TCP_SEND][Queued] uid={UID} action={pack.Actioncode} request={pack.Requestcode} bytes={sendbyte.Length} queue={writeQueue.Count} remote={_socket?.RemoteEndPoint}");
+                    }
                     if (writeQueue.Count == 1)
                     {
                         // 由队首 ByteArray 驱动发送，确保入队+判断+启动发送原子化
@@ -201,7 +209,8 @@ namespace Server
             }
             catch (Exception ex)
             {
-                Logging.Debug.Log(ex);
+                Logging.Debug.Log($"[TCP_CLOSE][Send] uid={UID} action={pack?.Actioncode} request={pack?.Requestcode} remote={_socket?.RemoteEndPoint} ex={ex}");
+                Close("Send exception", ex);
             }
         }
         private void SendBackCall(IAsyncResult ar)
@@ -211,10 +220,13 @@ namespace Server
                 Socket socket = (Socket)ar.AsyncState;
                 int count = socket.EndSend(ar);
                 ByteArray ba;
+                int queueCount;
                 lock (writeQueue)
                 {
                     ba = writeQueue.Peek();
+                    queueCount = writeQueue.Count;
                 }
+                Logging.Debug.Log($"[TCP_SEND][Callback] uid={UID} sent={count} queue={queueCount} remote={_socket?.RemoteEndPoint} socketConnected={_socket?.Connected}");
                 ba.ReadIdx += count;
                 ///完整发送了消息
                 if (ba.Length == 0)
@@ -308,7 +320,7 @@ namespace Server
                 MainPack pack = GetActiveFriendInfoPack();
                 pack.Actioncode = ActionCode.UpDateActiveFriendInfo;
                 pack.Requestcode = RequestCode.FriendRoom;
-                Send(GetActiveFriendInfoPack());
+                Send(pack);
 
             }
             catch (Exception ex)
@@ -336,6 +348,7 @@ namespace Server
 
             Logging.Debug.Log($"[TCP_CLOSE][Close] uid={UID} user={PlayerName} remote={_socket?.RemoteEndPoint} local={_socket?.LocalEndPoint} reason={reason} ex={(ex != null ? ex.ToString() : "null")}");
             Logging.Debug.Log("client  Close||||!!!!!!!!!");
+            Logging.Debug.FlushTrace();
             try
             {
                 if (_server != null)
@@ -366,6 +379,7 @@ namespace Server
             }
             _socket.Close();
             _mysqlConnection.Close();
+            Logging.Debug.FlushTrace();
         }
     }
 }

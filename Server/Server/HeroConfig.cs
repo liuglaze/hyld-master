@@ -1,4 +1,4 @@
-using SocketProto;
+﻿using SocketProto;
 using System.Collections.Generic;
 
 namespace Server
@@ -13,7 +13,7 @@ namespace Server
         public const int ManaMax = 90;
         public const int ManaPerSegment = 30;
         public const int DefaultAttackManaCost = 30;
-        public const int SuperEnergyMax = 3000;
+        public const int SuperEnergyMax = 200;
 
         public struct BulletParams
         {

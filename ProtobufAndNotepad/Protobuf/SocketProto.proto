@@ -59,6 +59,7 @@ enum ActionCode
     BattlePushDowmGameOver=38;
     BattleReview=39;
     BattlePushDownHitEvents=40;
+    BattleSetNetSimConfig=41;
 }
 
 enum ReturnCode
@@ -146,6 +147,7 @@ message MainPack
     repeated BattlePlayerPack battleplayerpack=12;
     BattleInfo battleInfo=13;
     int64 timestamp=14;
+    BattleNetSimConfig battle_net_sim_config=15;
 }
 
 message ChatPack
@@ -215,6 +217,14 @@ message BattleInfo
     BattleServerUpdate server_update=20;
 }
 
+message BattleNetSimConfig
+{
+    int32 battle_player_id=1;
+    float drop_rate=2;
+    int32 delay_min_ms=3;
+    int32 delay_max_ms=4;
+}
+
 message BattleClientInput
 {
     int32 battle_player_id=1;
@@ -281,6 +291,9 @@ message ClientMove
     float predicted_pos_y=5;
     float predicted_pos_z=6;
     MoveType move_type=7;
+    float predicted_vel_x=8;
+    float predicted_vel_y=9;
+    float predicted_vel_z=10;
 }
 
 message MoveAckResult
@@ -293,6 +306,9 @@ message MoveAckResult
     float correct_pos_z=6;
     int32 frame_discrepancy=7;
     bool resolving_frame_discrepancy=8;
+    float correct_vel_x=9;
+    float correct_vel_y=10;
+    float correct_vel_z=11;
 }
 
 message HitEvent

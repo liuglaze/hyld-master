@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R2 / T41 验收：运行时属性复制层（M06 最小）的契约验证。
+
+      为什么需要它：
+        「每连接基线」「ACK 只能前进、旧 ACK 不清新脏位」「标脏后仍要比较」
+        「8 项复制条件」「条件跃迁全掩码」「初始状态全量」「必须有界」
+        —— 这些性质编译期完全看不出来，运行期的表现又都长得像「偶尔不同步」。
+        这里把每条钉成可执行断言，并且**用手写描述符**构造输入，
+        不依赖生成器（生成器是另一块工作，B 与 A 必须能各自独立验收）。
+
+      负面验证：本程序会对 `PMReplicationChannel` 的三处决策点用「缺陷子类」
+        注入真实缺陷（旧 ACK 回归 / 条件跃迁不补发 / 标脏即发不比较），
+        并断言门禁确实抓到 —— 否则一组全绿的断言可能只是没牙。
+
+      为什么排除 Generated/：那部分是生成产物（依赖 Google.Protobuf），
+        复制层的门禁刻意只依赖 PMNet 的**手写核心**，以证明复制层本身自包含。
+
+      运行：dotnet Tools/PMReplicationTest/bin/Release/net8.0/PMReplicationTest.dll
+      退出码：0 = 干净实现全绿且三个缺陷全部被抓到；1 = 否则
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMReplicationTest</AssemblyName>
+    <RootNamespace>PMReplicationTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实源码：测的就是这份实现本身 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs"
+             Exclude="..\..\Client\Assets\Scripts\PMNet\Generated\**\*.cs"
+             LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

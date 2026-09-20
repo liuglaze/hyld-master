@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      P3'-3 验收：把两端内联的仿真公式收敛到 PMNet.Shared.PMBattleSim 时，
+      证明**行为没有改变**。
+
+      为什么需要它：
+      这与 P3'-2 的 PMNumericEquivalenceTest 是同一个套路，但对象从「数值」变成了「公式」。
+      公式被改坏的形态（浮点结合顺序、扇形步长分母、归一化阈值）在编译期完全看不出来，
+      在运行期表现为「客户端预测与服务端权威缓慢对不上」，排查成本极高。
+
+      本测试把改造前的公式**逐字复制**成 oracle，在数万条随机输入 + 边界输入上
+      与 PMBattleSim 的输出做**逐位**比对（比较 4 个字节，能区分 ±0.0 / NaN）。
+
+      运行：dotnet Tools/PMBattleSimTest/bin/Release/net8.0/PMBattleSimTest.dll
+      退出码：0 = 全部逐位等价；1 = 存在非预期差异
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMBattleSimTest</AssemblyName>
+    <RootNamespace>PMBattleSimTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实共享源码，不引 DLL：测试的就是这份源码本身 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+</Project>

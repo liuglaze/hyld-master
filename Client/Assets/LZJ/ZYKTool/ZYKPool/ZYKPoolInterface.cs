@@ -1,4 +1,4 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -15,10 +15,10 @@ namespace ZYKTool.Pool
     public interface IReusable
     {
 
-        //È¡³öÊ±ºòµ÷ÓÃ
+        //å–å‡ºæ—¶å€™è°ƒç”¨
         void OnSpawn();
 
-        //»ØÊÕµ÷ÓÃ
+        //å›æ”¶è°ƒç”¨
         void OnUnSpawn();
 
     }

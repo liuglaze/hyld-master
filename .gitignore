@@ -73,8 +73,18 @@
 /ProtobufAndNotepad/Protobuf/*.ilk
 /ProtobufAndNotepad/Protobuf/*.pdb
 
-# OpenSpec / repo helper output that should stay tracked
+# PMNet 代码生成器与校验工具的构建产物
+/Tools/**/bin/
+/Tools/**/obj/
+
+# Repo helper output that should stay tracked
 !/.agents/
 !/.github/
-!/openspec/
 !/Client/Assets/Docs/
+
+# HyldDS（局内专用服务器）构建产物：由 Unity 的 PMDsBuild 产生，328MB 级别，不应入库
+/HyldDS/
+
+# 大厅服务端本地启动器的输出（run_lobby.bat 由 Start-Process 重定向到这里）
+/Server/_lobby.out
+/Server/_lobby.err

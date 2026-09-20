@@ -1,12 +1,12 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using ZYKTool.Pool;
 
 /// <summary>
-/// ¶ÔÏó³Ø¹ÜÀíÕß
-/// ¹ÜÀí¶ÔÏó³ØµÄ ÎïÌå µÄ»ØÊÕ/ÊÍ·Å
+/// å¯¹è±¡æ± ç®¡ç†è€…
+/// ç®¡ç†å¯¹è±¡æ± çš„ ç‰©ä½“ çš„å›æ”¶/é‡Šæ”¾
 /// 
 /// </summary>
 namespace ZYKTool
@@ -16,19 +16,19 @@ namespace ZYKTool
     public class ZYKObjectPoolTool : MonoBehaviour
     {
         public static ZYKObjectPoolTool Single;
-        #region ×Ö¶Î
+        #region å­—æ®µ
         public GameObject[] Resources;
         private Dictionary<string, GameObject> Prefabs = new Dictionary<string, GameObject>();
         private Dictionary<string, ZYKObjectPool> ZYKObjectPools = new Dictionary<string, ZYKObjectPool>();
         #endregion
 
-        #region ·½·¨ 
+        #region æ–¹æ³• 
         public void AddPrefab(string name,GameObject go)
         {
             Prefabs.Add(name,go);
         }
 
-        //ÄÃÈ¡¶ÔÏó³ØµÄ¶ÔÏó
+        //æ‹¿å–å¯¹è±¡æ± çš„å¯¹è±¡
         public GameObject InstantiateObject(string name, Transform trans)
         {
             Logging.HYLDDebug.LogError(ZYKObjectPools.ContainsKey(name));
@@ -40,7 +40,7 @@ namespace ZYKTool
             ZYKObjectPool pool = ZYKObjectPools[name];
             return pool.PutOut();
         }
-        //»ØÊÕ¶ÔÏó³Ø¶ÔÏó
+        //å›æ”¶å¯¹è±¡æ± å¯¹è±¡
         public void DesteryObject(GameObject go)
         {
             
@@ -82,7 +82,7 @@ namespace ZYKTool
         }
         #endregion
 
-        #region Unity»Øµ÷
+        #region Unityå›è°ƒ
         private void Awake()
         {
             Single = this;
@@ -101,10 +101,10 @@ namespace ZYKTool
         }
         #endregion
 
-        #region ÊÂ¼ş»Øµ÷
+        #region äº‹ä»¶å›è°ƒ
         #endregion
 
-        #region °ïÖú·½·¨
+        #region å¸®åŠ©æ–¹æ³•
         #endregion
 
 

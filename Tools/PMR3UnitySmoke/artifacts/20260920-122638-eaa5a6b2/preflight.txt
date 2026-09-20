@@ -1,0 +1,8 @@
+assembly=D:\UGit\hyld-master\HyldDS\HyldDS_Data\Managed\Assembly-CSharp.dll
+mtime=2026-09-20 12:12:46
+size=1028096
+sha256=6df6285fcdf1e49e3734ecceadf35206eddb7712a9df3192d11b8d1bd0a22ce9
+exe=D:\UGit\hyld-master\HyldDS\HyldDS.exe
+exeMtime=2020-08-05 23:03:48
+protocolHash=0x7B986DB4
+collisionDigest=0x52334201

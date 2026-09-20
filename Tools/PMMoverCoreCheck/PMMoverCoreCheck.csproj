@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-A 门禁（M08 语言面）：PMMover 纯模型的 netstandard2.0 + C#7.3 零依赖编译校验。
+
+      为什么需要它：
+        PMMover/** 会被 Unity 2019.4（C# 7.3 / netstandard2.0）编译，也会被
+        net8.0 门禁工程（Tools/PMMoverTest）直编。如果它引用了 UnityEngine、
+        或者用了 Unity 2019.4 装不下的语言特性，失败**只在**"打开 Unity 构建"时暴露，
+        而本机没有可用的 Unity 验证窗口（R3 已记录）。所以这里把这件事变成一道可自动跑的门。
+
+      刻意做到：
+        1) netstandard2.0 + C# 7.3 —— 与 Unity 2019.4 的编译能力上限一致；
+        2) 无 OutputType（类库）：本工程**只编译、不运行**，没有 Program.cs；
+        3) 只读依赖面精确到**文件**，不用通配符：
+           · PMPrediction/PMPredictionContracts.cs —— 共享预测契约（主 Agent 落盘，只读）；
+           · PMNet/PMNetIdentity.cs —— PMFrameId / PMTimeStep（帧号命名空间隔离）；
+           · PMNet/PMNetRole.cs —— 身份/角色枚举（与 Identity 同属共享只读身份面）。
+           用 `PMPrediction/**/*.cs` 通配会把并行预测组正在实现的 timeline/buffer
+           一起编进来，制造跨组编译耦合 —— 这正是本批边界要避免的。
+
+      不包含 UnityEngine：这是本工程能成立的前提。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMMoverCoreCheck</AssemblyName>
+    <RootNamespace>PMMoverCoreCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 真实 Mover 源码（本目录全部文件：State / CollisionQuery / Model / TestWorld）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+
+    <!-- 只读共享契约与身份面（**逐文件**，避免把并行实现编进来）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionContracts.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

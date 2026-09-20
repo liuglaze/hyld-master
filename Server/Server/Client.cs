@@ -3,7 +3,6 @@ using System.Net.Sockets;
 using Server.Tool;
 using Server.DAO;
 using SocketProto;
-using MySql.Data.MySqlClient;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -20,63 +19,24 @@ namespace Server
         private UserData _userdata;
         private Server _server;
 
-        private MySqlConnection _mysqlConnection;
-        
         public FriendRoom FriendRoom
         {
             get; set;
         }
-        public Dictionary<int, Client> FriendsDic = new Dictionary<int, Client>();
-        private readonly object _friendsLock = new object();
 
-        public List<Client> GetFriendsSnapshot()
-        {
-            lock (_friendsLock)
-            {
-                return new List<Client>(FriendsDic.Values);
-            }
-        }
+        // 说明：原先这里有一张 Dictionary<int, Client> FriendsDic 及 6 个访问辅助方法
+        // （GetFriendsSnapshot / RemoveFriend / AddOrUpdateFriend / GetFriendCount /
+        //   TryGetFriend / ClearFriends），以及基于它的 UpdateMyselfInfo / GetActiveFriendInfoPack /
+        // UpdateActiveFriendInfo 三件套。
+        //
+        // 它们在服务端从未被写入过（FriendsDic 零写入点），因此：
+        //   - UpdateMyselfInfo 遍历空表，是空转；
+        //   - GetActiveFriendInfoPack 恒返回空好友列表；
+        //   - UpdateActiveFriendInfo 推送空包，而客户端遇到空 Playerspack 会直接清空好友列表，
+        //     等于「玩家一进房间好友面板就被清空」。
+        // 好友列表现改为由 UserController.FindFriendsInfo 按需从数据库派生；
+        // 实时的好友状态推送留到 P3 用复制机制重做。
 
-        public bool RemoveFriend(int uid)
-        {
-            lock (_friendsLock)
-            {
-                return FriendsDic.Remove(uid);
-            }
-        }
-
-        public void AddOrUpdateFriend(Client friend)
-        {
-            if (friend == null) return;
-            lock (_friendsLock)
-            {
-                FriendsDic[friend.UID] = friend;
-            }
-        }
-
-        public int GetFriendCount()
-        {
-            lock (_friendsLock)
-            {
-                return FriendsDic.Count;
-            }
-        }
-
-        public bool TryGetFriend(int uid, out Client friend)
-        {
-            lock (_friendsLock)
-            {
-                return FriendsDic.TryGetValue(uid, out friend);
-            }
-        }
-
-        public void ClearFriends()
-        {
-            lock (_friendsLock)
-            {
-                FriendsDic.Clear();
-            }
-        }
         public UserData GetUserData
         {
             get { return _userdata; }
@@ -102,10 +62,6 @@ namespace Server
         {
             get; set;
         }
-        public MySqlConnection GetMysqlConnecet
-        {
-            get { return _mysqlConnection; }
-        }
         public string socketIp { get; private set; }
         public Client(Socket socket, Server server)
         {
@@ -118,19 +74,9 @@ namespace Server
 
             socketIp = _socket.RemoteEndPoint.ToString().Split(':')[0];
 
-            try
-            {
-                //打开数据库连接
-                _mysqlConnection = new MySqlConnection(ServerConfig.DOMConectStr);
-                _mysqlConnection.Open();
-            }
-            catch (Exception ex)
-            {
-                Logging.Debug.Log(ex.ToString());
+            // 说明：原先这里会打开一条 MySQL 连接，失败则直接 Close() 并放弃这个客户端。
+            // 数据库已按需求移除（账号存在内存库 UserStore 里），因此不再有「连不上库就接入失败」这种状态。
 
-                Close();
-                return;
-            }
             //4.开始异步接受消息
             ReceiveMessage();
         }
@@ -178,6 +124,7 @@ namespace Server
                 Close("ReceiveCallBack exception", ex);
             }
         }
+        private int _closeStarted = 0;
         /// <summary>
         /// 使用读写队列优化
         /// </summary>
@@ -257,78 +204,6 @@ namespace Server
         {
             _server.HandleRequest(pack, this);
         }
-        private PlayerState laststate = PlayerState.PlayerOutline;
-        /// <summary>
-        /// 你改变时通知别的好友更新你的状态，正常来说应该用事件，但也没别的地方用，先这么着吧.
-        /// </summary>
-        public void UpdateMyselfInfo()
-        {
-            try
-            {
-                    Logging.Debug.Log(PlayerName + "  :  " + laststate + "    ----UpdateMyselfInfo--->  " + PlayerState);
-                    //Logging.Debug.Log(FriendActiveList.Count+"   "+GetFriendCount());
-                    List<Client> friendsSnapshot = GetFriendsSnapshot();
-                    foreach (Client player in friendsSnapshot)
-                    {
-                        if (player.PlayerState == PlayerState.PlayerGame || player.PlayerState == PlayerState.PlayerOutline) continue;
-                        Logging.Debug.Log(player.PlayerName + "  " + player.PlayerState);
-                        player.UpdateActiveFriendInfo();
-                    }
-                    laststate = PlayerState;
-
-            }
-            catch (Exception ex)
-            {
-                Logging.Debug.Log(ex);
-            }
-        }
-        /// <summary>
-        /// 得到活跃好友的信息包
-        /// </summary>
-        /// <returns></returns>
-        public MainPack GetActiveFriendInfoPack()
-        {
-            MainPack pack = new MainPack();
-            List<Client> friendsSnapshot = GetFriendsSnapshot();
-            foreach (Client player in friendsSnapshot)
-            {
-                Logging.Debug.Log(player.PlayerName + "  :  " + player.PlayerState);
-                if (player.PlayerState != PlayerState.PlayerOnline) continue;
-
-                PlayerPack playerPack = new PlayerPack();
-                playerPack.Playername = player.PlayerName;
-                playerPack.Id = player.UID;
-                playerPack.State = player.PlayerState;
-
-                Logging.Debug.Log(playerPack.State + "   " + player.PlayerState);
-                Logging.Debug.Log(playerPack);
-                pack.Playerspack.Add(playerPack);
-            }
-            pack.Str = "x";//防止空包
-            Logging.Debug.Log("UpdatePack    " + pack);
-            return pack;
-        }
-        /// <summary>
-        /// 更新客户端的好友状态
-        /// </summary>
-        public void UpdateActiveFriendInfo()
-        {
-            try
-            {
-                ///观察者模式:
-                Logging.Debug.Log(PlayerName + "   UpdateActiveFriendInfo :  " + PlayerState);
-                MainPack pack = GetActiveFriendInfoPack();
-                pack.Actioncode = ActionCode.UpDateActiveFriendInfo;
-                pack.Requestcode = RequestCode.FriendRoom;
-                Send(pack);
-
-            }
-            catch (Exception ex)
-            {
-                Logging.Debug.Log(ex);
-            }
-        }
-        private int _closeStarted = 0;
         public void Close()
         {
             Close("Close()", null);
@@ -355,6 +230,14 @@ namespace Server
                 {
                     _server._controllerManger?.CloseClient(this, UID);
                     BattleManage.Instance.HandleClientDisconnect(_server, UID);
+
+                    // R3-B：新链（专用服务器）对局不经过 BattleManage，必须单独通知 Lobby 宿主。
+                    // 宿主会**中止**该测试局（不伪造正常胜利）；若该 uid 不在新链对局里则是 no-op。
+                    PMNet.Control.PMDsLobbyHost lobbyHost = PMNet.Control.PMDsLobbyHost.Instance;
+                    if (lobbyHost != null)
+                    {
+                        lobbyHost.NotifyClientDisconnected(UID);
+                    }
                 }
             }
             catch (Exception ex2)
@@ -364,7 +247,7 @@ namespace Server
 
             try
             {
-                _userdata.BordCaseToFriendLogout(_mysqlConnection, _server, this, UpdateActiveFriendInfo);
+                _userdata.BordCaseToFriendLogout(_server, this);
             }
             catch (Exception ex2)
             {
@@ -378,7 +261,6 @@ namespace Server
                 FriendRoom.Exit(_server, this);
             }
             _socket.Close();
-            _mysqlConnection.Close();
             Logging.Debug.FlushTrace();
         }
     }

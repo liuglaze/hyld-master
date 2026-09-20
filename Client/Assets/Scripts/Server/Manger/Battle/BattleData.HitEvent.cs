@@ -200,8 +200,10 @@ namespace Manger
                 if (isFirstInit)
                 {
                     _playerMaxHp[playerIndex] = newHp;
-                    // 同时更新 hero.BloodValue 确保 PlayerLogic 的 playerBloodMax 同步
-                    HYLDStaticValue.Players[playerIndex].hero.BloodValue = newHp;
+                    // 权威最大血量写进**每玩家状态**（P3'-2）。
+                    // 历史实现写的是 hero.BloodValue（共享配置对象），
+                    // 结果是「一个玩家的权威血量会改掉所有同英雄玩家的配置」。
+                    HYLDStaticValue.Players[playerIndex].playerBloodMax = newHp;
                     Logging.HYLDDebug.FrameTrace($"[AHS-4] MaxHpInit: player={playerIndex} maxHp={newHp} oldDefault={oldHp} frame={frameId}");
                 }
 

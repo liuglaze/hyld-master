@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R3-B3 验收：Lobby 控制 listener / 全局账本 / 真实回环控制链路 + 受控进程。
+
+      事实来源：Docs/plans/net-r3-control-contract.md §3/§7.1/§7.3 与
+                Docs/plans/net-architecture-migration.md 的 R3B3 行。
+
+      它验证什么：
+        - PMDsControlListener：真实 loopback TCP、4 字节 LE 分帧（半包/粘包）、
+          超限立即断开、连接数/入站队列/出站队列三重有界；
+        - PMDsPlayerLedger：跨会话 uid 占用，同 uid 二次入局被拒，整局原子预留；
+        - PMDsLobbyHost：单线程串行调度（socket 只入队）、全局端口池、
+          两局拿到不同端口、引导文件原子发布且与启动参数一致、就绪才发 offer、
+          第二 TCP 连接不得顶替已绑定的控制连接、失败启动回滚、延迟退出占用、
+          客户端断线中止且不伪造胜利、确认退出后才恢复 PlayerOnline；
+        - 协调器新增面：Allocated 态 SetLaunchRequest 的 -port/-bootstrap/-matchid/-dsid 校验。
+
+      它不验证什么（避免把替身当验收）：
+        - 不启动真实 HyldDS；进程交互走受控替身，因此进程相关结论**只代表控制面接线**；
+        - 不验证 Unity 侧 PMR3Runtime / PMDsEntryCodec（属网络组与 Unity 组，且不得在此另写一份替身）；
+          本测试通过注入 IPMDsLobbyClientGateway 观察 offer 字段，生产实现在 Server 侧用冻结 codec 编码；
+        - 不验证真实 UDP 数据面（属 R3B2/R3B5）。
+
+      为什么直接编真实源码：测的就是那份实现本身，链接共享 Control 源与 Server/DS 源，
+      避免「测试里另写一份等价实现」这种自欺。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMDsLobbyTest</AssemblyName>
+    <RootNamespace>PMDsLobbyTest</RootNamespace>
+    <NoWarn>CS8981</NoWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 被测共享源（Unity 与 Server 共用同一份） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Control\PMDsControlProtocol.cs" LinkBase="PMNet\Control" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Control\PMDsTicket.cs" LinkBase="PMNet\Control" />
+
+    <!-- 控制帧载荷用 PMNetReader/Writer 编码（控制协议自身依赖它们） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetReader.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetWriter.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMWireType.cs" LinkBase="PMNet" />
+
+    <!-- 冻结的入局通知 codec（网络组产出）：本测试用它做「宿主字段 ⇄ 真实 codec」往返校验，
+         而不是在测试里另写一份替身 codec。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Session\PMDsEntryOffer.cs" LinkBase="PMNet\Session" />
+
+    <!-- 被测 Server 侧源（本测试不编 Server 主工程，避免运行中锁文件） -->
+    <Compile Include="..\..\Server\DS\PMDsCoordinator.cs" LinkBase="Server\DS" />
+    <Compile Include="..\..\Server\DS\PMDsProcess.cs" LinkBase="Server\DS" />
+    <Compile Include="..\..\Server\DS\PMDsPlayerLedger.cs" LinkBase="Server\DS" />
+    <Compile Include="..\..\Server\DS\PMDsControlListener.cs" LinkBase="Server\DS" />
+    <Compile Include="..\..\Server\DS\PMDsLobbyHost.cs" LinkBase="Server\DS" />
+  </ItemGroup>
+
+</Project>

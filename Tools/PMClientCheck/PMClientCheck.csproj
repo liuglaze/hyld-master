@@ -1,0 +1,107 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      P3'-2 门禁（第二轮扩展）：**整个客户端玩法层的真实编译检查**。
+
+      演进说明：
+        第一版只覆盖 HYLDStaticValue.cs + HeroData.cs + 共享表 —— 因为那时我误判了
+        「客户端依赖太多、做桩件不划算」。实测后（计划文档坑 #25）改成把**真实文件**也编进来：
+        项目类型本来就是仓库里的真代码，能编就编；桩件只负责 Unity 部分。
+      现在覆盖（约 120 个文件 / 23k 行）：
+        - Scripts/Server/**          网络与战斗层（P3'-3 的主要目标）
+        - Scripts/Manger/**          CommandManger / NetGlobal / ActionManger
+        - Scripts/PMNet|Shared|Math|Log/**
+        - HYLD1.0/Scripts/**         旧玩法层（PlayerLogic / Toolbox / 子弹 / UI…）
+        - 零散但被引用的真实文件：PlayerPrefabConstValue / HYLD2.0 的 GameConfig /
+          DouDiZhu 目录下的 rolateSelf、TCPSocket、EnumValue
+        - EasyTouch：只编自包含的 MovingJoystick.cs 与 MonoSingleton.cs（**桩三方、编一方**）
+
+      价值：P3'-3 要往客户端搬 ~3351 行战斗代码并与既有 3636 行合并，改动面极大。
+      没有这道门禁，每一轮都只能请用户在 Unity 里编译（P3'-2 已经这样来回 4 轮）。
+
+      ⚠ 边界：Unity 部分（ClientStubs.cs）是手写替身，只保证形状接近。
+        它抓「类型不匹配 / 参数个数顺序 / 拼写 / 缺成员」，抓不到「桩件与真实签名偏差」。
+        真实 Unity 编译仍是最终裁判。
+
+      语言面与 Unity 2019.4 一致：netstandard2.0 + C# 7.3。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMClientCheck</AssemblyName>
+    <RootNamespace>PMClientCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>CS0169;CS0414;CS0649;CS0108;CS0067;CS8981;CS0660;CS0661;CS0109;CS0162;CS0219;CS2002</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Client\Assets\Scripts\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Unity 引擎替身（唯一的手写部分） -->
+    <Compile Include="ClientStubs.cs" />
+
+    <!-- 真实客户端代码：能编就编，不桩 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="Client\PMNet" />
+
+    <!--
+      R3-B：PMR3 声明对象与生成物（**故意在 PMNet 目录之外**，避免与 PMNet/** 通配符里
+      其它门禁/程序集自有的注册表重名）。客户端玩法层里有 PMClientSessionHost / UIMatchingPanel
+      直接引用它们，所以必须真编进来（不桩本项目类型）。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="Client\PMR3\Generated" />
+
+    <!--
+      R4-B（B3）：运动预测/Mover 核心 + 网络 Driver + Unity 适配。
+      为什么必须真编进来：两个宿主（PMDsSessionHost / PMClientSessionHost）已经接上了
+      运动主链，它们的真实依赖必须在同一语言面（netstandard2.0 + C# 7.3）上被验证。
+      **不桩任何本项目新类型**：Driver/Physics/Session 一律编真实源码，
+      Unity 部分才用 ClientStubs.cs 的替身（且替身只保证形状，不保证语义）。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="Client\PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="Client\PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR4MovementCodec.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR4MovementDriver.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\**\*.cs" LinkBase="Client\PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Client\Shared" />
+    <Compile Include="..\..\Client\Assets\Scripts\Math\**\*.cs" LinkBase="Client\Math" />
+    <Compile Include="..\..\Client\Assets\Scripts\Log\**\*.cs" LinkBase="Client\Log" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\**\*.cs" LinkBase="Client\Server" />
+    <Compile Include="..\..\Client\Assets\Scripts\Manger\**\*.cs" LinkBase="Client\Manger" />
+    <Compile Include="..\..\Client\Assets\Scripts\PlayerPrefabConstValue.cs" LinkBase="Client" />
+    <Compile Include="..\..\Client\Assets\HYLD1.0\Scripts\**\*.cs" LinkBase="Client\Old" />
+    <Compile Include="..\..\Client\Assets\HYLD2.0\Config\GameConfig.cs" LinkBase="Client\HYLD2" />
+
+    <!-- EasyTouch：桩三方、编一方。只保留两个自包含的小文件。 -->
+    <Compile Include="..\..\Client\Assets\HYLD1.0\EasyTouch\Plugins\MovingJoystick.cs" LinkBase="Client\EasyTouch" />
+    <Compile Include="..\..\Client\Assets\HYLD1.0\EasyTouch\Plugins\MonoSingleton.cs" LinkBase="Client\EasyTouch" />
+
+    <!--
+      DouDiZhu 示例目录下的文件被旧玩法层引用（历史遗留的跨模块依赖，属真实情况）：
+        rolateSelf     被 HYLDBulletManger 使用
+        Net/ 下的 TCPSocket 被 HYLDActionMethon 等旧脚本使用
+        注意：斗地主的 TCPSocket/TCPSocketMessage 位于**全局命名空间**，
+        而 Scripts/Server/ 下有同名的 Server.TCPSocketMessage —— 后者在 Server 命名空间内，
+        因此两者不冲突（一个是全局、一个是命名空间内）。
+    -->
+    <Compile Include="..\..\Client\Assets\HYLD1.0\other\Sources\DouDiZhu\Scripts\rolateSelf.cs" LinkBase="Client\Other" />
+    <!-- EnumValue.cs 只需纯枚举 OldRequestCode/OldActionCode（被旧脚本引用），不依赖卡牌框架。 -->
+    <Compile Include="..\..\Client\Assets\HYLD1.0\other\Sources\DouDiZhu\Scripts\EnumValue.cs" LinkBase="Client\Other" />
+    <!--
+      斗地主的 TCPSocket 是**遗留重复实现**（真正在用的是 Scripts/Server 下的 TCPSocketManger）。
+      一方代码只用到它的 5 个静态成员，而编它会把它那套卡牌网络小框构
+      （MessageController/MessageTypes/StaticValue/D/RequestManager）全部拉进来 —— 与本次改造无关。
+      按「桩遗留、编一方」原则：不编它，改在 ClientStubs.cs 里提供最小替身。
+      rolateSelf 因为 HYLDBulletManger 真的依赖它的字段，所以编真实文件（它自包含）。
+    -->
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-B / B1 验收门禁（契约 Docs/plans/net-r4-network-contract.md §B1，主计划 P4B1/P4B2）。
+
+      为什么需要它：
+        「输入/完整快照/事件编码是否全字段往返」「上限/NaN/尾部/身份是否真的被拒绝」
+        「AP→DS→AP 是否经**真实 Transport + 真实生成桩**收敛」「输入重发是否去重、是否饿死旧缺口」
+        「事件是否不重不漏、迟到是否仍能派发」「重同步是否升流并按代次丢弃旧流」
+        「DS 预算是否防加速、同一宿主 tick 是否重复充值」「多角色是否互相串扰」
+        —— 这些编译期完全看不出来，运行期又都长得像「偶尔不同步 / 偶尔丢一条 / 偶尔跳一下」。
+
+      测什么（全部是**真实实现**，除单列说明外不直接调业务方法冒充网络）：
+        · 真实 PMNet 核心（PMNet/**，含 Transport / Session / World / Replication / Generated）；
+        · 真实 R4-B 声明对象与生成产物（PMR3/**，含生成桩 `PMNet_*`）；
+        · 真实预测核心（PMPrediction/**）与真实运动模型（PMMover/**）；
+        · 投递走**真实 PMTransport 字节链**（分片/序号/ACK/可靠与不可靠域都真实参与），
+          链路用「手工 link + 手工 hub」（与 PMR3RuntimeTest / PMNetSessionTest 同一手法）；
+        · 声明同步用**真实生成器**（PMNetGen 声明的 decl check 模式，只校验不写盘，逐字节）。
+
+      刻意不引用 UnityEngine：R4-B 的网络层是纯 C#；Unity 碰撞适配属 B2（Tools/PMR4UnityCheck）。
+
+      运行：dotnet Tools/PMR4NetworkTest/bin/Release/net8.0/PMR4NetworkTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR4NetworkTest</AssemblyName>
+    <RootNamespace>PMR4NetworkTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实源码面：测的就是这些实现本身。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只保证生成器先被构建出来（本工程不引用它的程序集，是当进程调用做声明同步校验）。 -->
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+</Project>

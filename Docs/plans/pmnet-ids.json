@@ -1,0 +1,38 @@
+{
+  "formatVersion": 1,
+  "_comment": "本文件是 PMNet 稳定 ID 的权威来源（D-R0-49）。请勿手工编辑；改 ID 等于改线协议。",
+  "classes": {
+    "CLASS:PMNetFixtures.FixtureController": 2171341074,
+    "CLASS:PMNetFixtures.FixtureHud": 2810388711,
+    "CLASS:PMNetFixtures.FixturePlayer": 3825713861,
+    "PMDeclCheck.Fixture.Pinned": 1121439345
+  },
+  "members": {
+    "CLASS:PMNetFixtures.FixtureController": {
+      "PROP:PMNetFixtures.FixtureController._pingMs": 55831
+    },
+    "CLASS:PMNetFixtures.FixtureHud": {
+      "PROP:PMNetFixtures.FixtureHud._highlight": 50056,
+      "PROP:PMNetFixtures.FixtureHud._remainSeconds": 6494
+    },
+    "CLASS:PMNetFixtures.FixturePlayer": {
+      "PROP:PMNetFixtures.FixturePlayer._aimYaw": 32638,
+      "PROP:PMNetFixtures.FixturePlayer._alive": 56093,
+      "PROP:PMNetFixtures.FixturePlayer._hp": 59873,
+      "PROP:PMNetFixtures.FixturePlayer._mana": 11535,
+      "PROP:PMNetFixtures.FixturePlayer._nickName": 8851,
+      "PROP:PMNetFixtures.FixturePlayer._scores": 18749,
+      "PROP:PMNetFixtures.FixturePlayer._simTime": 64369,
+      "PROP:PMNetFixtures.FixturePlayer._slot": 32594,
+      "PROP:PMNetFixtures.FixturePlayer._speed": 2497,
+      "RPC:PMNetFixtures.FixturePlayer.Fire": 3527,
+      "RPC:PMNetFixtures.FixturePlayer.OnDamaged": 63214,
+      "RPC:PMNetFixtures.FixturePlayer.OnEffect": 64600,
+      "RPC:PMNetFixtures.FixturePlayer.Teleport": 38494
+    },
+    "PMDeclCheck.Fixture.Pinned": {
+      "PROP:PMDeclCheck.Fixture.Pinned._value": 57348,
+      "PROP:PMNetFixtures.FixturePinned._value": 39454
+    }
+  }
+}

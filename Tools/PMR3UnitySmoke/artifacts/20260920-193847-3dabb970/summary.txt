@@ -1,0 +1,47 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=r3b6-smoke-41b7dd7e
+dsId=r3b6-smoke-41b7dd7e-ds-1
+dsPid=77756
+controlPort=2001
+dsUdpPort=40180
+bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-193847-3dabb970\bootstrap\r3b6-smoke-41b7dd7e\bootstrap-1.bin
+dsLog=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-193847-3dabb970\hyldds-1-r3b6-smoke-41b7dd7e-ds-1.log
+assemblyMtime=2026-09-20 19:16:14
+assemblySize=1170432
+assemblySha256=8abc8dacf1ae014e4b16ebf04fd1c0c479ecaa59241b6ea0232e544de06747da
+movementMode=True
+movementSymbols=PMR4MovementDriver=1 PMR4MovementCodec=1 PMUnityMoverCollisionQuery=1 MovementWorldVersion=1 BuildIsolated=1 PendingServerFrame=1 ZeroDistanceContactsIgnored=1 ServerMovementInputV1=1 ClientMovementEventsV1=1
+movementApTicksAccepted=786
+movementApTicksRejected=0
+movementStreams=uid301:stream=2,boundary=449,events=3,apSamples=3539,spSamples=3553 uid302:stream=2,boundary=449,events=3,apSamples=3554,spSamples=3540
+resultSummaryBytes=14
+exitedTerminal=True
+processExited=True
+osExitCode=0
+osExitObservations=1
+lobbyTerminalReason=结果已本地受理，且对端经认证显式 Exited(0)（收到 Exited 消息）
+sessionReleased=True
+midRunPortProbeError=SocketException: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+postExitPortProbeError=<ok>
+coordinatorKillRequests=0
+coordinatorGracefulExitObserved=1
+coordinatorGracefulExitWaits=2
+coordinatorGracefulExitTimeouts=0
+coordinatorDeferredCleanupTicks=0
+exitedTerminalAtMs=1789904339852
+osExitObservedAtMs=1789904339868
+holdSecondsConfigured=0
+holdStartWall=<none>
+holdEndWall=<none>
+holdStartMs=0
+holdEndMs=0
+holdMilliseconds=0
+holdHeartbeats=0
+holdHeartbeatReplies=0
+holdDsAliveSamples=0
+holdDsLogHeartbeatTicks=0
+holdDsMaxHbRx=-1
+dropControlAfterReady=False
+dropBlackoutMs=0
+dropExitCode=<none>
+checks=232 passed=232 failed=0

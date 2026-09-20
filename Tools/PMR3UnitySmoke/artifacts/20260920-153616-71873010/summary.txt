@@ -1,0 +1,43 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=r3b6-smoke-7cf01880
+dsId=r3b6-smoke-7cf01880-ds-1
+dsPid=13904
+controlPort=4383
+dsUdpPort=47440
+bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-153616-71873010\bootstrap\r3b6-smoke-7cf01880\bootstrap-1.bin
+dsLog=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-153616-71873010\hyldds-1-r3b6-smoke-7cf01880-ds-1.log
+assemblyMtime=2026-09-20 13:02:38
+assemblySize=1028608
+assemblySha256=13ab0a772332e158ef662f4ce36c4541d16a4cc453aef8b37ed0bb4b16e24a65
+resultSummaryBytes=0
+exitedTerminal=False
+processExited=False
+osExitCode=<none>
+osExitObservations=1
+lobbyTerminalReason=<none>
+sessionReleased=True
+midRunPortProbeError=<none>
+postExitPortProbeError=<ok>
+coordinatorKillRequests=0
+coordinatorGracefulExitObserved=0
+coordinatorGracefulExitWaits=0
+coordinatorGracefulExitTimeouts=0
+coordinatorDeferredCleanupTicks=0
+exitedTerminalAtMs=0
+osExitObservedAtMs=0
+holdSecondsConfigured=0
+holdStartWall=<none>
+holdEndWall=<none>
+holdStartMs=0
+holdEndMs=0
+holdMilliseconds=0
+holdHeartbeats=0
+holdHeartbeatReplies=0
+holdDsAliveSamples=0
+holdDsLogHeartbeatTicks=0
+holdDsMaxHbRx=-1
+dropControlAfterReady=False
+dropBlackoutMs=0
+dropExitCode=<none>
+checks=36 passed=35 failed=1
+FAIL: S35 可按 matchId 取到真实协调器（诊断面）

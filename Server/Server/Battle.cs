@@ -1,4 +1,5 @@
 ﻿using Server.Controller;
+using PMNet.Shared;
 using SocketProto;
 using System;
 using System.Collections.Generic;
@@ -27,7 +28,9 @@ namespace Server
 		private readonly object _battleLock = new object();
 		private readonly int frameIntervalMs = ServerConfig.frameTime;
 		private readonly int maxCatchupFrame = 5;
-		private const float FrameTimeSec = 16 / 1000f;  // = ServerConfig.frameTime / 1000f = 0.016f
+		private const float FrameTimeSec = BattleNumericConfig.FrameTimeSec;
+		// 帧长是两端共用的时间基准，已收敛到 BattleNumericConfig.FrameTimeSec（P3'-2）。
+		// 旧实现有三个独立声明点：这里（16/1000f）、ServerConfig.frameTime、客户端 ConstValue.frameTime。
 
 		private sealed class LastProcessedMoveInput
 		{
@@ -116,7 +119,9 @@ namespace Server
 		private Dictionary<int, ServerVector3> playerPositions;
 		private Dictionary<int, int> playerTeamIds;
 		private Dictionary<int, Hero> playerHeroes;
-		private const float MoveSpeed = 3.9f;
+		// 移速不再是一个全局常量（P3'-2）：旧服务端全职 3.9 与客户端逐英雄设计值不一致，
+		// 会让权威位置与客户端预测位置持续偏差、反复触发位置校正。
+		// 现在逐英雄从 BattleNumericConfig 取，见 GetMoveSpeedFor。
 		private int baseTeamId;
 		// 位置历史环形缓冲区（V2 延迟补偿）
 		private Dictionary<int, Dictionary<int, ServerVector3>> positionHistory;
@@ -402,9 +407,9 @@ namespace Server
 					int bpId = uidToBattlePlayerId[matchUser.uid];
 					playerTeamIds[bpId] = matchUser.teamid;
 					playerHeroes[bpId] = matchUser.hero;
-					playerHp[bpId] = HeroConfig.GetHp(matchUser.hero);
+					playerHp[bpId] = BattleNumericConfig.Get((int)matchUser.hero).MaxHp;
 					playerIsDead[bpId] = false;
-					playerMana[bpId] = HeroConfig.ManaMax;
+					playerMana[bpId] = BattleNumericConfig.ManaMax;
 					playerManaRegenTimerMs[bpId] = 0f;
 					playerSuperEnergy[bpId] = 0;
 					if (!teamGroups.ContainsKey(matchUser.teamid))
@@ -658,7 +663,7 @@ namespace Server
 				{
 					continue;
 				}
-				if (mana >= HeroConfig.ManaMax)
+				if (mana >= BattleNumericConfig.ManaMax)
 				{
 					playerManaRegenTimerMs[battlePlayerId] = 0f;
 					continue;
@@ -668,15 +673,15 @@ namespace Server
 					continue;
 				}
 
-				float reloadMs = HeroConfig.GetReloadSeconds(hero) * 1000f;
+				float reloadMs = BattleNumericConfig.Get((int)hero).ReloadSeconds * 1000f;
 				playerManaRegenTimerMs[battlePlayerId] += frameIntervalMs;
-				while (playerManaRegenTimerMs[battlePlayerId] >= reloadMs && mana < HeroConfig.ManaMax)
+				while (playerManaRegenTimerMs[battlePlayerId] >= reloadMs && mana < BattleNumericConfig.ManaMax)
 				{
 					playerManaRegenTimerMs[battlePlayerId] -= reloadMs;
-					mana = Math.Min(HeroConfig.ManaMax, mana + HeroConfig.ManaPerSegment);
+					mana = Math.Min(BattleNumericConfig.ManaMax, mana + BattleNumericConfig.ManaPerSegment);
 				}
 				playerMana[battlePlayerId] = mana;
-				if (mana >= HeroConfig.ManaMax)
+				if (mana >= BattleNumericConfig.ManaMax)
 				{
 					playerManaRegenTimerMs[battlePlayerId] = 0f;
 				}
@@ -697,33 +702,38 @@ namespace Server
 
 		// ==================== 服务端位置追踪 ====================
 
-		private void UpdatePlayerPositions(BattleFrame frameOp)
+		/// <summary>
+		/// 取某战斗内玩家的移速。
+		///
+		/// <para>
+		/// **逐英雄**（P3'-2）。旧服务端用全局常量 3.9，而客户端预测一直是逐英雄的
+		/// （黑鸦 4.2 / 麦克斯 4.08 / 柯尔特 4.05 / 里昂 3.96 / 帕姆 3.78），
+		/// 于是这五名玩家的权威位置每秒会比预测多/少 0.06~0.30 单位，
+		/// 约 2 秒就超过 <c>MovementMaxPositionError=0.6</c> 阈值，导致 MoveAck 持续回校正（表现为位置被“拉回”）。
+		/// </para>
+		///
+		/// <para>
+		/// 道具加成（如客户端 <c>HYLDModenProp</c> 的 +1）属于**玩家运行期状态**，不写回配置表；
+		/// 将来若要支持，应在这里叠加一个 per-player 修正量，而不是改 BattleNumericConfig。
+		/// </para>
+		/// </summary>
+		private float GetMoveSpeedFor(int battlePlayerId)
 		{
-			foreach (PlayerFrameInput op in frameOp.PlayerInputs)
+			Hero hero;
+			if (playerHeroes.TryGetValue(battlePlayerId, out hero))
 			{
-				int bpId = op.BattlePlayerId;
-				if (!playerPositions.TryGetValue(bpId, out ServerVector3 pos)) continue;
-
-				float mx = op.MoveX;
-				float mz = op.MoveY; // 客户端 MoveY 对应世界 Z 轴
-				float len = (float)Math.Sqrt(mx * mx + mz * mz);
-				if (frameid % 120 == 0)
-					Logging.Debug.Log($"[MoveInput] frame={frameid} bp{bpId} mx={mx:F4} mz=" +
-						$"{mz:F4} len={len:F6} pos=({pos.X:F2},{pos.Z:F2})");
-				if (len > 1e-6f)
-				{
-					mx /= len; mz /= len;
-
-					float teamSign = 1f;
-					if (playerTeamIds.TryGetValue(bpId, out int tid) && tid != baseTeamId)
-						teamSign = -1f;
-
-					pos.X += -mx * teamSign * MoveSpeed * FrameTimeSec;
-					pos.Z += mz * teamSign * MoveSpeed * FrameTimeSec;
-					playerPositions[bpId] = pos;
-				}
+				return BattleNumericConfig.Get((int)hero).MoveSpeed;
 			}
+
+			// 拿不到英雄（玩家尚未完成建链）不是「未知英雄」，用兼底值但不污染未知英雄记录。
+			return BattleNumericConfig.Fallback.MoveSpeed;
 		}
+
+		// P3'-3: 这里原本还有一个 UpdatePlayerPositions(BattleFrame)，内含**第三份**移动积分公式。
+		// 它在整个仓库里零调用点（实际推进走 ApplyPendingClientMoves -> SimulateAuthoritativeMove），
+		// 是一段历史遗留。既然移动公式已经单点化到 PMBattleSim，这份重复实现就没有保留价值 ——
+		// 留着只会让后来的人以为它是活的。
+		// 它的正常路径日志 [MoveInput] 一并消失；如需该信息，请在 SimulateAuthoritativeMove 侧加。
 
 		// ==================== 位置历史缓冲区 ====================
 

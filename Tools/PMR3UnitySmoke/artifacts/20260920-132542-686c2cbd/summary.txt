@@ -1,0 +1,40 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=<none>
+dsId=<none>
+dsPid=-1
+controlPort=-1
+dsUdpPort=-1
+bootstrap=<none>
+dsLog=<none>
+assemblyMtime=<none>
+assemblySize=0
+assemblySha256=<none>
+resultSummaryBytes=0
+exitedTerminal=False
+processExited=False
+osExitCode=<none>
+osExitObservations=0
+lobbyTerminalReason=<none>
+sessionReleased=False
+midRunPortProbeError=<none>
+postExitPortProbeError=<ok>
+coordinatorKillRequests=0
+coordinatorDeferredCleanupTicks=0
+exitedTerminalAtMs=0
+osExitObservedAtMs=0
+holdSecondsConfigured=90
+holdStartWall=<none>
+holdEndWall=<none>
+holdStartMs=0
+holdEndMs=0
+holdMilliseconds=0
+holdHeartbeats=0
+holdHeartbeatReplies=0
+holdDsAliveSamples=0
+holdDsLogHeartbeatTicks=0
+holdDsMaxHbRx=-1
+dropControlAfterReady=False
+dropBlackoutMs=0
+dropExitCode=<none>
+checks=1 passed=0 failed=1
+FAIL: S0 --hold-seconds=90 过大：需 hold*1000 + 60000 <= 120000ms，且 hold*1000 < DS smoke 期限 120000ms；请减小 hold（默认 0 = 快速模式）

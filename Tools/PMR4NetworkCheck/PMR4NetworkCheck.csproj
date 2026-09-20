@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-B / B1 语言面门禁（Unity 2019.4 = C# 7.3 + .NET Standard 2.0）。
+
+      为什么需要它：
+        R4-B 新增的 PMR4MovementCodec / PMR4MovementDriver 会被 Unity 2019.4 编译。
+        这两份文件里最容易越界的写法是：
+          · 对未约束泛型做 `x == null`（本工程统一用 object.ReferenceEquals）
+          · `Math.Clamp` / `Span` / `??=` / switch 表达式 / `using var`（C# 8+ 或 netstandard2.1）
+          · 依赖 UnityEngine 的 Vector3 / Physics（本批明确禁止）
+        这些在本机 IDE 里都不报错，只有在这里编译才会暴露。
+
+      本工程只编译：
+        · PMNet 核心与生成产物（PMNet/**，零外部依赖）；
+        · PMPrediction 四个文件（共享契约 + 时间轴 + 权威输入缓冲 + 插值缓冲）；
+        · PMMover 五个文件（纯模型 / 状态 / 碰撞接口 / 测试替身）；
+        · PMR3 声明对象与生成产物 + R4-B 的 codec/driver。
+
+      刻意不引用 Google.Protobuf / UnityEngine / 任何 NuGet 包：
+      以证明「运动网络层自包含、可 AOT、不依赖引擎」。
+      本工程是**库**，没有 Program.cs：它的验收形式就是「编译 exit 0」。
+
+      构建：dotnet build Tools/PMR4NetworkCheck -c Release
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR4NetworkCheck</AssemblyName>
+    <RootNamespace>PMR4NetworkCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PMNet 核心 + 生成产物（零外部依赖；与 T1 的 PMNetLangCheck 同一份源码面）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- 预测核心（M07）四个文件。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+
+    <!-- 运动模型（M08）五个文件。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+
+    <!-- R4-B 的声明对象 + 生成产物 + codec/driver。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,149 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-B / B2 门禁（Unity 适配器的**真实程序集**编译面）。
+
+      为什么需要它：
+        Client/Assets/Scripts/PMUnity/PMUnity*.cs 与 Client/Assets/Editor/PMR4UnityValidation.cs
+        只在 Unity 2019.4 里编译。上一批（见 Docs/plans/net-architecture-migration.md §9.5 坑 #25）
+        的教训是"没有自测编译手段时会把用户变成自己的编译器"——一次小小的 API 拼错，
+        代价是用户点一轮编辑器编译。本工程把那件事变成可自动跑的 CLI 门。
+
+      本工程与 PMUnityGlueCheck 的**关键区别**（这条必须说清楚）：
+        · PMUnityGlueCheck 用手写 UnityEngine/UnityEditor **桩件**，只证明"语法与类型自洽"；
+        · 本工程引用 D:/Unity/2019.4.8f1/Editor/Data/Managed/UnityEngine 下的**真实 DLL**，
+          因此能真正校验 Physics / PhysicsScene / Input / SceneManagement / EditorSceneManager
+          的**签名与可用性**（例如 PhysicsScene.IsValid() 是方法而不是属性）。
+
+      语言面：netstandard2.0 + C# 7.3（与 Unity 2019.4 的 apiCompatibilityLevel=6 一致）。
+      UNITY_EDITOR 是**显式定义**的：否则 PMR4UnityValidation.cs 会因 `#if UNITY_EDITOR`
+      整文件为空，门禁就成了"编译了 0 行"的假绿。
+
+      它证明什么 / 不证明什么：
+        · 证明：适配器 + 输入 + 表现 + Editor 验证脚本能在真实 Unity API 上编译通过；
+        · **不证明**运行期物理行为——那必须在 Unity 内跑（Client/Assets/Editor/PMR4UnityValidation.cs
+          的菜单 / Tools/PMR4UnityAdapterTest 覆盖输入纯转换）。
+          因此本工程是类库（无 OutputType、无 Program.cs）。
+
+      运行：dotnet build Tools/PMR4UnityCheck -c Release
+      前置：本机存在 D:/Unity/2019.4.8f1（与主计划"环境现状"一致）。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR4UnityCheck</AssemblyName>
+    <RootNamespace>PMR4UnityCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DefineConstants>UNITY_EDITOR</DefineConstants>
+    <!-- Unity 的托管程序集带 NU1701 之类的包兼容提示，与"能否编译"无关，不要拿它当失败。 -->
+    <NoWarn>$(NoWarn);CS1591;NU1701;CS0618</NoWarn>
+    <UnityManagedDir Condition="'$(UnityManagedDir)' == ''">D:\Unity\2019.4.8f1\Editor\Data\Managed</UnityManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      被验证的真实源码（精确到文件/目录，不通配整个 Assets）。
+
+      R4-B / B3 扩展：本工程现在还必须**编译验证两个真实宿主**
+      （PMDsSessionHost / PMClientSessionHost）以及它们依赖的全部新核心代码。
+      这是契约 §B3 的硬要求（"新宿主必须在 Tools/PMR4UnityCheck 引用真实 Unity2019 DLL 编译验证"）。
+      因此下面把 PMNet / PMPrediction / PMMover / PMR3 整目录编进来，
+      而不是像 B2 阶段那样只编被验证的三个适配器文件（那样会看不见宿主接线是否成立）。
+
+      仍未编（有意）：Client/Assets/Scripts/Server/Manger/**、HYLD1.0/**、旧 BattleData 等整套旧链。
+      宿主对旧链的唯一接触点是 Server.UDPSocketManger.CloseExisting()，
+      由独立文件 HostDependencies.cs 提供最小边界替身（见该文件头注释）。
+    -->
+    <Compile Include="HostDependencies.cs" />
+
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\**\*.cs" LinkBase="PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Editor\PMR4UnityValidation.cs" LinkBase="Editor" />
+
+    <!-- PMNet 核心（Transport / Session / World / Replication / Control / Generated） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- R4-B / B1 运动网络层（声明 + codec + Driver + 真生成物） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3" />
+
+    <!--
+      R4-C / C3 扩展：正式内容消费面。
+        · Shared/**：DS 正式出生名册要用 Shared/BattleNumericConfig 取英雄 MaxSpeed
+          （PMDsSessionHost 的 `using PMNet.Shared;` 是真实依赖，不是可选依赖）；
+        · PMUnity/** 已经在上面整目录编入（C2 三个正式类 + 碰撞适配 + 旧胶囊适配）。
+      因此本工程现在能真实校验「DS/客户端两个宿主 + C2 正式内容 + 旧诊断路径」的完整编译面。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Shared" />
+
+    <!-- 真实日志类（宿主的日志出口）与两个真实宿主 + DS 控制代理 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Log\Loging.cs" LinkBase="Client\Log" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsLobbyAgent.cs" LinkBase="Client\Boot" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsSessionHost.cs" LinkBase="Client\Boot" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMClientSessionHost.cs" LinkBase="Client\Boot" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      真实 Unity 汇编（不写桩件）：
+        · UnityEngine.dll                  —— 门面程序集（类型转发到各 Module）；
+        · UnityEngine.CoreModule.dll       —— GameObject/Transform/Scene/SceneManager/Application/Camera/Color/Quaternion/Bounds；
+        · UnityEngine.PhysicsModule.dll    —— Physics / PhysicsScene / Collider / BoxCollider / QueryTriggerInteraction；
+        · UnityEngine.InputLegacyModule.dll—— Input / KeyCode；
+        · UnityEngine.SharedInternalsModule.dll —— Unity 内部可见性属性所在程序集（模块引用了它，必须一并给出）。
+        · UnityEditor.dll                  —— EditorSceneManager / EditorUtility / MenuItem（PMR4UnityValidation.cs 需要）。
+    -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!--
+      R4-C / C3：C2 的正式内容类被 PMUnity/** 通配符编进来后，需要它们自己的模块：
+        · AnimationModule        —— Animator / AnimatorControllerParameter(Type)（正式角色表现驱动 Speed）；
+        · JSONSerializeModule    —— JsonUtility（manifest 解析的唯一 Unity 依赖）；
+        · AudioModule            —— AudioListener（被拒绝的旧组件，拒绝路径要引用）；
+        · TerrainPhysicsModule   —— TerrainCollider（Collider 形状序号分类用）。
+      与 PMBattleContentRuntimeCheck 的引用清单保持同口径。
+    -->
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TerrainPhysicsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.TerrainPhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.SharedInternalsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEditor">
+      <HintPath>$(UnityManagedDir)\UnityEditor.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

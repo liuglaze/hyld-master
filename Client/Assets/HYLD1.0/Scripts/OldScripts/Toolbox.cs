@@ -172,8 +172,8 @@ public class Toolbox : MonoBehaviour
             pos.gemTotal = 0;
         }
         //金库攻防初始化
-        HYLDStaticValue.RedBP = 30000;
-        HYLDStaticValue.BlueBP =30000;
+        HYLDStaticValue.RedBP = HYLDStaticValue.VaultBPMax;
+        HYLDStaticValue.BlueBP = HYLDStaticValue.VaultBPMax;
         //弹出游戏结束界面
         //SceneManager.LoadScene("HuangYeLuanDouStart");
         
@@ -234,7 +234,7 @@ public class Toolbox : MonoBehaviour
                 HYLDStaticValue.RoomEnemyTeamGemTotalValue = totalRedTemp;
                 HYLDStaticValue.RoomSelfTeamGemTotalValue = totalBlueTemp;
 
-                if (HYLDStaticValue.RoomEnemyTeamGemTotalValue >= 10 || HYLDStaticValue.RoomSelfTeamGemTotalValue >= 10)
+                if (HYLDStaticValue.RoomEnemyTeamGemTotalValue >= HYLDStaticValue.GemWinCount || HYLDStaticValue.RoomSelfTeamGemTotalValue >= HYLDStaticValue.GemWinCount)
                 {
 
                    BlueGem = totalBlueTemp;
@@ -249,8 +249,8 @@ public class Toolbox : MonoBehaviour
             //控制金库攻防输赢结束
             else if (HYLDStaticValue.ModenName == "HYLDJinKuGongFang")
             {
-                RightUpBlack.GetComponent<Slider>().value = (float)HYLDStaticValue.BlueBP / 30000;
-                LeftUpBlack.GetComponent<Slider>().value = (float)HYLDStaticValue.RedBP / 30000;
+                RightUpBlack.GetComponent<Slider>().value = (float)HYLDStaticValue.BlueBP / HYLDStaticValue.VaultBPMax;
+                LeftUpBlack.GetComponent<Slider>().value = (float)HYLDStaticValue.RedBP / HYLDStaticValue.VaultBPMax;
                 //ToolBox.GetComponent<Toolbox>().ChangeCenternText(BlueBP.ToString());
                 ChangeLeftUpText(HYLDStaticValue.BlueBP.ToString());
                 ChangeRightUpText(HYLDStaticValue.RedBP.ToString());

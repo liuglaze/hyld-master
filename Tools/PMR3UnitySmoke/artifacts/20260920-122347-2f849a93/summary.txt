@@ -1,0 +1,21 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=r3b6-smoke-5987d6dc
+dsId=r3b6-smoke-5987d6dc-ds-1
+dsPid=51096
+controlPort=9754
+dsUdpPort=46180
+bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122347-2f849a93\bootstrap\r3b6-smoke-5987d6dc\bootstrap-1.bin
+dsLog=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122347-2f849a93\hyldds-1-r3b6-smoke-5987d6dc-ds-1.log
+assemblyMtime=2026-09-20 12:12:46
+assemblySize=1028096
+assemblySha256=6df6285fcdf1e49e3734ecceadf35206eddb7712a9df3192d11b8d1bd0a22ce9
+resultSummaryBytes=14
+exitedTerminal=True
+processExited=True
+osExitCode=0
+osExitObservations=1
+lobbyTerminalReason=结果已本地受理，且对端经认证显式 Exited(0)（收到 Exited 消息）
+sessionReleased=True
+midRunPortProbeError=SocketException: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+postExitPortProbeError=<ok>
+checks=122 passed=122 failed=0

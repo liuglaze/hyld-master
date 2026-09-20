@@ -1,0 +1,29 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=r3b6-smoke-df515437
+dsId=r3b6-smoke-df515437-ds-1
+dsPid=34628
+controlPort=7966
+dsUdpPort=44020
+bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122035-33b22c05\bootstrap\r3b6-smoke-df515437\bootstrap-1.bin
+dsLog=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122035-33b22c05\hyldds-1-r3b6-smoke-df515437-ds-1.log
+assemblyMtime=2026-09-20 12:12:46
+assemblySize=1028096
+assemblySha256=6df6285fcdf1e49e3734ecceadf35206eddb7712a9df3192d11b8d1bd0a22ce9
+resultSummaryBytes=0
+exitedTerminal=False
+processExited=False
+osExitCode=<none>
+sessionReleased=True
+midRunPortProbeError=SocketException: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+postExitPortProbeError=<ok>
+checks=77 passed=69 failed=8
+FAIL: S68 两个客户端各看到 2 个副本（权威 DS 创建 + 复制）
+FAIL: S71 客户端 A 的本端副本角色 = AutonomousProxy（Create 初值已带 uid）
+FAIL: S72 客户端 A 看到的对手副本角色 = SimulatedProxy
+FAIL: S73 客户端 A 本端副本 uid 初值正确
+FAIL: S74 每个 owner 一次探针 → 属性 ProbeCount=1 收敛 + 收到一次 ClientEcho
+FAIL: S75 客户端 A 只发过一次探针（实际 0，期望 1）
+FAIL: S76 客户端 B 只发过一次探针（实际 0，期望 1）
+FAIL: 工具出现未捕获异常：NullReferenceException Object reference not set to an instance of an object.
+   at PMR3UnitySmoke.Program.SmokeRun.Execute() in D:\UGit\hyld-master\Tools\PMR3UnitySmoke\Program.cs:line 1090
+   at PMR3UnitySmoke.Program.Main(String[] args) in D:\UGit\hyld-master\Tools\PMR3UnitySmoke\Program.cs:line 96

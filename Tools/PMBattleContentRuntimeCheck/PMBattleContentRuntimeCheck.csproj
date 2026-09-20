@@ -1,0 +1,129 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-C / C2 门禁（正式内容运行时适配器的**真实程序集**编译面）。
+
+      为什么需要它（与 PMR4UnityCheck 同一条纪律）：
+        Client/Assets/Scripts/PMUnity/PMBattleContentManifest.cs、PMUnityBattleMap.cs、
+        PMUnityBattlePresentation.cs 只在 Unity 2019.4 里编译，而它们用了不少"签名容易记错"
+        的 API（PhysicsScene.OverlapCapsule 的参数序与返回 int、SceneManager.CreateScene +
+        CreateSceneParameters(LocalPhysicsMode.Physics3D)、AnimatorControllerParameter.type/
+        name、Resources.Load<T> 泛型、Collider.bounds、Animator.applyRootMotion…）。
+        没有 CLI 编译门时的代价是"用户变成自己的编译器"（主计划 §9.5 坑 #25）。
+        本工程把那件事变成一条可自动跑的命令。
+
+      它证明什么：
+        · C2 三个文件 + 它们真正依赖的 PMMover 面能在**真实 Unity 2019.4 DLL** 上
+          netstandard2.0 + C#7.3 编译通过（签名与可用性都对得上）；
+        · 不写任何 Unity 桩件（"不桩 Unity API"）：Physics/PhysicsScene/SceneManagement/
+          Resources/Animator/Camera 全部来自 D:/Unity/2019.4.8f1 的真实程序集。
+
+      它**不**证明什么（写清楚以免被误读）：
+        · 不证明运行期行为：真实 Resources 加载、真实场景隔离、真实 PhysX 出生位/墙
+          判定都必须在 Unity 内跑（C3/C4）。本工程是类库（无 OutputType、无 Program.cs）。
+        · 不证明"资源真的存在"：Resources/PMNet/* 由 C1 的 Editor 菜单烘焙，本机当前不存在，
+          因此 TryLoad/TryGetSpawn 在 CLI 上**不可能**被真正执行——这正是 C2 要求
+          "未生成时运行明确失败"的原因。
+
+      编译面（**只列 C2 + PMMover/PMPrediction 必要依赖**，刻意不编 PMNet 的
+      Transport/Session/World/Replication 与任何旧链文件）：
+        · PMUnity：C2 三个文件 + PMUnityMoverCollisionQuery.cs（地图直接复用它的全参构造）；
+        · PMMover：PMVector3 / PMMoverSyncState / PMMoverDefaults / PMMoverMode /
+          IPMMoverCollisionQuery（形状与命中语义）；
+        · PMPrediction：PMPredictionContracts.cs（PMMoverState/PMMoverModel 的契约依赖面）；
+        · PMNet：PMNetRole / PMNetRoles（角色判定）、PMNetRuntime（DS 判定）、
+          PMNetLaunchOptions（Runtime 的依赖）、PMNetIdentity（PMFrameId/PMTimeStep）。
+
+      运行：dotnet build Tools/PMBattleContentRuntimeCheck -c Release
+      前置：本机存在 D:/Unity/2019.4.8f1（与主计划"环境现状"一致）。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMBattleContentRuntimeCheck</AssemblyName>
+    <RootNamespace>PMBattleContentRuntimeCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Unity 的托管程序集带 NU1701 之类的包兼容提示，与"能否编译"无关，不要拿它当失败。 -->
+    <NoWarn>$(NoWarn);CS1591;NU1701;CS0618</NoWarn>
+    <UnityManagedDir Condition="'$(UnityManagedDir)' == ''">D:\Unity\2019.4.8f1\Editor\Data\Managed</UnityManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- R4-C / C2 交付物（本工程存在的**唯一**理由） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMBattleContentManifest.cs" LinkBase="PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityBattleMap.cs" LinkBase="PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityBattlePresentation.cs" LinkBase="PMUnity" />
+
+    <!-- 地图直接复用 B2 冻结的真实碰撞适配器（全参构造 + 白名单 + 世界版本）。
+         它的存在也是"不新增第二物理框架"这条契约在编译面上的证据。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityMoverCollisionQuery.cs" LinkBase="PMUnity" />
+
+    <!-- PMMover / PMPrediction 的必要依赖面（纯 C#，无 UnityEngine 依赖） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\IPMMoverCollisionQuery.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverModel.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionContracts.cs" LinkBase="PMPrediction" />
+
+    <!-- PMNet 的身份/角色/运行时判定（表现层拒绝 DS/Authority 的唯一依据） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRuntime.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetLaunchOptions.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      真实 Unity 汇编（不写桩件）：
+        · UnityEngine.dll                        —— 门面程序集（类型转发到各 Module）；
+        · UnityEngine.CoreModule.dll             —— GameObject/Transform/Component/Object/Resources/TextAsset/
+                                                    Scene/SceneManager/Application/Animator/AnimatorControllerParameter/
+                                                    Camera/Color/Quaternion/Vector3/Bounds/Mathf；
+        · UnityEngine.PhysicsModule.dll          —— Physics / PhysicsScene / Collider / BoxCollider /
+                                                    MeshCollider / TerrainCollider / Rigidbody /
+                                                    QueryTriggerInteraction / LocalPhysicsMode 相关类型；
+        · UnityEngine.AnimationModule.dll        —— Animator / AnimatorControllerParameter /
+                                                    AnimatorControllerParameterType（表现层驱动 Speed 参数）；
+        · UnityEngine.JSONSerializeModule.dll    —— JsonUtility（manifest 解析的**唯一** Unity 依赖）；
+        · UnityEngine.AudioModule.dll            —— AudioListener（被拒绝的旧组件，拒绝路径要引用它）；
+        · UnityEngine.TerrainPhysicsModule.dll   —— TerrainCollider（形状序号分类用）；
+        · UnityEngine.SharedInternalsModule.dll  —— Unity 内部可见性属性所在程序集（模块引用了它，必须一并给出）。
+      刻意**不**引用 UnityEditor：C2 三个文件不允许引用编辑器程序集（它们进播放器构建）。
+    -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TerrainPhysicsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.TerrainPhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.SharedInternalsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

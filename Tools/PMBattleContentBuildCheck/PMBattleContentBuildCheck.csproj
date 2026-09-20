@@ -1,0 +1,117 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-C / C1 门禁：Editor 内容烘焙代码的**真实 Unity 2019.4 API 编译面**。
+
+      为什么需要它：
+        Client/Assets/Editor/PMBattleContentBuild.cs 只在 Unity 2019.4 里编译。
+        本仓库已有的教训（Docs/plans/net-architecture-migration.md §9.5 坑 #25）是
+        「没有自测编译手段时，用户就是你的编译器」—— 一次 API 拼错就要用户点一轮编辑器。
+        本工程把那件事变成可自动跑的 CLI 门。
+
+      本工程与 PMUnityGlueCheck 的关键区别（必须说清楚）：
+        · PMUnityGlueCheck 用手写 UnityEngine/UnityEditor **桩件**，只证明"语法与类型自洽"，
+          而且**不编** Assets/Editor/PMBattleContentBuild.cs（它不在那份 csproj 的编译集里，
+          这也是 PMDsBuild.cs 里那处调用被 `#if UNITY_EDITOR` 包起来的原因）；
+        · 本工程引用 D:/Unity/2019.4.8f1/Editor/Data/Managed 下的**真实 DLL**，
+          因此能真正校验：
+            - EditorSceneManager.OpenScene/NewScene/CloseScene 的签名与枚举；
+            - PrefabUtility.SaveAsPrefabAsset(GameObject, string, out bool)；
+            - SerializedObject.GetIterator/Next(true)/CopyFromSerializedProperty；
+            - GameObjectUtility.RemoveMonoBehavioursWithMissingScript（**返回 int**）；
+            - AnimatorControllerParameterType / Animator.parameters；
+            - JsonUtility（C2 的 manifest 类型与派生规则）。
+
+      语言面：netstandard2.0 + C# 7.3（与 Unity 2019.4 的 apiCompatibilityLevel=6 一致）。
+      UNITY_EDITOR 是**显式定义**的：PMDsBuild.cs 里对 C1 的调用被 `#if UNITY_EDITOR` 包着，
+      不定义它，本门禁就看不到那处调用，等于少验一段真实代码。
+      UNITY_2019_4 只作版本自述（不参与条件编译）。
+
+      它证明什么 / 不证明什么：
+        · 证明：C1 的烘焙脚本 + PMDsBuild 的调用点 + C2 的 manifest 类型，
+          能在**真实 Unity 2019.4 程序集**上编译通过（API 存在、签名正确、语言面达标）；
+        · **不证明**运行期行为：菜单没被执行、场景没被打开、prefab 没被生成、
+          digest 没有实际算过。这些必须在 Unity 编辑器里由用户点菜单完成（本次 C1 未执行）。
+          因此本工程是类库（无 OutputType、无 Program.cs）—— 不要把它当成"烘焙已验收"。
+
+      运行：dotnet build Tools/PMBattleContentBuildCheck -c Release
+      前置：本机存在 D:/Unity/2019.4.8f1（与主计划"环境现状"一致）。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMBattleContentBuildCheck</AssemblyName>
+    <RootNamespace>PMBattleContentBuildCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <DefineConstants>UNITY_EDITOR;UNITY_2019_4</DefineConstants>
+    <!-- Unity 托管程序集带 NU1701 之类的包兼容提示，与"能否编译"无关；桩件有未使用字段噪音。 -->
+    <NoWarn>$(NoWarn);CS1591;NU1701;CS0618;CS0649;CS0169;CS0414</NoWarn>
+    <UnityManagedDir Condition="'$(UnityManagedDir)' == ''">D:\Unity\2019.4.8f1\Editor\Data\Managed</UnityManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      被验证的**真实源码**（精确到文件，不通配目录）。
+
+      · PMBattleContentBuild.cs      ← 本轮 C1 的烘焙实现（本门禁的第一目标）
+      · PMDsBuild.cs                 ← 构建入口：验证它对 C1 的调用点真实存在且签名匹配
+                                        （该调用被 `#if UNITY_EDITOR` 包着，故上面必须定义 UNITY_EDITOR）
+      · PMBattleContentManifest.cs   ← C2 的 manifest 类型与其**冻结派生规则**。
+                                        C1 直接复用它的类型与 TryDeriveCollisionDigestAndWorldVersion，
+                                        因此这里必须编**同一份真实源码**：两端各写一遍派生规则
+                                        正是最容易在握手时才暴露的漂移。
+    -->
+    <Compile Include="HostDependencies.cs" />
+
+    <Compile Include="..\..\Client\Assets\Editor\PMBattleContentBuild.cs" LinkBase="Editor" />
+    <Compile Include="..\..\Client\Assets\Editor\PMDsBuild.cs" LinkBase="Editor" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMBattleContentManifest.cs" LinkBase="PMUnity" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      真实 Unity 汇编（不写桩件）：
+        · UnityEngine.dll                       —— 门面程序集（类型转发到各 Module）；
+        · UnityEngine.CoreModule.dll            —— GameObject/Transform/Component/Scene/Mesh/Application/
+                                                   Debug/Random/JsonUtility 之外的公共类型；
+        · UnityEngine.PhysicsModule.dll         —— Collider/MeshCollider/BoxCollider/Rigidbody（白名单判定）；
+        · UnityEngine.AnimationModule.dll       —— Animator/AnimatorControllerParameter(Type)（Speed 参数校验）；
+        · UnityEngine.JSONSerializeModule.dll   —— JsonUtility（manifest 序列化）；
+        · UnityEngine.SharedInternalsModule.dll —— Unity 内部可见性属性所在程序集（模块引用了它，必须一并给出）；
+        · UnityEditor.dll                       —— MenuItem/PrefabUtility/EditorSceneManager/AssetDatabase/
+                                                   GameObjectUtility/SerializedObject/EditorUtility。
+    -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.SharedInternalsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEditor">
+      <HintPath>$(UnityManagedDir)\UnityEditor.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

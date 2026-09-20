@@ -1,4 +1,4 @@
-/****************************************************
+﻿/****************************************************
     BattleData.Prediction.cs  --  partial class: 预测历史 / 权威确认 / 输入重放
     从 BattleManger.cs 拆分，零逻辑变更
 *****************************************************/
@@ -418,8 +418,17 @@ namespace Manger
                     bool zeroInput = Mathf.Abs(mx) <= 1e-6f && Mathf.Abs(mz) <= 1e-6f;
 
                     int coveredFrames = Mathf.Max(1, entry.CoveredFrames);
+                    // 方向只用于表现层（朝向与幅度），位置积分走共享核心 ——
+                    // 核心的多帧形式 `dist = speed*dt*coveredFrames` 与服务端逐字一致；
+                    // 旧写法 `((dir*speed)*dt)*n` 的结合顺序不同，可差最后一位。
                     Vector3 tempDir = BattleFloatMath.ToMoveDirection(mx, mz, 1);
-                    pos += tempDir * HYLDStaticValue.Players[selfPlayerIndex].移动速度 * Server.NetConfigValue.frameTime * coveredFrames;
+                    float replayX, replayZ;
+                    PMNet.Shared.PMBattleSim.TryAdvancePosition(
+                        pos.x, pos.z, mx, mz, 1,
+                        HYLDStaticValue.Players[selfPlayerIndex].移动速度,
+                        Server.NetConfigValue.frameTime, coveredFrames,
+                        out replayX, out replayZ);
+                    pos = new Vector3(replayX, pos.y, replayZ);
                     replayMoveMagnitude = tempDir.magnitude;
                     replayMoveDir = replayMoveMagnitude < 0.001f ? Vector3.zero : tempDir;
                     replayedCount += coveredFrames;

@@ -99,7 +99,7 @@ namespace Manger
 
             if (attackType == AttackType.Super)
             {
-                if (selfPlayer.hero.superBullet == null
+                if (!selfPlayer.hero.HasSuperBullet
                     || selfPlayer.hero.大招实体 == null
                     || selfPlayer.hero.isSuperMovingType)
                 {

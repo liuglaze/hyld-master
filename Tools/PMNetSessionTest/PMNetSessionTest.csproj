@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R3-A2 / R3A3+R3A4 验收：已认证连接的网络适配（Session 层）契约验证。
+
+      为什么需要它：
+        「未激活不派发/不发送」「双方摘要与世代一致才进世界」「Create 与可靠 RPC 同流先
+        创建后调用」「ClassId/ParamLayoutId 不符就协议错误断连」「原生校验失败真的落到
+        Transport.Disconnect」「丢包重排下属性最终收敛、可靠 RPC 恰好交付一次」
+        —— 这些性质编译期完全看不出来，运行期又都长得像「偶尔不同步 / 偶尔丢事件」。
+        这里把每一条钉成可执行断言，并且走 **OnDatagram / Update 的字节链**
+        （真实 PMTransport + 真实 PMNetWorld + 真实 RPC 接收入口 + 真实复制层），
+        不直接调用业务实现冒充网络投递。
+
+      为什么不引 Unity、不引生成器：
+        本门禁只依赖 PMNet 的**手写核心**；描述符用手工表格构造，
+        从而证明适配器可独立验收。生成器链路已由 R2 的门禁覆盖，R3-B 再做集成。
+
+      运行：dotnet Tools/PMNetSessionTest/bin/Release/net8.0/PMNetSessionTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMNetSessionTest</AssemblyName>
+    <RootNamespace>PMNetSessionTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实源码：测的就是这份实现本身 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

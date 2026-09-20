@@ -133,7 +133,17 @@ namespace Logging
                 var dir = Path.GetDirectoryName(TraceSavePath);
                 if (!Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
-                _stream = File.Open(TraceSavePath, FileMode.OpenOrCreate, FileAccess.Write);
+
+                // FileShare.ReadWrite 是必需的，不是优化：
+                // File.Open(path, FileMode.OpenOrCreate, FileAccess.Write) 的重载会用默认的
+                // FileShare.None，把日志文件**独占锁定**——服务端在跑的时候，
+                // cat/cp/tail/编辑器全都读不到（表现为「文件有大小但读到 0 字节」或 Device busy）。
+                // 联调时无法查看运行中的日志是致命的运维缺陷，因此这里显式允许共享读。
+                _stream = new FileStream(
+                    TraceSavePath,
+                    FileMode.OpenOrCreate,
+                    FileAccess.Write,
+                    FileShare.ReadWrite);
             }
 
             var bytes = UTF8Encoding.Default.GetBytes(_traceSb.ToString());

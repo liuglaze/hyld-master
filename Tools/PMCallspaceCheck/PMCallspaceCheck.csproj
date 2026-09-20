@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R1 验收：RPC callspace 真值表 + 归属校验 + 身份/帧契约。
+
+      为什么需要它：
+      1. `PMRpcDispatch.EvaluateCallspace` 复刻的是 UE `AActor::GetFunctionCallspace` 的 16 个分支，
+         **分支顺序本身是契约**（例如 pending-kill 必须在 NetRequest 之前判）。
+         顺序写错在编译期完全看不出来，表现是「某些调用悄无声息地没执行」。
+      2. 归属校验此前在本仓库是**写反的**（服务端直接放行，等于取消全部归属校验），
+         见 Docs/plans/net-r0-contract.md 的 D-R0-42。这里把正确语义钉住。
+      3. 身份/帧契约的关键不变量（Id 永不复用、跨命名空间帧号相减必须失败）
+         属于「静默出错」类型，必须由可执行断言守住。
+
+      运行：dotnet Tools/PMCallspaceCheck/bin/Release/net8.0/PMCallspaceCheck.dll
+      退出码：0 = 全部通过；1 = 存在失败
+
+      注意：语言面（netstandard2.0 + C# 7.3）由 Tools/PMNetLangCheck 单独守住；
+      本工程是 net8.0 可执行程序，只为能实际跑断言。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMCallspaceCheck</AssemblyName>
+    <RootNamespace>PMCallspaceCheck</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实源码，不引 DLL：测的就是这份实现本身 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

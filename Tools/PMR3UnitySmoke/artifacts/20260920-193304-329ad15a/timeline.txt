@@ -1,0 +1,12 @@
+1789903984442 SessionStarted match=r3b6-smoke-ec94c328 dsId=r3b6-smoke-ec94c328-ds-1 epoch=1 port=47380 pid=67084
+1789904007803 ResultAccepted match=r3b6-smoke-ec94c328 winner=0 summary=14B
+1789904007928 SessionReleased match=r3b6-smoke-ec94c328 state=Exited reason=结果已本地受理，且对端经认证显式 Exited(0)（收到 Exited 消息）
+
+warnings:
+[host] [PMDsLobbyHost] PMDsLobbyHost 已启动：control=127.0.0.1:11820 ports=47380-47399 bootstrapRoot=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-193304-329ad15a\bootstrap
+[host] [PMDsLobbyHost] 新链开局已落地：match=r3b6-smoke-ec94c328 ds=r3b6-smoke-ec94c328-ds-1 epoch=1 port=47380 pid=67084 pattern=smoke
+[host] [PMDsLobbyHost] 会话 r3b6-smoke-ec94c328 的控制连接已绑定：id=1
+[host] [PMDsLobbyHost] 会话 r3b6-smoke-ec94c328 已发布入局通知给 2 名玩家并进入 Running（port=47380）
+[host] [PMDsLobbyHost] 会话 r3b6-smoke-ec94c328 收到权威结果：resultId=4294967297 winner=0（只做控制结果通知，不伪造 BattleReview）
+[host] [PMDsLobbyHost] 会话 r3b6-smoke-ec94c328 的控制连接已断开（id=1，reason=对端关闭连接），等待重连
+[host] [PMDsLobbyHost] 会话 r3b6-smoke-ec94c328 的控制连接已绑定：id=1

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      P3'-2 验收：数值迁移的**行为等价性**测试。
+
+      为什么需要它：
+      把数值从「两份硬编码副本」换成「共享单一事实源」时，最容易犯的错误不是编译不过，
+      而是**某个值被悄悄改掉了** —— 比如把「每次发射数」写成了「一轮总数」、
+      把某个英雄的伤害串行、把移速从 3.9 改成设计值。这类错误编译期完全看不出来。
+
+      本测试用**旧 HeroConfig 的实际取值**（冻结在 Tools/_old_heroconfig_snapshot.json，
+      从迁移前真实的 Server/Server/HeroConfig.cs 提取）作为基准，
+      逐英雄、逐字段比对新表的解析结果。全部相等 => 迁移是行为等价的。
+
+      唯一**有意**不等的是移速：旧服务端是全局常量 3.9，新表是逐英雄设计值。
+      测试对这一点单独断言（期望「至少 5 个英雄不同」），把它变成显式的已知变更而非遗漏。
+
+      运行：dotnet Tools/PMNumericEquivalenceTest/bin/Release/net8.0/PMNumericEquivalenceTest.dll
+      退出码：0 = 全部等价；1 = 存在非预期差异
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMNumericEquivalenceTest</AssemblyName>
+    <RootNamespace>PMNumericEquivalenceTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <None Include="..\_old_heroconfig_snapshot.json" Link="基准快照.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+</Project>

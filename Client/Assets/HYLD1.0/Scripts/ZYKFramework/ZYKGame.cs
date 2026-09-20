@@ -1,4 +1,4 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -7,7 +7,7 @@ public class ZYKGame : LZJSingleModen<ZYKGame>
 {
     ZYKPoolManger poolManger;
     /// <summary>
-    ///     µ÷ÓÃÕâ¸ö·½·¨¾ÍÄÜÊµÏÖÉú³ÉPrefabsµÄÎïÌå
+    ///     è°ƒç”¨è¿™ä¸ªæ–¹æ³•å°±èƒ½å®ç°ç”ŸæˆPrefabsçš„ç‰©ä½“
     ///     poolManger.InstantiateObject();
     //      poolManger.DesteryObject();
     /// </summary>

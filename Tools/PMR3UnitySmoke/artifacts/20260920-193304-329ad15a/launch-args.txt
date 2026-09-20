@@ -1,0 +1,4 @@
+pid=67084
+exe=D:\UGit\hyld-master\HyldDS\HyldDS.exe
+workdir=D:\UGit\hyld-master\HyldDS
+args="-batchmode" "-nographics" "-server" "-dsid" "r3b6-smoke-ec94c328-ds-1" "-matchid" "r3b6-smoke-ec94c328" "-bootstrap" "D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-193304-329ad15a\bootstrap\r3b6-smoke-ec94c328\bootstrap-1.bin" "-control" "127.0.0.1:11820" "-port" "47380" "-server-smoke" "-logFile" "D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-193304-329ad15a\hyldds-1-r3b6-smoke-ec94c328-ds-1.log"

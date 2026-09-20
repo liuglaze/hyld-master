@@ -154,8 +154,12 @@ namespace Manger
             PlayerInformation player = HYLDStaticValue.Players[playerIndex];
             int sign = GetTeamRelativeSign(playerIndex);
 
-            Vector3 movementDir = ApplyMovementInput(player, opt, sign);
-            AdvancePlayerPosition(player, movementDir);
+            // ApplyMovementInput 现在只写表现层字段（playerMoveX/Y/Dir/Magnitude），
+            // 不再返回方向 —— 位置推进由它下方的 AdvancePlayerPosition 把**原始输入**
+            // 直接交给共享核心，方向在核心内部一并算。刻意不返回方向：
+            // 免得将来有人拿这个返回值再开一条独立推进路径，那正是本次要消除的重复。
+            ApplyMovementInput(player, opt, sign);
+            AdvancePlayerPosition(player, opt.MoveX, opt.MoveY, sign);
             ApplyAttackFacing(player, opt, sign);
         }
 
@@ -166,7 +170,16 @@ namespace Manger
                 : 1;
         }
 
-        private Vector3 ApplyMovementInput(PlayerInformation player, BattleData.LocalPlayerInput opt, int sign)
+        /// <summary>
+        /// 把本帧的移动输入落到**表现层**字段上（朝向与幅度供渲染/动画消费）。
+        ///
+        /// <para>
+        /// 注意它**不做位置推进**，也不返回方向 —— 推进是
+        /// <see cref="AdvancePlayerPosition"/> 的事。改造前它返回方向、调用方拿去做推进，
+        /// 于是「方向从哪来」这件事有两个出口；现在收成一个。
+        /// </para>
+        /// </summary>
+        private void ApplyMovementInput(PlayerInformation player, BattleData.LocalPlayerInput opt, int sign)
         {
             player.playerMoveX = sign * opt.MoveX;
             player.playerMoveY = sign * opt.MoveY;
@@ -185,16 +198,36 @@ namespace Manger
                 player.playerMoveDir = movementDir;
                 player.playerMoveMagnitude = movementMagnitude;
             }
-
-            return movementDir;
         }
 
-        private void AdvancePlayerPosition(PlayerInformation player, Vector3 movementDir)
+        /// <summary>
+        /// 单帧位置推进。
+        ///
+        /// <para>
+        /// P3'-3：公式本体已收进 <c>PMNet.Shared.PMBattleSim</c>，这里改传**原始输入**
+        /// 而不是已经算好的方向 —— 因为核心的 <c>TryAdvancePosition</c> 同时负责
+        /// 「方向归一化」与「速度×时间×帧数」两段。
+        /// </para>
+        ///
+        /// <para>
+        /// 顺带把浮点结合顺序对齐到服务端：服务端算的是 <c>dir * (speed*dt*n)</c>，
+        /// 旧客户端算的是 <c>(dir*speed)*dt</c>，两者可差最后一位。现在两端同一个表达式。
+        /// </para>
+        /// </summary>
+        private void AdvancePlayerPosition(PlayerInformation player, float moveX, float moveY, int sign)
         {
-            // 移动公式：dir * 移动速度(units/sec) * frameTime(sec)
             Vector3 before = player.playerPositon;
-            Vector3 move = movementDir * player.移动速度 * Server.NetConfigValue.frameTime;
-            player.playerPositon += move;
+
+            float outX, outZ;
+            PMNet.Shared.PMBattleSim.TryAdvancePosition(
+                player.playerPositon.x, player.playerPositon.z,
+                moveX, moveY, sign,
+                player.移动速度, Server.NetConfigValue.frameTime, 1,
+                out outX, out outZ);
+
+            player.playerPositon = new Vector3(outX, player.playerPositon.y, outZ);
+
+            Vector3 move = player.playerPositon - before;
             float delta = Vector3.Distance(before, player.playerPositon);
             int selfIndex = HYLDStaticValue.playerSelfIDInServer;
             bool isSelf = selfIndex >= 0

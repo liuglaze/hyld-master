@@ -4,13 +4,36 @@
 
 ## 1. 启动与主链路
 
-`Program.cs:8` → `Server/Server.cs:32` → `Server/Client.cs:155` → `Controller/ControllerManger.cs:51` → `Controller/Controllers.cs` → `Server/*`
+`Program.cs` → `Server/Server.cs:32` → `Server/Client.cs:155` → `Controller/ControllerManger.cs:51` → `Controller/Controllers.cs` → `Server/*`
 
-- `Program.cs:8`（Main）：配置日志路径、覆写 ServerConfig、启动 TCP 服务器
+- `Program.cs`（Main）：配置日志路径、覆写 ServerConfig、启动 TCP 服务器
 - `Server/Server.cs:32`（构造）：TCP 监听 7778、UDP 监听 7777、启动监听线程和 Ping 检测
 - `Server/Client.cs:155`（ReceiveCallBack）：TCP 收包 → 解析 MainPack → HandleRequest
-- `Controller/ControllerManger.cs:51`（HandleRequest）：按 RequestCode 找 Controller、反射调用 ActionCode 方法
+- `Controller/ControllerManger.cs:51`（HandleRequest）：按 RequestCode 找 Controller、调用显式分发表里注册的委托
 - `Controller/Controllers.cs`：User/Friend/FriendRoom/Matching/PingPong/ClearSence 控制器
+
+### 1.1 目标框架与运行前提（2026-09 变更）
+
+- **目标框架：`net8.0`**（原 `net6.0`）。
+  原因：net6.0 已 EOL，且构建机上没有 .NET 6 运行时（只有 8/9/10），
+  `dotnet Server.dll` 会直接报 `You must install or update .NET to run this application`，服务端起不来。
+  对应迁移计划 Q5。
+- **不依赖任何数据库**：账号数据改为进程内内存库 `DAO/UserStore.cs`，
+  原先的 MySQL（`MySql.Data` 包 + `ServerConfig.DOMConectStr`）已完全移除。
+  服务端不再需要预装 MySQL 才能启动。详见 §3.5。
+- 启动：`dotnet Server/bin/Debug/net8.0/Server.dll`
+  （或 `dotnet run --project Server/Server.csproj`）。
+
+### 1.2 保活方式与无头运行
+
+`Program.cs` 结尾根据 stdin 是否被重定向分两种保活方式：
+
+- **交互式控制台**（`Console.IsInputRedirected == false`）：`Console.Read()`。
+- **非交互**（服务化、CI、`start /B` 重定向日志等）：`Thread.Sleep(Timeout.Infinite)`。
+
+原因：`Console.Read()` 在 stdin 被重定向时会**立刻返回 -1**，导致进程
+「打印了『启动监听成功』随即退出」，端口瞬间消失、极难定位。迁移计划里 Lobby/DS
+都需要能被非交互地拉起，所以必须区分。
 
 ## 2. 协议与网络通道
 
@@ -88,11 +111,10 @@
 
 **Server/Client.cs**（350 行） — 单 TCP 连接
 
-- `Client`:110 — 构造：MySQL 连接、启动异步接收
+- `Client`:110 — 构造：启动异步接收（原实现还会在此打开 MySQL 连接，现已移除）
 - `ReceiveCallBack`:155 — 收包 → 解析 → HandleRequest
 - `Send`:182 — 序列化 + 异步发送
-- `UpdateMyselfInfo`:242 — 状态变更广播给在线好友
-- `Close`:310 — 幂等关闭：清理状态、通知好友、关闭 Socket/DB
+- `Close`:310 — 幂等关闭：清理状态、通知好友、关闭 Socket
 
 **Server/ClientUdp.cs**（339 行，LZJUDP 类） — UDP 单例
 
@@ -139,7 +161,53 @@
 **Tool/Loging.cs**（132 行） — 日志：Info/Warn/Error/Exception 四级
 **Tool/IPManager.cs**（48 行） — 获取本机 IPv4/IPv6 地址
 **Tool/Message.cs**（163 行） — TCP 帧封装（ByteArray）
-**DAO/UserData.cs**（425 行） — MySQL 数据访问
+**DAO/UserStore.cs** — **进程内内存用户库**（替代原 MySQL）：`users` + `friends` 两张表的内存实现。
+  线程安全（服务端每连接一线程），对外只返回 `UserSnapshot` 值副本。详见 §3.5。
+**DAO/UserData.cs** — 单连接用户数据门面：持有「这条连接当前是谁」（UID/UserName/PlayerName/PlayerHero），
+  共享数据委托给 `UserStore`。
+
+### 3.5 用户数据：内存库（数据库已移除）
+
+**背景**：本工程不做账号持久化。原实现要求本机装 MySQL 才能登录，
+而构建/联调环境没有数据库，结果就是「服务端起不来 → 客户端连不上」。
+现改为内存实现，零外部依赖。
+
+| 项 | 原实现 | 现实现 |
+|---|---|---|
+| 存储 | MySQL `hyld` 库 | `DAO/UserStore.cs` 内存字典 |
+| 依赖 | `MySql.Data` NuGet + `ServerConfig.DOMConectStr` | 无 |
+| `users` | `UserName`(PK) / `Password` / `name` / `id` 自增 | 同名内存记录，`id` 从 1 自增 |
+| `friends` | 单向边 `(UserID, FriendID)`，查询时双向匹配 | 同样的单向边 + 双向匹配（语义等价） |
+| 注册 | `INSERT INTO users`，主键冲突返回 false | `UserStore.TryRegister`，同名返回 false |
+| 登录 | `SELECT ... WHERE UserName AND Password` | `UserStore.TryLoginOrCreate` |
+
+**行为变更（有意，需知晓）**：
+
+1. **登录自动建号**：账号不存在时直接建号并成功登录——不需要先走注册流程。
+   账号存在但密码不符仍**失败**（密码校验没有被削弱）。
+2. **新账号默认昵称 = 账号名**（原 MySQL 实现写入空串 `name=''`）。
+   理由：数据库已移除，没有别的途径产生昵称，而空昵称会让好友流程与大厅显示不可用。
+   客户端「昵称为空则引导改名」的判断仍保留，改名流程不受影响。
+3. **进程重启即清空**：内存实现的定义，不是缺陷。
+4. `hyld.sql`（仓库根）是原 MySQL 的建表/种子数据，**已不再被任何代码使用**，
+   仅作为历史 schema 记录保留。
+
+**未变的行为（原样保留，改动时勿破坏）**：
+
+- **一条 TCP 连接只能登录一次**：`UserController.Login` 开头 `if (client.UserName != null) → Fail`。
+- **同一账号同时只能有一条活跃连接**（防顶号）：`server.GetActiveClientByUserName(...) != null → Fail`。
+  注意副作用：客户端崩溃后立即用同账号重连，可能在服务端 Ping 超时清理之前被拒。
+
+**回归工具**：`Tools/PMServerSmokeTest/`（不需 Unity、不需数据库），
+以真实 TCP 客户端跑 10 个场景（自动建号、重复登录保护、密码校验、FindPlayerInfo、
+FindFriendsInfo、UpdateName 读回、Logon 重复、`request_id` 回带）。
+
+```bat
+dotnet build Server\Server.csproj
+dotnet build Tools\PMServerSmokeTest -c Release
+REM 先启动服务端，再跑：
+dotnet Tools\PMServerSmokeTest\bin\Release\net8.0\PMServerSmokeTest.dll
+```
 
 ## 4. 战斗主链路（全链路函数级）
 
@@ -303,7 +371,14 @@ oneGameOver = true（来源：击杀 / 断线）
 
 - 工具类：`Tool/Loging.cs`，`Logging.Debug.Log(消息[, 级别])`
 - 级别：Info / Warn / Error（附堆栈） / Exception（附堆栈）
-- 路径：`Server/log/{yyyy-MM-dd_HH时mm分ss秒}/server.log`（Program.cs:12）
+- 路径：`Server/log/{yyyy-MM-dd_HH时mm分ss秒}/server.log`
+  - 由 `Program.cs` 的 `ResolveLogDirectory()` 推导：从可执行文件目录向上找到
+    「同时含 `Server` 与 `Client` 子目录」的那一层（即工程根），再拼 `Server/log`；
+    找不到就退回 `<可执行文件目录>/log`。
+  - 启动时会打印日志文件绝对路径，避免「日志不知道去哪了」。
+  - 历史问题：原实现把路径**硬编码**为 `D:/unity/hyld-master/hyld-master/Server/log/...`
+    （某台旧开发机的绝对路径）。工程换位置后日志会被写到一个与代码无关的目录树里，
+    且因父目录会被自动创建，失败也不报错。
 - 128KB 缓冲刷盘，正常退出 flush，强杀可能丢尾部
 
 ## 9. 场景速查
@@ -351,7 +426,3 @@ oneGameOver = true（来源：击杀 / 断线）
 
 - `ActionCode` 与控制器方法名强绑定（反射）：改名必须同步，否则"没有找到指定事件处理"
 - `HeroConfig._hpConfig` 当前为测试值（约原值 1/5），后续需恢复
-
-## OpenSpec
-
-仅当任务明确涉及 OpenSpec、`/opsx`、proposal/design/spec/tasks 工件时，再进入完整 OpenSpec 流程。默认不启用。

@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R1 / T39+T40 验收：对象运行时（M04）的契约验证。
+
+      为什么需要它：
+      「NetId 永不复用」「创建与初始状态原子到达」「销毁不等 ack」「Owner 链推导归属」
+      —— 这些性质在编译期完全看不出来，在运行期表现为「偶发引用到已销毁对象」
+      「RPC 归属误判放行」「新玩家看不到已有对象」，排查成本极高。
+      这里把每条性质钉成可执行断言。
+
+      Owner 链的期望值逐字取自 UE 源码（文件:行号见 PMNetOwnerChain.cs 注释），
+      不是从我们的实现反推的。
+
+      运行：dotnet Tools/PMNetWorldTest/bin/Release/net8.0/PMNetWorldTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMNetWorldTest</AssemblyName>
+    <RootNamespace>PMNetWorldTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实源码：测的就是这份实现本身 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

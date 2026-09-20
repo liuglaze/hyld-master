@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-A / P4A4 集成门禁：真实预测核心（PMPrediction/**）+ 真实 Mover 纯模型（PMMover/**）
+      装在一起跑端到端集成断言。
+
+      为什么需要它：
+        P4A1/P4A2（Tools/PMPredictionTest）与 P4A3（Tools/PMMoverTest）各自只验证自己那一半。
+        "真实 Mover 模型装进真实预测时间轴之后，强制位置/速度/Mode/参数/ActiveLayers/aux
+        差异还能按原始输入与原 dt 恢复重放、并且与独立 reference 逐位一致"这件事，
+        只有把它们编进同一个进程才能验证；分开的工程永远看不到跨模块的语义错配。
+
+      关于 csproj 形态（实测证据，不是偏好）：
+        先按"引用两个库门禁工程"试过 —— ProjectReference 同时引 PMPredictionCoreCheck
+        与 PMMoverCoreCheck 会报 17 个 CS0433：共享类型在两边各定义一次，例如
+          CS0433 类型"IPMPredictionModel<TInput, TSync, TAux>"同时存在于
+                 "PMMoverCoreCheck" 和 "PMPredictionCoreCheck" 中
+          （同批还有 PMTimeStep / PMFrameId / PMSimulationResult / PMPredictionSnapshot）
+        因此本工程改为**直接链接源码编一份**（与 Tools/PMMoverTest 同风格），
+        只读依赖面精确到文件、不用通配符拉别的组的实现：
+          · PMPrediction/**（共享契约 + 预测组三份源码：timeline / authority buffer / SP buffer）
+          · PMMover/**（Mover 组四份源码：state / collision query / model / 测试世界）
+          · PMNet/PMNetIdentity.cs、PMNet/PMNetRole.cs（帧号命名空间与网络角色原语）
+        这样本工程同时覆盖被测的那一份实现，且不引入任何 DLL 或 NuGet / UnityEngine 依赖。
+
+      库侧语言门禁（netstandard2.0 + C# 7.3）已由 PMPredictionCoreCheck / PMMoverCoreCheck
+      各自完成；本工程是 net8.0 可执行验收门禁。
+
+      运行：dotnet Tools/PMMoverPredictionTest/bin/Release/net8.0/PMMoverPredictionTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMMoverPredictionTest</AssemblyName>
+    <RootNamespace>PMMoverPredictionTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实预测核心：共享契约 + 时间轴 + DS 输入预算 + SP 插值（与 PMPredictionCoreCheck 编同一份文件） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionContracts.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionTimeline.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMAuthorityInputBuffer.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMInterpolationBuffer.cs" LinkBase="PMPrediction" />
+
+    <!-- 真实 Mover 纯模型 + 确定性碰撞替身（与 PMMoverCoreCheck 编同一份文件） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+
+    <!-- 只读身份/角色原语（帧号命名空间隔离、ENetRole 语义） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

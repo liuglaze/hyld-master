@@ -2,18 +2,73 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
+    <!--
+      目标框架：net6.0 -> net8.0
+      原因：net6.0 已 EOL（SDK 持续报 NETSDK1138），且构建/联调机上没有 .NET 6 运行时
+      （只有 8.0.29 / 9.0.18 / 10.0.10），导致 `dotnet Server.dll` 直接报
+      "You must install or update .NET to run this application"，服务端起不来。
+      升到 net8.0（LTS）可同时解决 EOL 与「本机没有对应运行时」两件事。
+      对应迁移计划的 Q5。
+    -->
+    <TargetFramework>net8.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="iTextSharp" Version="5.5.13.2" />
-    <PackageReference Include="MySql.Data" Version="9.0.0" />
+    <!--
+      已移除 MySql.Data：账号数据改为进程内内存库（Server/DAO/UserStore.cs），
+      服务端不再依赖任何数据库，也就无需本机安装 MySQL 才能启动。
+    -->
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="Google.Protobuf">
       <HintPath>Google.Protobuf.dll</HintPath>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      PMNet 核心：与 Unity 客户端共用同一份源码（计划 P1 第 5 条 / Q3 决策）。
+      之所以用链接而不是复制：生成代码是确定性的，复制无风险；
+      但框架核心一旦复制必然长期分叉，所以这里保持单一事实源。
+      代价是 PMNet 核心不得引用 UnityEngine —— 这一点由 Tools/PMNetLangCheck
+      的 netstandard2.0 + C# 7.3 门禁强制保证（Unity 2019.4 的语言/API 天花板）。
+    -->
+    <Compile Include="..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!--
+      共享战斗数值表（P3'-2）：服务端与 Unity 客户端编译同一份源码。
+      这是「数值只有一个事实源」的落地方式 —— 与 PMNet 核同样的链接机制。
+      之所以能这样链接：该文件不引用 UnityEngine，也不引用任何生成代码，
+      只依赖 BCL（由 Tools/PMSharedConfigCheck 以 netstandard2.0 + C# 7.3 门禁强制保证）。
+    -->
+    <Compile Include="..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Shared" />
+
+    <!--
+      R3-B：PMR3 声明与生成产物（Unity 组产出，纯 C# 源码）。
+      namespace PMNet.R3，与 PMNet 核心同样的链接方式（**不复制**，避免长期分叉）。
+      Lobby 侧只消费 PMR3Runtime.Register() / ProtocolHash / CollisionDigest，
+      不接受外部客户端提供的 hash。
+      注意：PMR3 的 **Unity 适配**不放这个目录（按契约 §7.3 放 Server/Boot），
+      因此这个 glob 不会把 UnityEngine 依赖带进服务端工程。
+      目录尚不存在时 glob 匹配为空，不会导致 MSBuild 报错。
+    -->
+    <!--
+      R4-B：PMR3 目录下新增的运动网络实现（PMR4MovementDriver / PMR4MovementCodec）
+      **不编进 Lobby**。理由：
+        · 这两个文件依赖 PMNet.Prediction / PMNet.Mover（预测时间轴与运动模型），
+          而 Lobby 的角色是局外（登录/好友/房间/匹配/DS 编排），**不参与仿真**；
+        · Lobby 只消费 PMR3Runtime.Register() / ProtocolHash / CollisionDigest 三个静态面，
+          它对 PMR3 的依赖全部落在**声明层**；
+        · 声明层已经留好接缝 IPMMovementNetworkDriver（定义在 PMR3Player.cs 内），
+          Driver 只是它的一个实现者，Lobby 不需要、也不该把它编进来
+          （否则 Lobby 二进制会白白带上整套预测/运动数学）。
+      这是**排除**而不是"把预测/Mover 也链进来"：后者会让 Lobby 承担仿真代码的体积与
+      Unity 语言面约束，而它一行都用不上。
+    -->
+    <Compile Include="..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3"
+             Exclude="..\Client\Assets\Scripts\PMR3\PMR4MovementDriver.cs;..\Client\Assets\Scripts\PMR3\PMR4MovementCodec.cs" />
   </ItemGroup>
 
 </Project>

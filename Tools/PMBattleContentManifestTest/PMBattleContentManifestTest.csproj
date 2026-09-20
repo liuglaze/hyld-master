@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-C / C2 验收：manifest 的**纯规则**（schema / 固定值 / 资源路径白名单 / 摘要派生 /
+      内部一致 / 版本与非 0）在 net8 上真跑。
+
+      为什么需要它：
+        "摘要派生"（contentDigest 前 4 字节按**小端** uint、0→1；worldVersion 由
+        collisionDigest & 0x7fffffff 派生、0→1）与"手写常量必须被拒"这类规则，
+        错了不会编译报错，只会在 C3 两端握手时以一个"看起来正常"的整数不一致的形式暴露。
+        本工程把冻结规则钉成断言。
+
+      它与 PMBattleContentRuntimeCheck 的分工（互补，不重叠）：
+        · PMBattleContentRuntimeCheck：引用**真实 Unity 2019 DLL**，证明 C2 三个文件
+          （含 map/presentation）能在真实 API 上 netstandard2.0 + C#7.3 编译；
+        · 本工程：net8 上真跑 manifest 的**真实规则代码**，但 Unity 侧只给
+          **JsonUtility 一个类型的替身**（见 Program.cs 尾部的边界声明）。
+          除 JsonUtility 之外的 UnityEngine 类型一个都不提供——这既是"只桩 JsonUtility 边界"
+          的纪律，也让"manifest 源码里悄悄引入第二个 Unity 依赖"立刻变成编译错误。
+
+      它**不**证明什么（区分实机的口径）：
+        · 不代表 Unity 2019.4 真实 JsonUtility 的全部行为（未知字段忽略 / 缺字段留默认 /
+          uint 字段可解析，这三点由替身承担，实机待 C1 回读 + C3 运行确认，已登记在
+          Docs/plans/_r4c_runtime_report.md）；
+        · 不加载任何 Resources、不建场景、不跑物理：真实资源缺失/隔离物理世界/出生位与墙的
+          判定都必须在 Unity 内跑（C3/C4）。
+
+      运行：dotnet build Tools/PMBattleContentManifestTest -c Release
+            dotnet Tools/PMBattleContentManifestTest/bin/Release/net8.0/PMBattleContentManifestTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMBattleContentManifestTest</AssemblyName>
+    <RootNamespace>PMBattleContentManifestTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 被测的**真实生产代码**（不复制、不快照）：Unity 侧只缺 JsonUtility（Program.cs 里给替身） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMBattleContentManifest.cs" LinkBase="PMUnity" />
+  </ItemGroup>
+
+</Project>

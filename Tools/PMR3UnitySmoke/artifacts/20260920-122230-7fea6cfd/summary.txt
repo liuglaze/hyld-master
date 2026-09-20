@@ -1,0 +1,23 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=r3b6-smoke-50632e04
+dsId=r3b6-smoke-50632e04-ds-1
+dsPid=39092
+controlPort=9614
+dsUdpPort=40360
+bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122230-7fea6cfd\bootstrap\r3b6-smoke-50632e04\bootstrap-1.bin
+dsLog=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122230-7fea6cfd\hyldds-1-r3b6-smoke-50632e04-ds-1.log
+assemblyMtime=2026-09-20 12:12:46
+assemblySize=1028096
+assemblySha256=6df6285fcdf1e49e3734ecceadf35206eddb7712a9df3192d11b8d1bd0a22ce9
+resultSummaryBytes=14
+exitedTerminal=True
+processExited=True
+osExitCode=<none>
+sessionReleased=True
+midRunPortProbeError=SocketException: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+postExitPortProbeError=<ok>
+checks=121 passed=117 failed=4
+FAIL: S90 真实 DS 日志证明它创建了 uid=A 的权威副本
+FAIL: S91 真实 DS 日志证明它创建了 uid=B 的权威副本
+FAIL: S103 取到真实 OS 退出码（不可用）
+FAIL: S104 真实 OS 退出码 = 0（正常收尾）

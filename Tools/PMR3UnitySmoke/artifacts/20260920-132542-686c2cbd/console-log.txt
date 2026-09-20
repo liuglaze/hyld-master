@@ -1,0 +1,10 @@
+=== R3-B6：真实 Unity DS 进程烟测（真实 PMDsLobbyHost + 真实 HyldDS.exe + 真实 UDP 两客户端）===
+
+    ... [9ms] artifacts=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132542-686c2cbd
+  模式：holdSeconds=90 dropControlAfterReady=False（默认 0 = 原快速模式）
+    FAIL S0 --hold-seconds=90 过大：需 hold*1000 + 60000 <= 120000ms，且 hold*1000 < DS smoke 期限 120000ms；请减小 hold（默认 0 = 快速模式）
+    摘要已写入 D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132542-686c2cbd\summary.txt
+
+  总耗时 23ms（上限 120000ms）
+  0 项通过，1 项失败：
+    - S0 --hold-seconds=90 过大：需 hold*1000 + 60000 <= 120000ms，且 hold*1000 < DS smoke 期限 120000ms；请减小 hold（默认 0 = 快速模式）

@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-B / B2 物理适配器的**零距离语义**回归门禁（受控 Unity 查询双件 + 真实适配器源码）。
+
+      为什么需要它（本次缺陷的性质）：
+        2026-09-20 的真实 Unity Play 运行里，隔离 runtime-local-physics-scene 下出现 6 项失败，
+        根因是 PhysX 的 CapsuleCast 对"起点已接触/重叠"的 Collider 返回 distance=0 + normal=-dir
+        （这就是 Unity 2019.4 实测语义：贴地 capsule 的足底正好落在 floor 顶面时，任意方向的扫掠
+         都会拿到 floor 的这条 0 距离命中）。适配器当时用"法线与运动方向相反"来过滤命中，
+        而 -dir 恰好**恒**满足该判据 ⇒ 贴地时水平扫掠被判 fraction=0 ⇒ 角色永远走不动；
+        同时 Cast 分支先于 Overlap 分支返回 ⇒ 真正的"起点嵌墙"路径（StartOverlapResolutions）永不执行。
+
+      它证明什么：
+        · 真实源码 Client/Assets/Scripts/PMUnity/PMUnityMoverCollisionQuery.cs 在上述**受控**查询双件下，
+          能准确区分"起点正穿透 / 仅接触 / 有效前向 TOI"，并给出契约要求的 Fraction/Normal；
+        · 真实源码 PMMoverModel.cs 在该适配器上跑"走墙 2 秒 / 起跳落地"，复现真实 Play 里的
+          minX≈0.9 与 maxY>1.5（修复前：minX 停在 3.125、maxY=1，与 Editor 报告逐位同症状）。
+
+      **它不证明什么**（边界必须写清楚，不允许被读成"假验物理"）：
+        · 双件是**我自己实现的**轴对齐 Box 语义模型，**不是** PhysX、也不是 Unity；
+          它只复现"已观测到的零距离语义 + 一阶 TOI"，用来把适配器逻辑钉死。
+        · 真实 PhysX 上的最终结论仍需用户在 Unity 里跑
+          Client/Assets/Editor/PMR4UnityValidation.cs 的菜单（本工程不代替、也不宣称代替）。
+        · 旋转 Box / Mesh / Terrain 等非轴对齐 Box 形状：双件用 bounds 近似，属**有意简化**，
+          适配器侧对应的"不支持边界"另有断言（见 Program.cs 的 D5）。
+
+      运行：dotnet build Tools/PMR4CollisionAdapterTest -c Release
+            dotnet Tools/PMR4CollisionAdapterTest/bin/Release/net8.0/PMR4CollisionAdapterTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR4CollisionAdapterTest</AssemblyName>
+    <RootNamespace>PMR4CollisionAdapterTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 测试入口 + 受控 UnityEngine 双件（只桩适配器真正用到的成员）。 -->
+    <Compile Include="Program.cs" />
+
+    <!-- 被验收的真实适配器（不复制、不快照）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityMoverCollisionQuery.cs" LinkBase="PMUnity" />
+
+    <!-- 真实纯 Mover 模型与状态（与 Tools/PMMoverTest 编的是同一份文件）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+
+    <!-- 只读共享契约与身份面（逐文件，不拉并行预测组的实现）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionContracts.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

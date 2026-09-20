@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-C / C3 门禁：**正式内容 manifest 的 schema / 派生 / 路径口径**对照测试。
+
+      为什么需要它：
+        C3 把「Lobby 侧选正式内容还是诊断内容」的判据从固定的 PMR3Runtime.CollisionDigest
+        改成了「读 manifest 的 collisionDigest」。这条链一旦口径漂移，后果是
+        「Lobby 分配的 digest 与 DS/客户端本机 manifest 不一致」→ 每局都在握手段被拒。
+        因此这里用**真实**的两份实现跑同一批正反用例：
+
+          · Server/DS/PMDsBattleContentConfig.cs        —— net8 侧（System.Text.Json）；
+          · Client/Assets/Scripts/PMUnity/PMBattleContentManifest.cs —— C2 的 Unity 侧（JsonUtility）。
+
+      边界（诚实口径）：
+        · 本工程**不编任何 UnityEngine**：C2 类的唯一 Unity 依赖 JsonUtility 由文件末尾的替身提供
+          （只替“JSON → 对象字段”的解析边界，规则本身一律跑真实源码）；
+        · 不加载资源、不建场景、不启动 Unity —— 纯 C# 的规则与路径测试。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMBattleContentSessionTest</AssemblyName>
+    <RootNamespace>PMBattleContentSessionTest</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实被验证面 1：net8 侧（Lobby）的 manifest 配置入口。 -->
+    <Compile Include="..\..\Server\DS\PMDsBattleContentConfig.cs" LinkBase="Server\DS" />
+
+    <!-- 真实被验证面 2：C2 的 Unity 侧 manifest 类（对照口径的唯一来源）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMBattleContentManifest.cs" LinkBase="Client\PMUnity" />
+  </ItemGroup>
+
+</Project>

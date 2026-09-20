@@ -148,6 +148,10 @@ message MainPack
     BattleInfo battleInfo=13;
     int64 timestamp=14;
     BattleNetSimConfig battle_net_sim_config=15;
+    // 请求关联 ID（计划 P1 / B3）。
+    // 0 表示非请求（服务端主动推送、广播、多播）；非 0 时回包会原样带回，
+    // 供客户端做「回包匹配 + 超时重试去重」。这是 proto3 追加字段，旧端不受影响。
+    int32 request_id=16;
 }
 
 message ChatPack

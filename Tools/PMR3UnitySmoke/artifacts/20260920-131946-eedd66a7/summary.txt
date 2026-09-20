@@ -1,0 +1,36 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=r3b6-smoke-7172d012
+dsId=r3b6-smoke-7172d012-ds-1
+dsPid=21796
+controlPort=5033
+dsUdpPort=44840
+bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-131946-eedd66a7\bootstrap\r3b6-smoke-7172d012\bootstrap-1.bin
+dsLog=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-131946-eedd66a7\hyldds-1-r3b6-smoke-7172d012-ds-1.log
+assemblyMtime=2026-09-20 13:02:38
+assemblySize=1028608
+assemblySha256=13ab0a772332e158ef662f4ce36c4541d16a4cc453aef8b37ed0bb4b16e24a65
+resultSummaryBytes=14
+exitedTerminal=True
+processExited=True
+osExitCode=-1
+osExitObservations=1
+lobbyTerminalReason=结果已本地受理，且对端经认证显式 Exited(0)（收到 Exited 消息）
+sessionReleased=True
+midRunPortProbeError=SocketException: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+postExitPortProbeError=<ok>
+holdSecondsConfigured=40
+holdStartWall=2026-09-20 13:19:46.747
+holdEndWall=2026-09-20 13:20:26.750
+holdStartMs=1789881586747
+holdEndMs=1789881626750
+holdMilliseconds=40003
+holdHeartbeats=8
+holdHeartbeatReplies=8
+holdDsAliveSamples=643
+holdDsLogHeartbeatTicks=9
+holdDsMaxHbRx=8
+dropControlAfterReady=False
+dropBlackoutMs=0
+dropExitCode=<none>
+checks=135 passed=134 failed=1
+FAIL: S104 真实 OS 退出码 = 0（Unity 优雅退出，非强杀）

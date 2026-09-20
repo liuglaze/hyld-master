@@ -10,6 +10,73 @@
 - 战斗结束后服务端会通过 TCP 下发 `BattleReview` 完整回放；该包可能超过 1024 字节，客户端 TCP 半包缓冲按包头扩容，收到后切回主线程保存回放，不能因回放大包导致大厅 TCP 断开。
 - 战斗逻辑帧时长：ConstValue.frameTime = 0.016f（16ms，约 60fps 逻辑帧）。
 
+## 1.1 进程形态判定：客户端 / HyldDS（专用服务器）
+
+> 本节是 P2' 引入的启动期契约。改动入口链路时必读。
+
+**背景**：目标形态下「局内战斗」由 HyldDS 承担，而 **HyldDS 就是本 Unity 工程打出来的包**
+（每局拉起一个进程、打完销毁）。Unity 2019.4 既没有 Windows 的 Dedicated Server 构建目标，
+也没有 `UNITY_SERVER` 宏，因此**客户端与 DS 是同一个二进制，身份只能在运行时从命令行参数判定**。
+
+**判定链路**（顺序固定）：
+
+```
+进程启动
+  └─ PMNetBootstrap（[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]，早于任何场景加载）
+       ├─ PMNetLaunchOptions.FromCurrentProcess()   解析命令行
+       ├─ PMNetRuntime.Initialize(...)              得到进程网络模式
+       └─ 分流
+            ├─ Client          → 保持原有流程（HYLDManger 等），行为与改造前一致
+            └─ DedicatedServer → 另设日志落点 + PMDsHost.Start(...)
+```
+
+**默认取向**：**不带 `-server` 就是客户端**。解析失败、未初始化、任何异常路径都退回客户端行为。
+因此客户端路径不受影响。
+
+**唯一判定来源**：`PMNet.PMNetRuntime.IsDedicatedServer`（或 `Mode`）。
+**禁止**用「是否编辑器」「当前场景名」之类的间接条件代替它——在无头 DS 上这类条件会导致
+难以定位的表现层副作用（纪律检查见迁移计划 §6 的 T27）。
+
+**DS 启动参数契约**（由 Lobby 拉起时组装）：
+
+| 参数 | 必需 | 说明 |
+|---|---|---|
+| `-server` | ✅ | 身份标识。**缺省即客户端**。 |
+| `-batchmode` / `-nographics` | 可选 | Unity 内建的运行时无头参数。**注意：图形无头化已在构建期完成**（`BuildOptions.EnableHeadlessMode`，实测在 2019.4 + Windows 可用，运行时日志会出现 `Forcing GfxDevice: Null`），因此这两个参数在真无头包里是**冗余但无害**；保留它们是为了兼容“构建期无头不可用”的回退路径。**但 `-batchmode` 仍有意义**：它让进程不期望交互控制台。 |
+| `-dsid <id>` | 建议 | DS 实例标识，用于日志与 Lobby 侧对账。 |
+| `-matchid <id>` | 建议 | 对局标识。 |
+| `-listen <ip>` | 可选 | 默认 `0.0.0.0`。 |
+| `-port <n>` | **必需** | 战斗监听端口。**每局必须不同**——现有客户端把战斗 UDP 端口硬编码为 `7777`（`ConstValue.cs`），同机多局会互相抢占。 |
+| `-lobby <host:port>` | 建议 | Lobby 地址，供 DS 反向注册。 |
+| `-tickrate <hz>` | 可选 | 默认 30。 |
+| `-logFile <path>` | 可选 | `-` 表示输出到 stdout。DS 的日志目录由它推导。 |
+
+解析规则：支持 `-k v` 与 `-k=v`、参数名大小写不敏感、重复参数以最后一次为准、
+非法取值不抛异常（保留默认值并记警告）。完整行为由 `Tools/PMNetLaunchCheck` 的 94 项检查固化。
+
+**DS 侧对客户端链路的抑制**（`HYLDManger` 三处守卫，均以 `IsDedicatedServer` 为门）：
+
+- `Awake`：跳过 UI / 大厅 TCP / PingPong 初始化（**保留 `base.Awake()`**，让 `Instance` 有效以免散落各处的 `HYLDManger.Instance` 空引用）。
+- `Update`：不跑客户端每帧管线（大厅 PingPong、UI、Trace 刷盘）；DS 的日志刷盘由 `PMDsHost` 心跳负责。
+- `Send`：大厅 TCP 未初始化时记警告并忽略，而不是空引用。
+
+**DS 构建**：编辑器菜单 `Build / Build HyldDS (Windows Headless)`，或
+`-executeMethod PMDsBuild.BuildWindowsHeadlessDs`。产出 `HyldDS/HyldDS.exe` + `run_ds.bat`。
+构建脚本会**先试 `BuildOptions.EnableHeadlessMode`**（实测在本平台可用），
+失败才回退到 `BuildOptions.None` 并在 Console 明说采用了哪种方式；
+`run_ds.bat` 的注释里也会写明本次产物的无头方式。
+实测数据（供参考）：单 DS 启动 **740 ms**、常驻内存 **~61 MB**、tick 准确跑在配置的 30 Hz。
+该构建**只打包一张自动创建的空引导场景**（不加载客户端 UI 场景），因此 DS 进程里不会有
+`HYLDManger`；上面的守卫是防御性兜底。
+
+> 因为身份是运行时的，**客户端构建产物加 `-server` 启动同样会进入 DS 模式**，
+> 单机联调可用同一份产物拉两次。
+
+**注意**：P2' 阶段 DS 的收包/回包只是连通性占位（回包固定为 `PMDS-PONG`），
+真实战斗收发会在 P3' 由从 `Server/ClientUdp.cs` 迁移过来的 UDP 层取代。
+
+---
+
 ## 2. 坐标系与摄像机
 
 - **游戏坐标系**：X = 水平，Z = 屏幕纵向（上下），Y = 固定高度层（玩家 Y=1）。
@@ -226,7 +293,7 @@ SpawnVisualBullet ➞ NetGlobal.Instance.AddAction(lambda) // 排队到主线程
 
 ### 4.4 单机模式子弹（计划剥离）
 
-> **注意**：单机模式已决定全面剥离，将作为独立 OpenSpec change 执行。以下描述仅供残留代码理解参考。
+> **注意**：单机模式已决定全面剥离，将作为独立任务执行。以下描述仅供残留代码理解参考。
 
 - HYLDBulletManager.OnLogicUpdate 中，!isNet 时遍历玩家的 fireState，满足条件直接 Attack()
 - shell 的 isVisualOnly=false，保留完整碰撞体，OnTriggerEnter 执行伤害判定

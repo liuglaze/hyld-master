@@ -247,8 +247,6 @@ namespace Server
 					continue;
 				}
 				activeClient.PlayerState = PlayerState.PlayerOnline;
-				activeClient.UpdateMyselfInfo();
-				activeClient.UpdateActiveFriendInfo();
 				Logging.Debug.Log($"[BattleFinish][RestorePlayerState] battleId={battleId} uid={uid} state={activeClient.PlayerState}");
 				Logging.Debug.Log($"[BattleFinish][SendReview] battleId={battleId} uid={uid} bytes={reviewBytes}");
 				activeClient.Send(mainPack);

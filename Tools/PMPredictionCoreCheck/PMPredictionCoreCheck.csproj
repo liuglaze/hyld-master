@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-A / P4A1+P4A2 语言面门禁：预测核心（M07）必须能在 Unity 2019.4 的能力上限内编译，
+      即 netstandard2.0 API + C# 7.3。
+
+      为什么需要它：
+        Unity 2019.4 的托管编译上限就是 C# 7.3 / .NET Standard 2.0。
+        预测时间轴/输入缓冲/插值缓冲里最容易越界的写法是：
+          - 对未约束泛型做 `x == null`（这里统一用 object.ReferenceEquals）
+          - `Math.Clamp`（.NET Standard 2.1 才有）
+          - `??=`、switch 表达式、`using var`、target-typed new（C# 8+）
+        这些在各自的 IDE 里都不报错，只有在这里编译才会暴露。
+
+      本工程只编译共享契约 + 3 份预测源码 + 预测核心直接依赖的两份 PMNet 原语；
+      刻意不引用 Google.Protobuf / UnityEngine / 任何 NuGet 包，
+      以证明预测核心自包含、可 AOT。本工程是**库**，没有 Program.cs：
+      它的验收形式就是「编译 exit 0」。
+
+      构建：dotnet build Tools/PMPredictionCoreCheck/PMPredictionCoreCheck.csproj
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMPredictionCoreCheck</AssemblyName>
+    <RootNamespace>PMPredictionCoreCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 共享契约（主 Agent 落盘，只读依赖） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionContracts.cs" LinkBase="PMPrediction" />
+    <!-- 预测组三份源码 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionTimeline.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMAuthorityInputBuffer.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMInterpolationBuffer.cs" LinkBase="PMPrediction" />
+    <!-- 预测核心直接依赖的 PMNet 原语（只取这两份，避免拖入 Protobuf 生成产物） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

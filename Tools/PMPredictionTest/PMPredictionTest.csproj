@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-A 验收（P4A1 / P4A2）：预测核心契约矩阵。
+
+      为什么需要它：
+        「输入帧 n → 输出边界 n+1」「同帧完整恢复后按原 dt 重放」「迟到/重复边界不回退确认」
+        「历史满且未确认就冻结而不是静默覆盖」「确认事件只广播一次」「缺帧等待而不是跨越」
+        「信用不足就延后而不是拆分/放大 dt」
+        —— 这些性质编译期完全看不出来，运行期又都长得像「偶尔抖动/偶尔不同步」。
+        这里把每一条钉成可执行断言，并且**预期值由独立手算给出**（不是拿实现自己的常量自比）。
+
+      不引 Mover、不引 Unity、不引生成器：
+        预测核心只依赖共享契约 PMPredictionContracts.cs + PMNet 的帧/角色原语。
+        Mover / 集成验收属于 P4A3 / P4A4 的独立门禁。
+
+      运行：dotnet Tools/PMPredictionTest/bin/Release/net8.0/PMPredictionTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMPredictionTest</AssemblyName>
+    <RootNamespace>PMPredictionTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实源码：测的就是这份实现本身 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionContracts.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionTimeline.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMAuthorityInputBuffer.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMInterpolationBuffer.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

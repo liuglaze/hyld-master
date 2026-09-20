@@ -1,0 +1,25 @@
+{
+  "formatVersion": 1,
+  "_comment": "本文件是 PMNet 稳定 ID 的权威来源（D-R0-49）。请勿手工编辑；改 ID 等于改线协议。",
+  "classes": {
+    "CLASS:PMNetE2E.E2eReplicated": 2761782480,
+    "CLASS:PMNetE2E.E2eScoreboard": 2767219303
+  },
+  "members": {
+    "CLASS:PMNetE2E.E2eReplicated": {
+      "PROP:PMNetE2E.E2eReplicated._ammo": 36071,
+      "PROP:PMNetE2E.E2eReplicated._health": 43547,
+      "PROP:PMNetE2E.E2eReplicated._speed": 26362,
+      "PROP:PMNetE2E.E2eReplicated._title": 15488,
+      "RPC:PMNetE2E.E2eReplicated.Checked": 821,
+      "RPC:PMNetE2E.E2eReplicated.Fire": 24024,
+      "RPC:PMNetE2E.E2eReplicated.Notify": 44765,
+      "RPC:PMNetE2E.E2eReplicated.Push": 6043,
+      "RPC:PMNetE2E.E2eReplicated.Say": 431,
+      "RPC:PMNetE2E.E2eReplicated.Warp": 46137
+    },
+    "CLASS:PMNetE2E.E2eScoreboard": {
+      "PROP:PMNetE2E.E2eScoreboard._score": 25086
+    }
+  }
+}

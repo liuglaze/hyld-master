@@ -1,8 +1,8 @@
-/*
+ï»¿/*
  * * * * * * * * * * * * * * * * 
- * Author:        ÕÔÔªâı
- * CreatTime:  2020/11/7 2£º38 
- * Description:  ½ÇÉ«Àà
+ * Author:        èµµå…ƒæº
+ * CreatTime:  2020/11/7 2ï¼š38 
+ * Description:  è§’è‰²ç±»
  * * * * * * * * * * * * * * * * 
 */
 using System.Collections;
@@ -114,9 +114,9 @@ public abstract class ICharacter
 }
 public class CharacterBaseAttribute
 {
-    protected string mName;//Ãû×Ö
-    protected int mMaxHP;//ÑªÁ¿
-    protected float mMoveSpeed;//ÒÆËÙ
+    protected string mName;//åå­—
+    protected int mMaxHP;//è¡€é‡
+    protected float mMoveSpeed;//ç§»é€Ÿ
     protected string mIconSprite;
     protected string mPrefabName;
 

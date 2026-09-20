@@ -45,11 +45,15 @@ public class HYLDModenProp : MonoBehaviour
     void wd()
     {
        // Logging.HYLDDebug.LogError(Id);
-        damage = HYLDStaticValue.Players[Id].hero.bulletDamage;
-        blood = HYLDStaticValue.Players[Id].hero.BloodValue;
+        // 狂暴瓶：+30% 伤害与血量上限、+1 移速，5 秒后还原。
+        //
+        // P3'-2 起这些修正写在**每玩家有效值**上（Players[Id].bulletDamage / playerBloodMax / 移动速度），
+        // 不再写 hero.* —— 后者是共享配置，写它会让「同英雄的所有玩家」一起被加强。
+        damage = HYLDStaticValue.Players[Id].bulletDamage;
+        blood = HYLDStaticValue.Players[Id].playerBloodMax;
         HYLDStaticValue.Players[Id].body.transform.Find("Capsule").transform.localScale += new Vector3(0.4f, 0.4f, 0.4f);
-        HYLDStaticValue.Players[Id].hero.bulletDamage += (int)(HYLDStaticValue.Players[Id].hero.bulletDamage * 0.3);
-        HYLDStaticValue.Players[Id].hero.BloodValue += (int)(HYLDStaticValue.Players[Id].hero.BloodValue * 0.3);
+        HYLDStaticValue.Players[Id].bulletDamage += (int)(HYLDStaticValue.Players[Id].bulletDamage * 0.3);
+        HYLDStaticValue.Players[Id].playerBloodMax += (int)(HYLDStaticValue.Players[Id].playerBloodMax * 0.3);
         HYLDStaticValue.Players[Id].移动速度 += 1;
         Invoke("Recover", 5);
         
@@ -60,8 +64,8 @@ public class HYLDModenProp : MonoBehaviour
         
         //sLogging.HYLDDebug.LogError(2);
         HYLDStaticValue.Players[Id].body.transform.Find("Capsule").transform.localScale -= new Vector3(0.3f, 0.3f, 0.3f);
-        HYLDStaticValue.Players[Id].hero.bulletDamage =damage;
-        HYLDStaticValue.Players[Id].hero.BloodValue = blood;
+        HYLDStaticValue.Players[Id].bulletDamage = damage;
+        HYLDStaticValue.Players[Id].playerBloodMax = blood;
         HYLDStaticValue.Players[Id].移动速度 -= 1;
     }
 }

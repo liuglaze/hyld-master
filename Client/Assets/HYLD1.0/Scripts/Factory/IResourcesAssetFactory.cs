@@ -1,4 +1,4 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -153,7 +153,7 @@ public class ResourcesAssetFactory : IResourcesAssetFactory
         UnityEngine.Object o = Resources.Load(path);
         if (o == null)
         {
-            Logging.HYLDDebug.LogError("ÎŞ·¨¼ÓÔØ×ÊÔ´£¬Â·¾¶:" + path); return null;
+            Logging.HYLDDebug.LogError("æ— æ³•åŠ è½½èµ„æºï¼Œè·¯å¾„:" + path); return null;
         }
         return UnityEngine.GameObject.Instantiate(o) as GameObject;
     }
@@ -162,7 +162,7 @@ public class ResourcesAssetFactory : IResourcesAssetFactory
         UnityEngine.Object o = Resources.Load(path);
         if (o == null)
         {
-            Logging.HYLDDebug.LogError("ÎŞ·¨¼ÓÔØ×ÊÔ´£¬Â·¾¶:" + path); return null;
+            Logging.HYLDDebug.LogError("æ— æ³•åŠ è½½èµ„æºï¼Œè·¯å¾„:" + path); return null;
         }
         return o;
     }

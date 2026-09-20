@@ -5,10 +5,8 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using Server.Controller;
-using MySql.Data.MySqlClient;
 using Server.DAO;
 using SocketProto;
-using System.Reflection;
 using System.Linq; // 需要引用 Linq 用于快速复制列表
 
 namespace Server
@@ -52,6 +50,12 @@ namespace Server
             myThread1.Start();
 
             Logging.Debug.Log("启动监听{0}成功", Logging.Debug.LogSeverity.Info, _socket.LocalEndPoint.ToString());
+
+            // 把「服务端实际支持哪些上行入口」固化到启动日志，便于跟客户端协议清单核对。
+            _controllerManger.LogRegisteredHandlers();
+
+            // R3-B：按配置启用新链（默认关闭 = opt-in）。只在显式启用时才注册 PMR3 声明并拉起宿主。
+            InitializeDedicatedServerLobby();
         }
 
         // --- 以下所有涉及集合的操作都加了锁 ---
@@ -77,6 +81,37 @@ namespace Server
                     _activeClient.Add(id, client);
                 }
             }
+        }
+
+        /// <summary>
+        /// 把该连接登记为活跃玩家。幂等。
+        ///
+        /// 与 AddActiveClient 的区别：若同一 uid 已存在**另一条**连接，先移除旧连接再登记，
+        /// 保证 _activeClient 里不会留下已被顶替的断线连接。
+        ///
+        /// 计划 B4：把原来散在 FindPlayerInfo 里的登记动作提取出来，
+        /// 使 Login 与 FindPlayerInfo 都能调用同一套逻辑。
+        /// </summary>
+        public void RegisterActiveClient(Client client)
+        {
+            if (client == null)
+            {
+                return;
+            }
+
+            lock (_lock)
+            {
+                Client existing;
+                if (_activeClient.TryGetValue(client.UID, out existing) && !ReferenceEquals(existing, client))
+                {
+                    _activeClient.Remove(client.UID);
+                    Logging.Debug.Log($"[ACTIVE-REPLACE] id={client.UID} 旧连接被新连接顶替");
+                }
+
+                _activeClient[client.UID] = client;
+            }
+
+            Logging.Debug.Log($"[ACTIVE-ADD] id={client.UID} 玩家{client.PlayerName} 加入活跃字典");
         }
 
         public void RemoveActiveClient(Client client)
@@ -229,6 +264,180 @@ namespace Server
                 }
             }
         }
+        #endregion
+
+        #region R3-B：新链（专用服务器）宿主
+
+        /// <summary>
+        /// R3-B 宿主初始化（仅启用配置时）。
+        ///
+        /// 关键口径：
+        /// - <c>HYLD_PMNET_DS</c> 缺省不开新链（opt-in）；一旦置位，<b>即使配置不全</b>也保留
+        ///   <see cref="PMNet.Control.PMDsLobbyHost.NewChainEnabled"/> = true，
+        ///   让匹配层 **显式失败** 而不是悄悄回退旧链（契约 §7「选新链后失败只能报失败」）；
+        /// - 协议摘要从 Unity 组产出的 <c>PMR3Runtime</c> 取，**不接受客户端提供的 hash**；
+        /// - R4-C / C3：**碰撞摘要不再固定为诊断保留值**，而是从正式内容 manifest
+        ///   （<c>Client/Assets/Resources/PMNet/BattleContentV1.json</c>，或
+        ///   <c>HYLD_PMNET_CONTENT_MANIFEST</c> 指定的绝对路径）读取并强校验后取
+        ///   <c>collisionDigest</c>；manifest 缺失/非法 => **拒绝拉局**，不回落诊断内容；
+        /// - 部署路径/端口范围全部来自配置/环境变量，本方法**不猜**任何用户目录。
+        /// </summary>
+        private void InitializeDedicatedServerLobby()
+        {
+            PMNet.Control.PMDsLobbyHostOptions options = PMNet.Control.PMDsLobbyHostOptions.FromEnvironment();
+
+            // 启用位先落地：它决定匹配入口走哪条链，与「宿主是否真的起来」无关。
+            PMNet.Control.PMDsLobbyHost.NewChainEnabled = options.Enabled;
+
+            if (!options.Enabled)
+            {
+                Logging.Debug.Log("[PMDsLobby] 新链未启用（HYLD_PMNET_DS != 1）：保持旧匹配/旧战斗链路");
+                return;
+            }
+
+            if (!options.IsLaunchConfigured)
+            {
+                Logging.Debug.Log("[PMDsLobby] HYLD_PMNET_DS=1 但启动配置不完整（需要 HYLD_PMNET_DS_EXE / "
+                    + "HYLD_PMNET_DS_WORKDIR / HYLD_PMNET_DS_BOOTSTRAP_DIR / 合法端口范围）；"
+                    + "新链不会拉起任何一局（匹配将显式失败，不回退旧链）");
+                return;
+            }
+
+            // 声明产物（Unity 组）注册：hash 是内部真值，不来自业务包。
+            PMNet.R3.PMR3Runtime.Register();
+            options.ProtocolHash = PMNet.R3.PMR3Runtime.ProtocolHash;
+
+            // R4-C / C3：碰撞摘要来自**正式内容 manifest**（不再固定诊断保留值 0x52334201）。
+            //
+            // 失败即 "拒绝拉局"：这里直接 return，而 NewChainEnabled 仍为 true（上面已置位），
+            // 因此匹配入口会显式失败而不是静默回落旧链/诊断内容。
+            // 0 与保留诊断值都在 PMDsBattleContentConfig 里被拒绝（正式内容不得撞保留值）。
+            PMNet.Control.PMDsBattleContentInfo content;
+            string contentError;
+            if (!PMNet.Control.PMDsBattleContentConfig.TryLoad(out content, out contentError))
+            {
+                Logging.Debug.Log("[PMDsLobby] 正式内容 manifest 不可用，拒绝新链启动（不回退诊断摘要）：" + contentError);
+                return;
+            }
+
+            options.CollisionDigest = content.CollisionDigest;
+
+            PMNet.Control.PMDsProcessWhitelist whitelist = new PMNet.Control.PMDsProcessWhitelist();
+            whitelist.Add(options.DsExecutablePath);
+            PMNet.Control.PMDsSystemProcessLauncher launcher =
+                new PMNet.Control.PMDsSystemProcessLauncher(whitelist);
+
+            PMNet.Control.PMDsLobbyHost host = new PMNet.Control.PMDsLobbyHost(
+                options, PMNet.Control.PMDsSystemClock.Instance, launcher, new ServerLobbyClientGateway(this));
+            host.Log = delegate(string message)
+            {
+                Logging.Debug.Log(message);
+            };
+
+            string error;
+            if (!host.Start(out error))
+            {
+                Logging.Debug.Log("[PMDsLobby] 宿主启动失败（匹配将显式失败，不回退旧链）：" + error);
+                return;
+            }
+
+            PMNet.Control.PMDsLobbyHost.Instance = host;
+            Logging.Debug.Log("[PMDsLobby] 新链宿主已启动：control=127.0.0.1:" + host.ControlPort
+                + " protocolHash=0x" + options.ProtocolHash.ToString("X8")
+                + " collisionDigest=0x" + options.CollisionDigest.ToString("X8")
+                + " worldVersion=" + content.WorldVersion
+                + " contentDigest=" + content.ContentDigest
+                + " manifest=" + content.ManifestPath);
+        }
+
+        /// <summary>
+        /// Lobby 宿主 → 已认证客户端的**生产**网关。
+        ///
+        /// 契约 §7.1：入局信息走现有已认证 Lobby TCP 的 <c>StartEnterBattle</c>，
+        /// <c>MainPack.Str</c> = 前缀 + Base64(<c>PMDsEntryCodec.Encode(PMDsEntryOffer)</c>)。
+        /// 这里**不另写一套编码**：未就绪之前不得用替身充数（offer/完整 Str/票据均不入日志）。
+        /// </summary>
+        private sealed class ServerLobbyClientGateway : PMNet.Control.IPMDsLobbyClientGateway
+        {
+            private readonly Server _server;
+
+            public ServerLobbyClientGateway(Server server)
+            {
+                _server = server;
+            }
+
+            public bool IsClientAuthenticated(int uid)
+            {
+                Client client = _server.GetActiveClient(uid);
+                return client != null && !string.IsNullOrEmpty(client.UserName);
+            }
+
+            public bool TrySendEntryOffer(PMNet.Control.PMDsLobbyEntryNotice notice, out string error)
+            {
+                Client client = _server.GetActiveClient(notice.Identity.Uid);
+                if (client == null)
+                {
+                    error = "该 uid 当前没有活跃连接";
+                    return false;
+                }
+
+                PMNet.Session.PMDsEntryOffer offer = new PMNet.Session.PMDsEntryOffer();
+                offer.MatchId = notice.MatchId;
+                offer.DsId = notice.DsId;
+                offer.Host = notice.Host;
+                offer.Epoch = notice.Epoch;
+                offer.ProtocolHash = notice.ProtocolHash;
+                offer.CollisionDigest = notice.CollisionDigest;
+                offer.Port = notice.Port;
+                offer.Identity = notice.Identity;
+                offer.Ticket = notice.Ticket;
+
+                string text;
+                try
+                {
+                    text = PMNet.Session.PMDsEntryCodec.Encode(offer);
+                }
+                catch (Exception ex)
+                {
+                    // 错误信息不得携带 offer / 票据字节。
+                    error = "入局信息编码失败：" + ex.GetType().Name;
+                    return false;
+                }
+
+                MainPack pack = new MainPack();
+                pack.Requestcode = RequestCode.Matching;
+                pack.Returncode = ReturnCode.Succeed;
+                pack.Actioncode = ActionCode.StartEnterBattle;
+                pack.Str = text;
+                client.Send(pack);
+
+                // 只记公开对账字段，不记 offer / 完整 Str / 票据。
+                Logging.Debug.Log("[PMDsLobby] 入局通知已发送 uid=" + notice.Identity.Uid
+                    + " match=" + notice.MatchId + " ds=" + notice.DsId
+                    + " port=" + notice.Port + " epoch=" + notice.Epoch);
+                error = null;
+                return true;
+            }
+
+            public void NotifyMatchEnded(PMNet.Control.PMDsLobbyResultNotice notice)
+            {
+                // 契约 §7.3 / 任务口径：优先只记录公开 event；**不伪造 BattleReview 帧历史**（回放属 R6）。
+                Logging.Debug.Log("[PMDsLobby] 对局结果已受理 match=" + notice.MatchId
+                    + " resultId=" + notice.ResultId + " winner=" + notice.WinnerTeamId
+                    + " summaryBytes=" + (notice.Summary == null ? 0 : notice.Summary.Length)
+                    + "（不发送 BattleReview）");
+            }
+
+            public void RestorePlayerOnline(int uid)
+            {
+                Client client = _server.GetActiveClient(uid);
+                if (client != null)
+                {
+                    client.PlayerState = PlayerState.PlayerOnline;
+                }
+            }
+        }
+
         #endregion
     }
 }

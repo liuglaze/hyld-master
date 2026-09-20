@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-A / P4A3 门禁：Mover 纯模型的**真实实现**行为验证（手算 oracle）。
+
+      为什么需要它：
+        "模式/碰撞/层/效果/回滚可恢复"这些性质的失败形态都不是编译错误，而是
+        "玩起来有点不对"：多叠了一层的速度、落地后竖直速度没清零、墙里穿过去半个身位、
+        reconcile 没发现模式不同、插值把 350°→10° 走了 340°。
+        这些只能用"独立算出的期望值"逐项比对，不能用实现自身当预期。
+
+      做法：
+        · 直接编**真实源码**（PMMover/** + 只读 Contracts + Identity），不引 DLL、不 mock 模型；
+        · 碰撞用真实的 PMMoverTestWorld（确定性地板 + 墙），因此滑动/落地走的是真几何；
+        · 期望值在 Program.cs 里**独立手算**（常量算术 + 显式推导注释），
+          不调用被验证的实现来产生预期。
+
+      边界（诚实口径）：
+        · 本工程不引 UnityEngine，因此**不**验证 Unity 物理等价性（PENDING_USER）；
+        · 不依赖并行预测组的 timeline/buffer（本批与它们的接口只有只读 Contracts）。
+
+      运行：dotnet Tools/PMMoverTest/bin/Release/net8.0/PMMoverTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMMoverTest</AssemblyName>
+    <RootNamespace>PMMoverTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实 Mover 源码（含确定性碰撞替身），与 PMMoverCoreCheck 编的是同一份文件。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+
+    <!-- 只读共享契约与身份面（**逐文件**，不拉并行预测组的实现）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\PMPredictionContracts.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

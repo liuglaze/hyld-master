@@ -331,18 +331,14 @@ public class shell : MonoBehaviour
         if (HYLDStaticValue.Players[targetPlayerId].teamID == HYLDStaticValue.Players[bulletOnwerID].teamID)
             return;
 
-        if (HYLDStaticValue.Players[targetPlayerId].是否有防护罩)
-        {
-            Die();
-            return;
-        }
+        // P3'-3c：原本这里先查「是否有防护罩」（命中则 Die 返回），再处理 Poison 标志。
+        // 两者均已删除 —— 这条 OnTrigger_Player 整条在联机下不可达（视觉子弹碰撞体被禁用，
+        // shell.cs:129-139），且对应的机制在客户端侧也已移除：
+        //   · 护盾：服务端不实现，`是否有防护罩` 字段已随机制删除；
+        //   · 毒：消费方（PlayerLogic 的毒 tick）已删除，再置 `isPoisoning` 无人读。
+        // 注意 HeiYa 图标在 prefab 里默认就是未激活（m_IsActive: 0），不需要额外隐藏。
 
         // ── 特殊效果（标志位驱动） ──
-        if (Has(BulletBehavior.Poison))
-        {
-            HYLDStaticValue.Players[targetPlayerId].body.transform.Find("Canvas").Find("HeiYa").gameObject.SetActive(true);
-            HYLDStaticValue.Players[targetPlayerId].isPoisoning = true;
-        }
         if (Has(BulletBehavior.BeeCharge))
         {
             ApplyBeeCharge();
@@ -350,6 +346,15 @@ public class shell : MonoBehaviour
 
         // ── 扣血 + 充能 ──
         HYLDStaticValue.Players[bulletOnwerID].当前能量 += bulletDamage / 2f;
+        // ── 伤害 + 充能（P3'-3c：整块属**单机**路径，联机不可达，已标注未改动） ──
+        //
+        // 下面两行都在**客户端直接改写权威字段**（当前能量 / playerBloodValue），
+        // 与 P3'-3c 处理的病灶同类。之所以本次不动它们：
+        //   · 本方法（OnTrigger_Player）在联机下不可达 —— 联机视觉子弹的碰撞体被全部禁用
+        //     （shell.cs:129-139），OnTriggerEnter 永不触发；
+        //   · 加上这一处后，残留的权威字段写入点便全部收敛在「联机不可达」的单机回调里，
+        //     权威路径（BattleData.HitEvent.cs）是唯一在联机下生效的 playerBloodValue 写入者。
+        // 若将来要彻底删掉单机层，这里是候选；但本次范围是消除**联机下**的双权威源。
         HYLDStaticValue.Players[targetPlayerId].playerBloodValue -= bulletDamage;
 
         // ── 穿透判定 ──
@@ -382,11 +387,11 @@ public class shell : MonoBehaviour
             }
         }
 
-        // ── 减速 ──
-        if (Has(BulletBehavior.Slow))
-        {
-            other.transform.parent.GetComponent<PlayerLogic>().减速(slowDuration);
-        }
+        // ── 减速（P3'-3c 已删除） ──
+        // 原本这里调 `PlayerLogic.减速(slowDuration)`，它改写的是客户端预测用的
+        // `Players[].移动速度`，服务端并不知道（服务端移速来自配置表）→ 只会造成预测分歧。
+        // 该方法已随机制删除。与本块相邻的慢速表现由 BulletBehavior.Slow 的其它分支负责，
+        // 本块本身在联机下不可达。
     }
 
     // ── Text 目标碰撞（单机模式） ──

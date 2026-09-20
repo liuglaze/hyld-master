@@ -1,7 +1,7 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 
-//Íâ¹ÛÄ£Ê½ ÖĞ½éÕß
+//å¤–è§‚æ¨¡å¼ ä¸­ä»‹è€…
 public class ZYKGameFacade :LZJSingleModen<ZYKGameFacade>
 {
     private bool misGameOver = false;

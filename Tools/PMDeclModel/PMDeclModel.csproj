@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R2 声明模型的**冻结接口**（供生成器与校验工具共用）。
+
+      为什么单独一个工程：
+        生成器（Tools/PMNetGen）与声明校验/ID 门禁（Tools/PMNetCheck）都要消费同一份
+        中间表示。把 IR 复制两份必然长期分叉，而分叉的表现是"生成物与校验结论不一致"。
+
+      为什么 IR 放在工具侧、而描述符放在运行时侧：
+        - IR 里带 `string`、`List<>`、命名空间与文件位置，是**只给生成期看的**；
+        - 运行时只需要紧凑的静态表（PMPropertyDescriptor / PMRpcDescriptor）。
+        两者用途不同，硬合并会把生成期的负担带进运行时。
+
+      零 NuGet 依赖、netstandard2.0：与其它 Tools/ 工程一致，便于离线构建。
+      语言面用 C# 7.3，与 Unity 侧一致 —— 这份 IR 将来若需要被 Unity 编辑器插件引用，
+      不需要再降级。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMDeclModel</AssemblyName>
+    <RootNamespace>PMNet.Codegen</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="PMDeclModel.cs" />
+    <Compile Include="PMIdLock.cs" />
+
+    <!--
+      运行时侧的 PMNet 核心直接链接进来，不抄枚举、不抄哈希实现。
+      理由：生成器与运行期必须算出**同一个** ID / 协议摘要；
+      抄一份出来迟早会因为一个 unchecked 或一处编码差异分叉，
+      而分叉的表现是"线协议静默不兼容"，排查代价极高。
+
+      排除 Generated/：那是 protobuf DTO 产物，与声明模型无关，且会引入
+      Google.Protobuf 依赖。PMNet 核心（除 Generated 外）实测零 Unity 依赖 ——
+      三处 UnityEngine 字样全在注释里（见 PMNetLaunchOptions.cs:29 等）。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs"
+             Exclude="..\..\Client\Assets\Scripts\PMNet\Generated\**\*.cs"
+             LinkBase="PMNetCore" />
+  </ItemGroup>
+
+</Project>

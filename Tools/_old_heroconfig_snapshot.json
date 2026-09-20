@@ -1,0 +1,312 @@
+{
+ "defaults": {
+  "DefaultAttackManaCost": 30,
+  "ManaMax": 90,
+  "ManaPerSegment": 30,
+  "SuperEnergyMax": 200
+ },
+ "hp": {
+  "Abo": 1060,
+  "BaLi": 840,
+  "BaoPoMaiKe": 1060,
+  "BeiYa": 900,
+  "BuLuoKe": 1120,
+  "DaLiEr": 960,
+  "DiKe": 1120,
+  "GeEr": 900,
+  "GongNiu": 1400,
+  "HeiYa": 900,
+  "KeErTe": 1180,
+  "LiAng": 840,
+  "MaiKeSi": 1060,
+  "PaMu": 1340,
+  "PanNi": 1010,
+  "PeiPei": 840,
+  "RuiKe": 840,
+  "SiPaiKe": 840,
+  "TaLa": 1120,
+  "XueLi": 960
+ },
+ "moveSpeedFromClient": {
+  "ABo": 3.9,
+  "BaLi": 3.9,
+  "BaoPoMaiKe": 3.9,
+  "BeiYa": 3.9,
+  "BuLuoKe": 3.9,
+  "DaLiEr": 3.9,
+  "DiKe": 3.9,
+  "GeEr": 3.9,
+  "GongNiu": 3.9,
+  "HeiYa": 4.2,
+  "KeErTe": 4.05,
+  "LiAng": 3.96,
+  "MaiKeSi": 4.08,
+  "PaMu": 3.78,
+  "PanNi": 3.9,
+  "PeiPei": 3.9,
+  "RuiKe": 3.9,
+  "SiPaiKe": 3.9,
+  "TaLa": 3.9,
+  "XueLi": 3.9
+ },
+ "normal": {
+  "Abo": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 6.0,
+   "BulletSpeed": 10.0,
+   "Damage": 520.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 15.0
+  },
+  "BaLi": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 5.0,
+   "BulletSpeed": 5.0,
+   "Damage": 816.0,
+   "HitRadius": 0.8,
+   "IsParabola": true,
+   "SpreadAngle": 0.0
+  },
+  "BaoPoMaiKe": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 5.0,
+   "BulletSpeed": 5.0,
+   "Damage": 840.0,
+   "HitRadius": 0.8,
+   "IsParabola": true,
+   "SpreadAngle": 20.0
+  },
+  "BeiYa": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 10.0,
+   "BulletSpeed": 10.0,
+   "Damage": 800.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "BuLuoKe": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 10.0,
+   "BulletSpeed": 10.0,
+   "Damage": 1155.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "DaLiEr": {
+   "BulletCount": 15.0,
+   "BulletMaxDist": 6.0,
+   "BulletSpeed": 16.0,
+   "Damage": 90.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 45.0
+  },
+  "DiKe": {
+   "BulletCount": 4.0,
+   "BulletMaxDist": 5.0,
+   "BulletSpeed": 5.0,
+   "Damage": 680.0,
+   "HitRadius": 0.8,
+   "IsParabola": true,
+   "SpreadAngle": 20.0
+  },
+  "GeEr": {
+   "BulletCount": 6.0,
+   "BulletMaxDist": 7.0,
+   "BulletSpeed": 11.0,
+   "Damage": 448.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "GongNiu": {
+   "BulletCount": 10.0,
+   "BulletMaxDist": 4.0,
+   "BulletSpeed": 8.0,
+   "Damage": 45.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 40.0
+  },
+  "HeiYa": {
+   "BulletCount": 3.0,
+   "BulletMaxDist": 7.0,
+   "BulletSpeed": 12.0,
+   "Damage": 320.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 30.0
+  },
+  "KeErTe": {
+   "BulletCount": 2.0,
+   "BulletMaxDist": 8.0,
+   "BulletSpeed": 12.0,
+   "Damage": 340.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "LiAng": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 7.0,
+   "BulletSpeed": 11.0,
+   "Damage": 680.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 10.0
+  },
+  "MaiKeSi": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 7.0,
+   "BulletSpeed": 14.0,
+   "Damage": 320.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 10.0
+  },
+  "PaMu": {
+   "BulletCount": 2.0,
+   "BulletMaxDist": 9.0,
+   "BulletSpeed": 14.0,
+   "Damage": 260.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 50.0
+  },
+  "PanNi": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 6.0,
+   "BulletSpeed": 11.0,
+   "Damage": 400.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "PeiPei": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 11.0,
+   "BulletSpeed": 12.0,
+   "Damage": 650.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "RuiKe": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 10.0,
+   "BulletSpeed": 13.0,
+   "Damage": 400.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "SiPaiKe": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 10.0,
+   "BulletSpeed": 10.0,
+   "Damage": 0.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "TaLa": {
+   "BulletCount": 3.0,
+   "BulletMaxDist": 7.0,
+   "BulletSpeed": 10.0,
+   "Damage": 460.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 45.0
+  },
+  "XueLi": {
+   "BulletCount": 5.0,
+   "BulletMaxDist": 6.0,
+   "BulletSpeed": 11.0,
+   "Damage": 80.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 30.0
+  }
+ },
+ "reload": {
+  "Abo": 1.0,
+  "BaLi": 1.0,
+  "BaoPoMaiKe": 1.0,
+  "BeiYa": 9.0,
+  "BuLuoKe": 1.0,
+  "DaLiEr": 2.0,
+  "DiKe": 1.0,
+  "GeEr": 1.0,
+  "GongNiu": 1.0,
+  "HeiYa": 2.0,
+  "KeErTe": 1.0,
+  "LiAng": 1.0,
+  "MaiKeSi": 2.0,
+  "PaMu": 1.0,
+  "PanNi": 1.0,
+  "PeiPei": 1.0,
+  "RuiKe": 1.0,
+  "SiPaiKe": 1.0,
+  "TaLa": 1.0,
+  "XueLi": 1.0
+ },
+ "super": {
+  "BeiYa": {
+   "BulletCount": 6.0,
+   "BulletMaxDist": 10.0,
+   "BulletSpeed": 10.0,
+   "Damage": 60.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "GeEr": {
+   "BulletCount": 4.0,
+   "BulletMaxDist": 7.0,
+   "BulletSpeed": 14.0,
+   "Damage": 448.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "KeErTe": {
+   "BulletCount": 12.0,
+   "BulletMaxDist": 12.0,
+   "BulletSpeed": 18.0,
+   "Damage": 340.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "PaMu": {
+   "BulletCount": 1.0,
+   "BulletMaxDist": 2.0,
+   "BulletSpeed": 5.0,
+   "Damage": 300.0,
+   "HitRadius": 0.8,
+   "IsParabola": true,
+   "SpreadAngle": 0.0
+  },
+  "RuiKe": {
+   "BulletCount": 12.0,
+   "BulletMaxDist": 14.0,
+   "BulletSpeed": 19.0,
+   "Damage": 400.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 0.0
+  },
+  "XueLi": {
+   "BulletCount": 40.0,
+   "BulletMaxDist": 6.0,
+   "BulletSpeed": 14.0,
+   "Damage": 80.0,
+   "HitRadius": 0.8,
+   "IsParabola": false,
+   "SpreadAngle": 40.0
+  }
+ }
+}

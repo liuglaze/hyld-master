@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      大厅服务端冒烟测试（不依赖 Unity，也不依赖数据库）。
+
+      为什么需要它：
+      1) 迁移计划的 T6b「18 个大厅入口逐条运行回归」此前一直标记为 PENDING_USER，
+         原因是「本机缺 MySQL + 缺 Unity 运行环境」。数据库移除后，前半条障碍消失，
+         这个工具让大厅链路可以在命令行被真实回归。
+      2) 客户端改动的验证此前必须开 Unity；服务端侧的改动则可以在这里快速验证。
+
+      它做什么：以真实 TCP 客户端身份连接服务端（默认 127.0.0.1:7778），
+      按 `[int32 小端长度][protobuf MainPack]` 的分帧发送请求并校验回包。
+
+      ⚠ 它验证什么、不验证什么：
+      验证：服务端能启动、RPC 分发表可达、用户库（内存）行为正确、request_id 被回带。
+      不验证：客户端 UI 行为、战斗链路（UDP）、房间/匹配的完整时序。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMServerSmokeTest</AssemblyName>
+    <RootNamespace>PMServerSmokeTest</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 直接编译服务端那份生成产物，保证与服务端用的是同一套协议定义 -->
+    <Compile Include="..\..\Server\Server\SocketProto.cs" LinkBase="SocketProto" />
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Server\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

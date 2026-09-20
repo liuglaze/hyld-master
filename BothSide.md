@@ -1,4 +1,4 @@
-# BothSide.md — 两端协议与同步语义记录
+﻿# BothSide.md — 两端协议与同步语义记录
 
 > 记录客户端与服务端之间需要双方对齐的协议字段、同步语义、约定变更。
 
@@ -475,3 +475,166 @@
   - BattleStart 后到首个权威帧到达前，服务端不应期待该客户端已经发送 `ClientMove`。
   - 若网络长时间丢下行权威帧，客户端上行移动会停止增长；新权威帧恢复后才继续上报连续 ClientMoveFrame。
   - 正常情况下服务端日志中的 `[ClientMove][ACCEPT] deltaReceived=` 不应在开局出现几十帧级别的首段 backlog。
+
+---
+
+## 29. HyldDS 的启动与身份判定契约（P2'，2026-09）
+
+> 本节记录「Lobby 如何拉起一个 HyldDS」以及「DS 如何确认自己是 DS」。
+> 这是跨端约定：Lobby（P4'）负责组装命令行，Unity 侧负责解析。
+
+### 29.1 形态变化
+
+- **原形态**：战斗权威在一个独立的 C# 服务端进程里，与大厅同一进程（`Server/Server/Battle.cs` 等）。
+- **目标形态**：战斗权威由 **HyldDS** 承担，而 **HyldDS 就是 Unity 工程打出来的包**，
+  每局拉起一个进程、打完销毁（决策 D6-D9，见 `Docs/plans/net-architecture-migration.md`）。
+- **协议层不受本节影响**：P2' 不改任何 proto 字段。战斗收发的线格式仍是 `MainPack`
+  （P5' 才切换到 PMNet 属性复制）。
+
+### 29.2 身份判定（为什么必须是运行时的）
+
+- Unity 2019.4 **没有** Windows 的 Dedicated Server 构建目标，**没有** `UNITY_SERVER` 宏。
+  因此客户端与 DS 的**业务代码**是同一份，无法用编译期宏区分「我是服务端还是客户端」，
+  身份只能由自定义参数 `-server` 在运行时标明。
+
+- ⚠ **更正（2026-09 实测）**：本文早期写法称「`BuildOptions.EnableHeadlessMode` 在 2019.4 仅对 Linux 生效」，
+  **这个说法不成立**。实测在本工程（Unity 2019.4.8f1 + Windows Standalone）下：
+
+  - 构建：`BuildOptions.EnableHeadlessMode` 可正常构建成功；
+  - 运行：日志首行即为 `Forcing GfxDevice: Null` + `NullGfxDevice: Version: NULL 1.0`，
+    即**编译期就选定了空图形设备**。
+
+  所以：**图形设备的无头化在构建期解决**；运行时 `-server` 只负责**身份**。
+  `-batchmode` / `-nographics` 因此变成冗余但无害（保留以兼容回退路径），
+  但 `-batchmode` 仍有意义：它让进程不期望交互控制台。
+
+- 判定入口：`PMNet.PMNetRuntime`（解析结果来自 `PMNetLaunchOptions`）。
+- **默认取向：不带 `-server` 就是客户端。** 解析失败、未初始化等异常路径一律退回客户端行为。
+- 推论：客户端构建产物加 `-server` 启动，同样会进入 DS 模式。
+- 实测开销（供 Lobby 侧评估按局拉起是否可接受）：启动 **740 ms**、常驻内存 **~61 MB**。
+
+### 29.3 命令行契约（Lobby → DS）
+
+Lobby 拉起 DS 时应按下表组装命令行：
+
+| 参数 | 必需 | 说明 |
+|---|---|---|
+| `-server` | ✅ | 身份标识。缺省即客户端。 |
+| `-batchmode` | 可选 | Unity 内建：无窗口、非交互。**图形无头化已在构建期完成**（见 29.2），此参数主要保证进程不期望交互控制台。 |
+| `-nographics` | 建议 | Unity 内建：不初始化图形设备。 |
+| `-dsid <id>` | 建议 | DS 实例标识（日志与对账用）。 |
+| `-matchid <id>` | 建议 | 对局标识。 |
+| `-listen <ip>` | 可选 | 默认 `0.0.0.0`。 |
+| `-port <n>` | **必需** | 战斗监听端口。**每局必须不同**：现有客户端把战斗 UDP 端口硬编码为 7777（`ConstValue.cs` 的 `NetConfigValue.ServiceUDPPort`），同机多局会互相抢占。 |
+| `-lobby <host:port>` | 建议 | Lobby 地址，供 DS 反向注册（P4' 接入）。 |
+| `-tickrate <hz>` | 可选 | 逻辑帧率，默认 30。 |
+| `-logFile <path>` | 可选 | `-` 表示输出到 stdout；DS 的日志目录由它推导。 |
+
+参考启动行（`PMDsBuild` 会自动生成 `run_ds.bat` 模板）：
+
+```
+HyldDS.exe -batchmode -nographics -server ^
+  -dsid ds-001 -matchid match-777 ^
+  -listen 0.0.0.0 -port 7801 ^
+  -lobby 10.0.0.5:7778 ^
+  -tickrate 30 ^
+  -logFile D:/HyldDS/logs/ds_001.log
+```
+
+解析规则（已由 `Tools/PMNetLaunchCheck` 的 94 项检查固化）：
+
+- 支持 `-k v` 与 `-k=v` 两种写法；参数名**大小写不敏感**。
+- 同名参数重复出现时**以最后一次为准**。
+- **非法取值不抛异常**：保留默认值并记入警告（启动期应「起来 + 报错」，而不是异常退出）。
+- 单独的 `-` 会被当作**值**而不是开关（Unity 的 `-logFile -` 表示输出到 stdout）。
+- 以 `-` 开头的取值不会被当作值消费，因此负数需写成内联形式（如 `-port=-1`，但会被范围校验拒绝）。
+- 未识别的参数一律忽略，但完整保留在 `RawArgs` 中。
+
+### 29.4 就绪与健康（P2' 现状）
+
+- DS 起进程后绑定 `-listen`:`-port`，并在日志中输出就绪块（含实际绑定端口与本机 IPv4）。
+- 每 5 秒输出一次心跳：`tick=` / `recv=` / `sent=` / `recvErr=` / `remotes=`。
+- **P2' 阶段收发是连通性占位**：收到任何数据报都回一个固定内容 `PMDS-PONG`。
+  真实战斗协议会在 P3' 由从 `Server/ClientUdp.cs` 迁移过来的 UDP 层取代。
+- **尚未实现（P4'）**：DS 向 Lobby 的注册上报（`ip:port` + `dsid` + `matchid`）与 Lobby 侧的分配/对账。
+  当前 `-lobby` 只被解析与记录，未真正连接。
+
+### 29.5 对客户端的影响
+
+- 客户端侧新增 `PMNetBootstrap` 启动探针与 `HYLDManger` 三处 DS 守卫（`Awake` / `Update` / `Send`）。
+- 三处守卫均以 `PMNetRuntime.IsDedicatedServer` 为门；**客户端上该值恒为 false，路径逐字不变**。
+- 客户端构建方式与输出产物均**不变**。
+
+---
+
+## 30. 服务端账号改为内存库（无数据库，2026-09）
+
+> 本节记录**客户端可感知**的部分。服务端内部的存储实现变更（MySQL -> 内存）不影响协议。
+
+### 30.1 协议未变
+
+- `MainPack` / `LoginPack` / `RequestCode` / `ActionCode` 全部未改。
+- 客户端**无需任何改动**即可继续使用登录、注册、好友、房间、匹配。
+
+### 30.2 行为变化（客户端可感知）
+
+| 项 | 原行为 | 现行为 |
+|---|---|---|
+| 账号不存在时 `Login` | 返回 `Fail`（必须先 `Logon` 注册） | **自动建号并返回 `Succeed`** |
+| 账号存在但密码错误 | `Fail` | `Fail`（未变，密码校验保留） |
+| 新账号的昵称 | 空串（需改名） | **默认取账号名** |
+| 账号/好友数据 | MySQL 持久化 | 服务端内存，**进程重启即清空** |
+
+### 30.3 两条既有约束（客户端必须遵守，未变）
+
+1. **一条 TCP 连接只能登录一次**：`UserController.Login` 开头判 `client.UserName != null` 即 `Fail`。
+   客户端重登必须重连，不能在原连接上再发一次 `Login`。
+2. **同一账号同时只能有一条活跃连接**（防顶号）：登录成功会登记活跃连接，
+   同账号的第二条连接会被拒。
+
+   ⚠ 已知副作用：客户端崩溃后**立即**用同账号重连，可能在服务端 Ping 超时清理掉旧连接之前被拒。
+   需要的活可在 P4'（局域程序改造）阶段一并处理。
+
+### 30.4 对回归的影响
+
+- 大厅行为现在可以**不开 Unity、不装数据库**地自动回归：
+  `Tools/PMServerSmokeTest`（10 场景 / 17 项检查）。
+  UI 交互路径仍需在 Unity 里人工确认。
+
+
+## PMNet R2 独立审查返工（新链，尚未接入真实业务宿主）
+
+生命周期消息格式由1升到2，Create新增声明式初值载荷；两端须使用同版实现。初值按连接过滤并在创建回调前生效，Never/非Owner的OwnerOnly不可泄露。更新掩码支持256属性、32字节，畸形记录不得被ACK。
+RPC按(ClassId,RpcId)查找；数组实参在调用点快照，未接线队列满时显式失败而不淘汰旧可靠调用。宿主接收需统一经过PMNetRpcReceive.Deliver，连接实现IPMNetRpcDisconnectTarget以兑现原生Validate失败断连。ForceValidate Reject不要求断连。
+本轮为生成代码与内存投递验收，真实UDP、握手和Unity验证仍在后续阶段。完整状态及限制见Docs/plans/net-architecture-migration.md文末RV1–RV7。
+
+
+## PMNet R3-A 控制与会话接线基础
+
+新增Control：版本1控制帧（4字节LE长度、最大64KiB）、HMAC-SHA256每局控制密钥、绑定对局/世代/摘要/名册的短时票据。新增Session：已认证连接激活、协议摘要核对、应用信封与顺序域映射；可靠RPC/Create/Destroy同流，属性更新及版本ACK走复制域。DS拒绝客户端Replication Update，客户端拒绝DS发来的复制ACK。
+消息含应用头总长上限65535并受分片容量约束，超限显式失败；单帧发送预算由两次Update共享。ResultCommitted只表示Lobby本地受理，退出资源回收以进程实际退出为准。
+本轮未接旧匹配与PMDsHost，真实UDP票据端点绑定、Unity场景就绪、客户端切服属于R3-B；T42尚未通过。状态见主计划R3表。
+
+
+## PMNet R3-B 入局与真实回环接线
+
+新链开关HYLD_PMNET_DS=1；需要配置DS exe/workdir/bootstrap目录及控制端口/UDP端口池。匹配只选一种权威，失败不回旧链。Lobby仅Ready后通过StartEnterBattle的Str发PMDS1:有界Base64控制offer（无JSON、禁止日志输出），客户端识别后进入PMClientSessionHost并关闭旧UDP，保留大厅TCP。带-bootstrap的DS只启动新PMDsSessionHost，不开旧诊断router。
+握手PMHS在Transport外验票并绑定真实端点后激活，票据消费键全SHA256；已激活会话不随入场票据120s过期退出。正常结果Ack后DS显式Exited(0)，Lobby确认实际进程退出后释放资源。默认1000ms ControlPing保活，纯ACK不再互相触发ACK。
+当前场景是固定floor/wall测试布局，PMR3生成Probe/Echo与属性用于基础验收，不是完整战斗玩法。真实TCP+UDP两客户端集成通过，真实Unity构建、场景与UI仍待T42。
+
+
+## DS控制活性修复（真实烟测后）
+
+DS Ready/Heartbeat现在有Lobby签名Heartbeat应答；DS每5s发送，Lobby最小1s应答节流。DS只由可信下行续命，首响应30s/运行期15s超时，避免正常长局30s误退出。2026-09-20 12:12构建已通过真实短闭环122项，但不含此修复，需重新打DS包。客户端真实UnityUI仍未验。
+
+
+## R4-A纯预测与Mover首批（尚未切换业务网络）
+
+新增PMPrediction/PMMover纯核心，Input帧n产出边界n+1，AP确认按Input域边界，DS权威帧独立。原始整毫秒dt首批1..50，历史128，输入预算8步/100ms+墙钟信用；单位Y-up米。已有四基础模式/效果/两种叠加与测试碰撞环境，尚未接Unity物理或改变旧战斗包。
+权威快照对Frozen/NeedsResync不生效，仅Resync恢复；不可逆事件必须有边界权威证据，缺失不拿预测值代替。网络编码和事件可靠补发留R4-B。最终状态见主计划P4A1–P4A4。
+
+
+## R4-B网络运动接线（真实Unity运行待验）
+
+PMR3Player新增声明式输入RPC、完整Sync/Aux快照属性、可靠事件/重同步RPC；协议摘要改变，Lobby/客户端/DS必须同版本。局内AP预测、DS主线程预算模拟、SP只插值。输入流重置代次隔离旧包；事件按可靠到达顺序与状态确认边界消费。上行不允许直接指定可信传送/速度/参数。
+两宿主使用独立PhysicsScene内同布局floor/wall、WorldVersion=1，出生墙外x±3。新链WASD/Space输入与简单胶囊表现已接；旧战斗切换仍由HYLD_PMNET_DS=1控制，本轮未执行R6全业务退役。验证入口为Play模式Tools/PMR4/验证 Unity 碰撞适配（真实 PhysX），后续重新Build HyldDS；net8回环门禁不代表PhysX运行通过。状态唯一源见Docs/plans/net-architecture-migration.md P4B1–P4B6。

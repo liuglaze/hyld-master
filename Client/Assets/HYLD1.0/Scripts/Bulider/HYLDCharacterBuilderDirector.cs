@@ -1,8 +1,8 @@
-/*
+ï»¿/*
  * * * * * * * * * * * * * * * * 
- * Author:        ÕÔÔªâı
- * CreatTime:  2020/11/16 13£º51 
- * Description:  ½ÇÉ«½¨ÔìÖ¸»ÓÕß
+ * Author:        èµµå…ƒæº
+ * CreatTime:  2020/11/16 13ï¼š51 
+ * Description:  è§’è‰²å»ºé€ æŒ‡æŒ¥è€…
  * * * * * * * * * * * * * * * * 
 */
 using System.Collections;
@@ -13,9 +13,9 @@ public class HYLDCharacterBuilderDirector
 {
     public static ICharacter Construct(HYLDCharacterBulider bulider)
     {
-        bulider.AddCharacterBaseAttribute();//Ìí¼ÓÊôĞÔ
-        bulider.AddGameObect();//Ìí¼ÓÓ¢ĞÛ
-        bulider.AddWeapon();//Ìí¼ÓÎäÆ÷
+        bulider.AddCharacterBaseAttribute();//æ·»åŠ å±æ€§
+        bulider.AddGameObect();//æ·»åŠ è‹±é›„
+        bulider.AddWeapon();//æ·»åŠ æ­¦å™¨
 
         return bulider.GetResult();
     }

@@ -1,4 +1,4 @@
-- ForServer.md
+﻿- ForServer.md
 
   > 面向服务端/联调同学的客户端协作文档（以当前联机主链路为准）。
 
@@ -229,3 +229,9 @@
   - 会话默认架构说明在：Assets/CLAUDE.md。
   - 本文件提供“服务端协作视角”的细化链路。
   - 若改动涉及两端协议/同步行为，请同步记录：D:/unity/hyld-master/hyld-master/BothSide.md。
+
+
+## R4-B网络运动接线（真实Unity运行待验）
+
+PMR3Player新增声明式输入RPC、完整Sync/Aux快照属性、可靠事件/重同步RPC；协议摘要改变，Lobby/客户端/DS必须同版本。局内AP预测、DS主线程预算模拟、SP只插值。输入流重置代次隔离旧包；事件按可靠到达顺序与状态确认边界消费。上行不允许直接指定可信传送/速度/参数。
+两宿主使用独立PhysicsScene内同布局floor/wall、WorldVersion=1，出生墙外x±3。新链WASD/Space输入与简单胶囊表现已接；旧战斗切换仍由HYLD_PMNET_DS=1控制，本轮未执行R6全业务退役。验证入口为Play模式Tools/PMR4/验证 Unity 碰撞适配（真实 PhysX），后续重新Build HyldDS；net8回环门禁不代表PhysX运行通过。状态唯一源见Docs/plans/net-architecture-migration.md P4B1–P4B6。

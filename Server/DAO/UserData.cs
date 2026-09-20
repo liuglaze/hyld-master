@@ -1,37 +1,30 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Text.RegularExpressions;
+using System;
 using Google.Protobuf.Collections;
-using MySql.Data.MySqlClient;
 using SocketProto;
+
 namespace Server.DAO
 {
-
-    /*
-    SELECT * FROM `friends`
-
-
-    查找lzj的所有好友信息
-    SELECT DISTINCT u.`name`,u.`id`
-    FROM `users` u
-    CROSS JOIN `friends` f
-    WHERE (f.`UserID`= 12 AND f.`FriendID`=u.`id`)OR(f.`FriendID`=12 AND u.`id`=f.`UserID`)
-
-    改名
-    UPDATE `users` SET `name` = '' WHERE `UserName` = 'lzj';
-
-    添加好友
-    INSERT INTO `friends` SET `UserID`= 12,`FriendID`=17; 
-
-    获取玩家名字
-    SELECT `name` FROM `users` WHERE `UserName` = 'LZJ'
-
-    //注册
-    INSERT INTO `users` SET `UserName` = 'llf',`Password`='jjy',`name`=''; 
-     */
-
-
+    /// <summary>
+    /// 单个连接的用户数据门面（每个 <see cref="Client"/> 持有一个实例）。
+    ///
+    /// 本类持有「这条连接当前是谁」的会话状态（UID / UserName / PlayerName / PlayerHero），
+    /// 而账号与好友的**共享数据**放在 <see cref="UserStore"/>（进程内内存库）。
+    ///
+    /// 历史沿革：原实现直接对 MySQL 执行 SQL。数据库已按需求移除（本工程不做账号持久化），
+    /// 因此这里全部改为读写 <see cref="UserStore"/>。各方法的语义与原 SQL 版逐条对齐，
+    /// 有意偏离之处都已在方法注释中标出。
+    ///
+    /// 与原实现的对照（原 SQL 保留在文件末尾注释里，便于回溯）：
+    ///   Logon           <- INSERT INTO users ...
+    ///   Login           <- SELECT * FROM users WHERE UserName=@u AND Password=@p
+    ///   FindPlayerInfo  <- SELECT name, id FROM users WHERE UserName=@u
+    ///   FindFriendsInfo <- SELECT u.name,u.id FROM users u JOIN friends f ON (...)
+    ///   UpdateName      <- UPDATE users SET name=@n WHERE UserName=@u
+    ///   AplyAddFriend   <- SELECT UserName FROM users WHERE id=@id
+    ///   AcceptAddFriend <- INSERT INTO friends SET UserID=@u, FriendID=@f
+    ///   RejectAddFriend <- 无 SQL，只通知对方
+    ///   BordCaseToFriendLogout <- 同 FindFriendsInfo 的查询
+    /// </summary>
     class UserData
     {
         public int UID
@@ -50,134 +43,101 @@ namespace Server.DAO
         {
             get; private set;
         }
+
         /// <summary>
-        /// 注册
+        /// 注册。
+        /// 对应原实现 `INSERT INTO users SET UserName=@u, Password=@p, name=''`，
+        /// 主键冲突（MySQL 1062）返回 false。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="mySqlConnection"></param>
-        /// <returns></returns>
-        public bool Logon(MainPack pack, MySqlConnection mySqlConnection)
+        public bool Logon(MainPack pack)
         {
-            //1.3将账号密码信息录入数据库
             string username = pack.Loginpack.Username;
             string password = pack.Loginpack.Password;
 
-            // 重要安全提示: 密码在存入数据库前应进行哈希处理。
-            // 例如: string hashedPassword = BCrypt.Net.BCrypt.HashPassword(password);
+            string error;
+            if (UserStore.TryRegister(username, password, out error))
+            {
+                Logging.Debug.Log($"[Logon] 注册成功 username={username} (当前账号数={UserStore.UserCount})");
+                return true;
+            }
 
-            string sql = "INSERT INTO `users` SET `UserName` = @username, `Password` = @password, `name` = '';";
-            try
+            // 与原文案保持一致，便于对照日志
+            if (error == "该账户已存在")
             {
-                using (MySqlCommand cmd = new MySqlCommand(sql, mySqlConnection))
-                {
-                    cmd.Parameters.AddWithValue("@username", username);
-                    cmd.Parameters.AddWithValue("@password", password); // 在生产环境中，这里应该使用哈希后的密码
-                    cmd.ExecuteNonQuery();
-                    return true;
-                }
+                Logging.Debug.Log("该账户已存在啊！！");
             }
-            catch (MySqlException ex)
+            else
             {
-                // 错误码 1062: 主键或唯一键冲突 (即用户名已存在)
-                // 这种方式比先SELECT后INSERT更高效且能避免竞态条件
-                if (ex.Number == 1062)
-                {
-                    Logging.Debug.Log("该账户已存在啊！！");
-                }
-                else
-                {
-                    Logging.Debug.Log("数据库错误: " + ex.Message);
-                }
-                return false;
+                Logging.Debug.Log("[Logon] 注册失败：" + error + " username=" + username);
             }
-            catch (Exception ex)
-            {
-                Logging.Debug.Log("注册时发生未知错误: " + ex.Message);
-                return false;
-            }
+            return false;
         }
 
         /// <summary>
-        /// 登陆
+        /// 登录。
+        /// 对应原实现 `SELECT * FROM users WHERE UserName=@u AND Password=@p`：
+        /// 命中则记录 UserName 并返回 true。
+        ///
+        /// 有意扩展：账号不存在时自动建号（开发环境不需要先注册）。
+        /// 账号存在但密码不符时仍失败——保留密码校验，避免原语义被悄悄削弱。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="mySqlConnection"></param>
-        /// <returns></returns>
-        public bool Login(MainPack pack, MySqlConnection mySqlConnection)
+        public bool Login(MainPack pack)
         {
-            //0.3.查寻数据库用户信息
             string username = pack.Loginpack.Username;
             string password = pack.Loginpack.Password;
 
             Logging.Debug.Log(username + "      " + password);
-            try
-            {
-                // 使用参数化查询防止SQL注入
-                string sql = "SELECT * FROM `users` WHERE `UserName` = @username AND `Password` = @password";
-                using (MySqlCommand cmd = new MySqlCommand(sql, mySqlConnection))
-                {
-                    cmd.Parameters.AddWithValue("@username", username);
-                    cmd.Parameters.AddWithValue("@password", password); // 在生产环境中，应先从数据库获取哈希，再用BCrypt.Verify比较
 
-                    using (MySqlDataReader read = cmd.ExecuteReader())
-                    {
-                        bool res = read.HasRows;
-                        Logging.Debug.Log(res);
-                        if (res)
-                        {
-                            UserName = username;
-                        }
-                        return res;
-                    }
-                }
-            }
-            catch (Exception ex)
+            bool created;
+            string error;
+            if (!UserStore.TryLoginOrCreate(username, password, out created, out error))
             {
-                Logging.Debug.Log(ex);
+                Logging.Debug.Log("[Login] 登录失败：" + error + " username=" + username);
                 return false;
             }
+
+            UserName = username;
+
+            if (created)
+            {
+                Logging.Debug.Log($"[Login] 账号不存在，已自动建号 username={username} (当前账号数={UserStore.UserCount})");
+            }
+            else
+            {
+                Logging.Debug.Log($"[Login] 登录成功 username={username}");
+            }
+            return true;
         }
+
         /// <summary>
-        /// 查找好友信息
+        /// 查找好友信息，结果写入 <c>pack.Friendspack</c>。
+        /// 对应原实现的双向好友查询；状态从 <paramref name="server"/> 实时取。
+        ///
+        /// 原实现里有一个从未被使用的局部变量 PlayerPack myinfo（死代码），此处不再保留。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="client"></param>
-        /// <param name="mySqlConnection"></param>
-        /// <param name="server"></param>
-        /// <returns></returns>
-        public bool FindFriendsInfo(ref MainPack pack, Client client, MySqlConnection mySqlConnection, Server server)
+        public bool FindFriendsInfo(ref MainPack pack, Client client, Server server)
         {
             Logging.Debug.Log(UserName + " ??? FindFriendsInfo  ??:" + UID);
-            string sql = "SELECT DISTINCT u.`name`,u.`id` FROM `users` u JOIN `friends` f ON " +
-                "(f.`UserID` = @userid AND f.`FriendID` = u.`id`) OR (f.`FriendID` = @userid AND u.`id` = f.`UserID`)";
+
             try
             {
-                using (MySqlCommand comd = new MySqlCommand(sql, mySqlConnection))
+                System.Collections.Generic.List<UserSnapshot> friends = UserStore.GetFriends(UID);
+                for (int i = 0; i < friends.Count; i++)
                 {
-                    comd.Parameters.AddWithValue("@userid", UID);
-                    using (MySqlDataReader read = comd.ExecuteReader())
+                    UserSnapshot friend = friends[i];
+
+                    PlayerPack playerinfo = new PlayerPack
                     {
-                        PlayerPack myinfo = new PlayerPack
-                        {
-                            Playername = PlayerName,
-                            Id = UID,
-                            State = PlayerState.PlayerOnline
-                        };
-                        while (read.Read())
-                        {
-                            PlayerPack playerinfo = new PlayerPack
-                            {
-                                Playername = read["name"].ToString(),
-                                Id = Convert.ToInt32(read["id"]),
-                                State = server.GetPlayerState(Convert.ToInt32(read["id"]))
-                            };
+                        Playername = friend.Name,
+                        Id = friend.Id,
+                        State = server.GetPlayerState(friend.Id)
+                    };
 
-                            pack.Friendspack.Add(playerinfo);
+                    pack.Friendspack.Add(playerinfo);
 
-                            Logging.Debug.Log($"找到好友: {playerinfo.Playername} (ID: {playerinfo.Id})");
-                        }
-                    }
+                    Logging.Debug.Log($"找到好友: {playerinfo.Playername} (ID: {playerinfo.Id})");
                 }
+
                 return true;
             }
             catch (Exception ex)
@@ -185,46 +145,37 @@ namespace Server.DAO
                 Logging.Debug.Log(ex);
                 return false;
             }
-
         }
+
         /// <summary>
-        ///查找玩家信息
+        /// 查找玩家信息，结果写入 <c>pack.UserInfopack</c>，并更新本连接的会话身份。
+        /// 对应 `SELECT name, id FROM users WHERE UserName = @u`；查不到返回 false。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="client"></param>
-        /// <returns></returns>
         public bool FindPlayerInfo(ref MainPack pack, Client client)
         {
             try
             {
-                MySqlConnection mySqlConnection = client.GetMysqlConnecet;
                 string username = pack.Loginpack.Username;
                 Logging.Debug.Log(username + "  FindPlayerInfo");
-                string sql = "SELECT `name`, `id` FROM `users` WHERE `UserName` = @username";
-                using (MySqlCommand comd = new MySqlCommand(sql, mySqlConnection))
+
+                UserSnapshot user;
+                if (!UserStore.TryGetByName(username, out user))
                 {
-                    comd.Parameters.AddWithValue("@username", username);
-                    using (MySqlDataReader read = comd.ExecuteReader())
-                    {
-                        if (read.Read())
-                        {
-                            PlayerPack playerinfo = new PlayerPack();
-                            playerinfo.Username = username;
-                            playerinfo.Playername = read["name"].ToString();
-                            playerinfo.Id = Convert.ToInt32(read["id"]);
-                            UserName = username;
-                            PlayerName = playerinfo.Playername;
-                            UID = playerinfo.Id;
-                            pack.UserInfopack = playerinfo;
-                            Logging.Debug.Log($"找到玩家: {PlayerName} (ID: {UID})");
-                        }
-                        else
-                        {
-                            return false;
-                        }
-                    }
+                    Logging.Debug.Log("[FindPlayerInfo] 账号不存在 username=" + username);
+                    return false;
                 }
-                client.UpdateMyselfInfo();
+
+                PlayerPack playerinfo = new PlayerPack();
+                playerinfo.Username = username;
+                playerinfo.Playername = user.Name;
+                playerinfo.Id = user.Id;
+
+                UserName = username;
+                PlayerName = playerinfo.Playername;
+                UID = playerinfo.Id;
+
+                pack.UserInfopack = playerinfo;
+                Logging.Debug.Log($"找到玩家: {PlayerName} (ID: {UID})");
                 return true;
             }
             catch (Exception ex)
@@ -240,32 +191,31 @@ namespace Server.DAO
             ($"[ChangeHero-UserData-BEFORE] UID={UID} PlayerHero={PlayerHero},收到UserInfopack.Hero ={ pack.UserInfopack?.Hero}");
 
             // 判空报警
-            if (pack.UserInfopack == null )
+            if (pack.UserInfopack == null)
                 Logging.Debug.Log($"[ChangeHero-UserData-ERROR] UID={UID} UserName={UserName} 收到空Hero: pack={pack}");
 
             PlayerHero = pack.UserInfopack.Hero;
             Logging.Debug.Log($"[ChangeHero-UserData-AFTER] UID={UID} 新PlayerHero={PlayerHero}");
         }
+
         /// <summary>
-        /// 更新名字
+        /// 改名。对应 `UPDATE users SET name=@n WHERE UserName=@u`。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="mySqlConnection"></param>
-        /// <returns></returns>
-        public bool UpdateName(MainPack pack, MySqlConnection mySqlConnection)
+        public bool UpdateName(MainPack pack)
         {
             string username = pack.Loginpack.Username;
             string newPlayerName = pack.Str;
             Logging.Debug.Log(username + "UpdateName:  " + newPlayerName);
-            string sql = "UPDATE `users` SET `name` = @name WHERE `UserName` = @username;";
+
             try
             {
-                using (MySqlCommand comd = new MySqlCommand(sql, mySqlConnection))
+                string error;
+                if (!UserStore.TryRename(username, newPlayerName, out error))
                 {
-                    comd.Parameters.AddWithValue("@name", newPlayerName);
-                    comd.Parameters.AddWithValue("@username", username);
-                    comd.ExecuteNonQuery();
+                    Logging.Debug.Log("[UpdateName] " + error + " username=" + username);
+                    return false;
                 }
+
                 UserName = username;
                 PlayerName = newPlayerName;
                 return true;
@@ -276,74 +226,89 @@ namespace Server.DAO
                 return false;
             }
         }
+
         //*********************加好友*************************//
+
         /// <summary>
-        /// 申请加好友
+        /// 申请加好友：按 ID 找到目标账号，向其连接发一条「有人申请加你」的通知。
+        /// 对应 `SELECT UserName FROM users WHERE id = @id`。
+        ///
+        /// 注意（原样保留的行为）：这条通知用的是 ActionCode.AcceptAddFriend 且不写任何好友表，
+        /// 真正的落库发生在对方回复 AcceptAddFriend 时。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="mySqlConnection"></param>
-        /// <returns></returns>
-        public bool AplyAddFriend(MainPack pack, MySqlConnection mySqlConnection, Server server)
+        public bool AplyAddFriend(MainPack pack, Server server)
         {
             string Playername = pack.UserInfopack.Playername;
             Logging.Debug.Log(Playername + "  !!!AplyAddFriend!!!:  " + pack.Str);
-            ///根据姓名查找好友账号
+
             try
             {
-                string sql = "SELECT `UserName` FROM `users` WHERE `id` = @id";
-                string res = "";
-                using (MySqlCommand comd = new MySqlCommand(sql, mySqlConnection))
+                int targetId;
+                if (!int.TryParse(pack.Str, out targetId))
                 {
-                    comd.Parameters.AddWithValue("@id", int.Parse(pack.Str));
-                    using (MySqlDataReader read = comd.ExecuteReader())
-                    {
-                        if (read.Read())
-                        {
-                            res = read["UserName"].ToString();
-                            Logging.Debug.Log("找到用户: " + res);
-                        }
-                    }
+                    Logging.Debug.Log("[AplyAddFriend] pack.Str 不是合法 ID：" + pack.Str);
+                    return false;
                 }
 
-                if (res != "")
+                UserSnapshot target;
+                if (!UserStore.TryGetById(targetId, out target))
                 {
-                    MainPack SendToFriendpack = new MainPack();
-                    SendToFriendpack.Returncode = ReturnCode.AddFriend;
-                    SendToFriendpack.Actioncode = ActionCode.AcceptAddFriend;
-                    SendToFriendpack.Str = Playername;
-                    server.GetClientByUserName(res).Send(SendToFriendpack);
-                    Logging.Debug.Log("AplyAddFriend!!!!:  " + pack);
-                    return true;
+                    Logging.Debug.Log("[AplyAddFriend] 找不到 ID=" + targetId + " 的账号");
+                    return false;
                 }
-                return false;
+
+                Logging.Debug.Log("找到用户: " + target.UserName);
+
+                MainPack SendToFriendpack = new MainPack();
+                SendToFriendpack.Returncode = ReturnCode.AddFriend;
+                SendToFriendpack.Actioncode = ActionCode.AcceptAddFriend;
+                SendToFriendpack.Str = Playername;
+                server.GetClientByUserName(target.UserName).Send(SendToFriendpack);
+                Logging.Debug.Log("AplyAddFriend!!!!:  " + pack);
+                return true;
             }
             catch (Exception ex)
             {
                 Logging.Debug.Log("ex  :" + ex.Message);
                 return false;
             }
-
         }
+
         /// <summary>
-        /// 同意加好友
+        /// 同意加好友：写入好友边，并通知对方。
+        /// 对应 `INSERT INTO friends SET UserID=@u, FriendID=@f`（单向边，查询时双向匹配）。
+        ///
+        /// 有意加固：好友边用**服务端权威的 UID**，而不是客户端传来的 pack.UserInfopack.Id。
+        /// 原实现用后者，一旦客户端没走 FindPlayerInfo（Id 仍为 0），就会写入一条永远匹配不上的脏边；
+        /// 而这条边在内存库里会一直存在到进程结束。两者不一致时打日志，便于发现客户端状态问题。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="mySqlConnection"></param>
-        /// <returns></returns>
-        public bool AcceptAddFriend(ref MainPack pack, Client client, MySqlConnection mySqlConnection, Server server)
+        public bool AcceptAddFriend(ref MainPack pack, Client client, Server server)
         {
-            int userid = pack.UserInfopack.Id;
             Logging.Debug.Log(" AcceptAddFriend:  " + pack.Str);
+
             Client friend = server.GetClientByPlayerName(pack.Str);
-            string sql = "INSERT INTO `friends` SET `UserID` = @userid, `FriendID` = @friendid;";
+            if (friend == null)
+            {
+                Logging.Debug.Log("[AcceptAddFriend] 找不到昵称为 '" + pack.Str + "' 的在线连接");
+                return false;
+            }
+
             try
             {
-                using (MySqlCommand comd = new MySqlCommand(sql, mySqlConnection))
+                int userId = UID;
+                if (pack.UserInfopack != null && pack.UserInfopack.Id != UID)
                 {
-                    comd.Parameters.AddWithValue("@userid", userid);
-                    comd.Parameters.AddWithValue("@friendid", friend.UID);
-                    comd.ExecuteNonQuery();
+                    Logging.Debug.Log($"[AcceptAddFriend] 客户端自称 Id={pack.UserInfopack.Id} 与服务端 UID={UID} 不一致，以服务端为准");
                 }
+
+                if (userId <= 0)
+                {
+                    Logging.Debug.Log("[AcceptAddFriend] 本连接尚未完成身份初始化（UID<=0），拒绝写好友边");
+                    return false;
+                }
+
+                UserStore.AddFriend(userId, friend.UID);
+                Logging.Debug.Log($"[AcceptAddFriend] 已建立好友边 {userId} <-> {friend.UID} (当前好友边数={UserStore.FriendEdgeCount})");
 
                 MainPack SendToFriendpack = new MainPack();
                 SendToFriendpack.Returncode = ReturnCode.Succeed;
@@ -361,28 +326,42 @@ namespace Server.DAO
                 return false;
             }
         }
+
         /// <summary>
-        /// 拒绝加好友
+        /// 拒绝加好友：只通知对方，不写任何数据。
+        ///
+        /// 返回值恒为 false 是**原实现的既有行为**（控制器随后也无视该返回值、一律回 Fail），
+        /// 这里原样保留，改动它会影响客户端对 ReturnCode 的判断。
         /// </summary>
-        /// <param name="pack"></param>
-        /// <param name="mySqlConnection"></param>
-        /// <param name="server"></param>
-        /// <returns></returns>
-        public bool RejectAddFriend(MainPack pack, MySqlConnection mySqlConnection, Server server)
+        public bool RejectAddFriend(MainPack pack, Server server)
         {
             int userid = pack.UserInfopack.Id;
             Logging.Debug.Log(" RejectAddFriend:  " + pack.Str);
             Client friend = server.GetClientByPlayerName(pack.Str);
+            if (friend == null)
+            {
+                Logging.Debug.Log("[RejectAddFriend] 找不到昵称为 '" + pack.Str + "' 的在线连接");
+                return false;
+            }
+
             MainPack SendToFriendpack = new MainPack();
             SendToFriendpack.Returncode = ReturnCode.Fail;
             SendToFriendpack.Actioncode = ActionCode.RejectAddFriend;
             friend.Send(SendToFriendpack);
             return false;
         }
-        public void BordCaseToFriendLogout(MySqlConnection mySqlConnection, Server server, Client client, Action UpdateActiveFriendInfo)
+
+        /// <summary>
+        /// 断线时处理好友相关收尾：遍历好友、对在线者打日志，并把本连接置为离线。
+        ///
+        /// 说明：原实现里紧随其后的「主动通知好友我下线了」依赖 Client.FriendsDic，
+        /// 而该表在服务端从未被写入，通知实际从未发生（详见迁移计划 B5）。
+        /// 该缺陷的修复放在 P3 用复制机制重做，这里保持「只判定与记录」。
+        /// </summary>
+        public void BordCaseToFriendLogout(Server server, Client client)
         {
             Logging.Debug.Log(UserName + "  BordCaseToFriendLogout  :" + UID);
-            string sql = "SELECT DISTINCT u.`name`,u.`id` FROM `users` u JOIN `friends` f ON (f.`UserID` = @userid AND f.`FriendID` = u.`id`) OR (f.`FriendID` = @userid AND u.`id` = f.`UserID`)";
+
             try
             {
                 if (PlayerName == null)
@@ -390,31 +369,19 @@ namespace Server.DAO
                     return;
                 }
 
-                using (MySqlCommand comd = new MySqlCommand(sql, mySqlConnection))
+                System.Collections.Generic.List<UserSnapshot> friends = UserStore.GetFriends(UID);
+                for (int i = 0; i < friends.Count; i++)
                 {
-                    comd.Parameters.AddWithValue("@userid", UID);
-                    using (MySqlDataReader read = comd.ExecuteReader())
-                    {
-                        while (read.Read())
-                        {
-                            int friendId = Convert.ToInt32(read["id"]);
-                            PlayerState friendState = server.GetPlayerState(friendId);
+                    UserSnapshot friend = friends[i];
+                    PlayerState friendState = server.GetPlayerState(friend.Id);
 
-                            //如果好友在线，就告诉他，老子下号了！
-                            if (friendState != PlayerState.PlayerOutline)
-                            {
-                                Client friendclient = server.GetActiveClient(friendId);
-                                if (friendclient != null)
-                                {
-                                    friendclient.RemoveFriend(client.UID);
-                                    Logging.Debug.Log($"通知好友 {read["name"]} 我已下线。");
-                                }
-                            }
-                        }
+                    if (friendState != PlayerState.PlayerOutline)
+                    {
+                        Logging.Debug.Log($"[FriendPresence] 好友 {friend.Name}(id={friend.Id}) 在线，但当前无推送机制（待 P3 复制实现）");
                     }
                 }
+
                 client.PlayerState = PlayerState.PlayerOutline;
-                client.UpdateMyselfInfo();
             }
             catch (Exception ex)
             {
@@ -422,4 +389,28 @@ namespace Server.DAO
             }
         }
     }
+
+    /*
+    ---- 原 MySQL 实现使用的 SQL（已随数据库移除，此处留档便于回溯语义）----
+
+    SELECT * FROM `friends`
+
+    查找 lzj 的所有好友信息
+    SELECT DISTINCT u.`name`,u.`id`
+    FROM `users` u
+    CROSS JOIN `friends` f
+    WHERE (f.`UserID`= 12 AND f.`FriendID`=u.`id`)OR(f.`FriendID`=12 AND u.`id`=f.`UserID`)
+
+    改名
+    UPDATE `users` SET `name` = '' WHERE `UserName` = 'lzj';
+
+    添加好友
+    INSERT INTO `friends` SET `UserID`= 12,`FriendID`=17;
+
+    获取玩家名字
+    SELECT `name` FROM `users` WHERE `UserName` = 'LZJ'
+
+    注册
+    INSERT INTO `users` SET `UserName` = 'llf',`Password`='jjy',`name`='';
+     */
 }

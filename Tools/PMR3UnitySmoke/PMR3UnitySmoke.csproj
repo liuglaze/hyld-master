@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R3-B6 真实 Unity DS 进程烟测：真实 PMDsLobbyHost + 真实 PMDsSystemProcessLauncher 拉起
+      D:\UGit\hyld-master\HyldDS\HyldDS.exe（Unity 2019.4 真无头包），
+      两个**纯 C#（非 UnityUI）**客户端经真实 UDP 入局，跑通
+        Lobby 写真实引导文件 → 真实 OS 进程读引导 → 真实控制 TCP Ready
+        → 真实 PMDS1 offer → 两个客户端真实 UDP 握手/验票/复制/RPC
+        → 真实 DS 的 -server-smoke 结果 → ResultAck → 认证显式 Exited(0)
+        → **实际 OS 进程退出** → 端口/uid 回收
+      这条链。与 Tools/PMR3IntegrationTest 的区别只有一个：**进程不再是替身**。
+
+      编译范围（都是真实实现，且都是纯 C#、不引 UnityEngine）：
+        - Client/Assets/Scripts/PMNet/**（Control/Session/Transport/World/Replication/Generated）；
+        - Client/Assets/Scripts/PMR3/**（声明对象 + PMNetGen 生成产物）；
+        - Client/Assets/Scripts/PMPrediction/**、Client/Assets/Scripts/PMMover/**
+          与 PMR4MovementCodec/Driver（只被「movement 模式」用到：真实预测时间轴 +
+          真实运动模型 + 确定性 AABB 碰撞替身 PMMoverTestWorld）；
+        - Server/DS/**（协调器 / 进程抽象与真实系统启动器 / uid 账本 / 控制 listener / Lobby 宿主）。
+
+      刻意**不**编译 Client/Assets/Scripts/Server/Boot/*（PMDsSessionHost / PMDsLobbyAgent / PMClientSessionHost
+      需要 UnityEngine）——它们跑在真实 DS 进程里。因此本工具里不存在任何「DS 侧替身宿主」，
+      本工具只有：真实 Lobby 宿主 + 两个测试客户端 + 进程封装薄包装。
+
+      运行：dotnet Tools/PMR3UnitySmoke/bin/Release/net8.0/PMR3UnitySmoke.dll
+            dotnet Tools/PMR3UnitySmoke/bin/Release/net8.0/PMR3UnitySmoke.dll （带 movement 开关）
+                  （额外跑 R4-B 真实 DS 权威运动验收：Create 初值 / AP+SP / 权威位移 /
+                    撞墙停在 ±0.9 / Space 起跳峰值 > 1.5 后落回 y≈1 + Walking /
+                    owner 可靠 Mode+Landed 事件去重 / 对手 SP 快照 / 重同步升流后旧流输入无效；
+                    验收完再发探针让**原 smoke 闭环照旧**收尾。
+                    movement 开关与 hold-seconds / drop-control-after-ready 互斥。
+                    参数名见 Program.cs 的 HasFlag 调用与运行输出。）
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR3UnitySmoke</AssemblyName>
+    <RootNamespace>PMR3UnitySmoke</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591;CS8981</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实 PMNet 核心（含 Control/Session/Transport/World/Replication/Generated）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- R3-B 声明对象 + 生成产物（PMR3 在 PMNet 目录之外，避免注册表重名）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="PMR3\Generated" />
+
+    <!--
+      R4-B（movement 模式）：真实预测核心 + 真实运动模型/确定性碰撞替身 + 编解码 + Driver。
+       **刻意逐个列出**而不是通配 PMR3\**：PMR3Player.cs / PMR3Runtime.cs / Generated\** 上面已经
+       显式 Include，再用通配会重复编译同一文件（同一生成注册表被编两遍）。
+       PMMoverTestWorld 是 **AABB 替身**（不是 PhysX），只用于客户端 AP 产出行输入，
+       权威仍来自真实 Unity DS。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR4MovementCodec.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR4MovementDriver.cs" LinkBase="PMR3" />
+
+    <!-- Server/DS 全部源：协调器/进程抽象（含真实 PMDsSystemProcessLauncher）/uid 账本/控制 listener/Lobby 宿主。 -->
+    <Compile Include="..\..\Server\DS\**\*.cs" LinkBase="Server\DS" />
+  </ItemGroup>
+
+</Project>

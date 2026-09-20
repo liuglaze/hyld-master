@@ -4,6 +4,7 @@ using System.Text;
 using SocketProto;
 using Server;
 using System.Linq;
+using PMNet.Control;
 
 namespace Server.Controller
 {
@@ -31,7 +32,15 @@ namespace Server.Controller
             requestCode = RequestCode.ClearSence;
             _dic_ClearFinish = new Dictionary<int, bool>();
         }
-        public void  AllClearSenceReady(Server server, List<int> playeruids)
+        /// <summary>
+        /// 全员清场就绪后逐个单播通知（纯下行，客户端不会上行该 ActionCode）。
+        ///
+        /// 原名 AllClearSenceReady，与 ActionCode.AllClearSenceReady 同名，
+        /// 会被旧的「按 ActionCode 方法名反射」路由误命中，并因参数不匹配
+        /// （该方法只收 2 个参数）在 Invoke 时抛异常，冒泡后导致服务端主动断开该连接（计划 B1-1）。
+        /// 改为私有 + 改名以彻底消除该风险。
+        /// </summary>
+        private void BroadcastAllClearSenceReadyToPlayers(Server server, List<int> playeruids)
         {
             MainPack pack = new MainPack();
             pack.Actioncode = ActionCode.AllClearSenceReady;
@@ -59,6 +68,16 @@ namespace Server.Controller
         public MainPack ClientSendClearSenceReady(Server server, Client client, MainPack pack)
         {
             int uid = int.Parse(pack.Str);
+
+            // R3-B：新链（局内专用服务器）的对局在 Lobby 侧**没有** BattleContext，
+            // 旧清场就绪不得作用到新局（新局的清场/就绪在 DS 侧由 PMR3 宿主负责）。
+            PMDsLobbyHost dsHost = PMDsLobbyHost.Instance;
+            if (dsHost != null && dsHost.IsUidInMatch(uid))
+            {
+                Logging.Debug.Log($"[ClearSence] 忽略专用服务器对局的旧 ClearSence 请求 uid={uid}");
+                return pack;
+            }
+
             if (!BattleManage.Instance.TryGetBattleContextByUid(uid, out BattleContext battleContext))
             {
                 Logging.Debug.Log($"ClientSendClearSenceReady 未找到 battle context, uid={uid}");
@@ -82,7 +101,7 @@ namespace Server.Controller
             }
             if (isOK)
             {
-                AllClearSenceReady(server,playeruids);
+                BroadcastAllClearSenceReadyToPlayers(server, playeruids);
             }
             return pack;
         }
@@ -648,6 +667,15 @@ namespace Server.Controller
 
         private void StartFighting(Server server, MatchResult matchResult)
         {
+            // R3-B：开局链路的**唯一**二分点。一次只选一条链：
+            // 新链由 HYLD_PMNET_DS=1 显式启用（默认 opt-in 关闭）；选中新链后失败只能报失败，
+            // 禁止静默回退生成第二个权威（旧链）。
+            if (PMDsLobbyHost.NewChainEnabled)
+            {
+                StartFightingDedicatedServer(server, matchResult);
+                return;
+            }
+
             List<MatchUserInfo> matchUsers = BuildMatchUsers(server, matchResult);
             if (matchUsers.Count == 0)
             {
@@ -662,6 +690,70 @@ namespace Server.Controller
             }
 
             Logging.Debug.Log($"StartFighting 创建战斗成功，roomId={matchResult.roomId}, battleId={battleId}");
+        }
+
+        /// <summary>
+        /// R3-B 新链开局：由 Lobby 宿主拉起专用服务器（DS）承载整局。
+        ///
+        /// 硬约束（契约 §7.3）：
+        /// - 名册必须与**已认证活跃 Client** 一致；缺任何一人 ⇒ **整局拒绝**，
+        ///   不调 <c>BuildMatchUsers</c> 缩编（阽悄少人会让客户端认知与名册不一致）；
+        /// - 不调 <c>BattleManage.TryBeginBattle</c>，因此新 uid 不会进入旧 <c>_uidToBattleIds</c>，
+        ///   旧 UDP/清场路由也自然不会作用到新局；
+        /// - 宿主未就绪/配置不全时只报失败，**不回退旧链**。
+        /// </summary>
+        private void StartFightingDedicatedServer(Server server, MatchResult matchResult)
+        {
+            PMDsLobbyHost host = PMDsLobbyHost.Instance;
+            if (host == null || !host.IsRunning)
+            {
+                Logging.Debug.Log($"[PMDsMatch] 新链已启用但宿主未就绪，整局失败（不回退旧链） roomId={matchResult.roomId}");
+                return;
+            }
+
+            Dictionary<string, int> teamID = new Dictionary<string, int>();
+            int curMaxID = 1;
+            int playerId = 1;
+            List<PMDsRosterIdentity> roster = new List<PMDsRosterIdentity>();
+
+            foreach (MatchedPlayerEntry player in matchResult.players)
+            {
+                Client c = server.GetActiveClient(player.uid);
+                if (c == null)
+                {
+                    Logging.Debug.Log(
+                        $"[PMDsMatch] 新链开局失败：玩家{player.uid}不在线/未认证，整局拒绝（不缩编） roomId={matchResult.roomId}");
+                    return;
+                }
+
+                if (!teamID.ContainsKey(player.teamId))
+                {
+                    teamID.Add(player.teamId, curMaxID++);
+                }
+
+                roster.Add(new PMDsRosterIdentity(player.uid, playerId++, teamID[player.teamId], (int)c.PlayerHero));
+            }
+
+            if (roster.Count == 0)
+            {
+                Logging.Debug.Log($"[PMDsMatch] 新链开局失败：名册为空 roomId={matchResult.roomId}");
+                return;
+            }
+
+            PMDsLobbyMatchRequest request = new PMDsLobbyMatchRequest();
+            request.MatchId = matchResult.roomId;
+            request.Roster = roster.ToArray();
+            request.FightPattern = matchResult.fightPattern.ToString();
+
+            PMDsLobbyStartReply reply = host.TryStartMatch(request);
+            if (!reply.IsQueued)
+            {
+                Logging.Debug.Log($"[PMDsMatch] 新链开局被拒 roomId={matchResult.roomId}: {reply}");
+                return;
+            }
+
+            Logging.Debug.Log(
+                $"[PMDsMatch] 新链开局已提交 roomId={matchResult.roomId} pattern={request.FightPattern} players={roster.Count}");
         }
         public override void CloseClient(Client client, int id)
         {
@@ -739,7 +831,6 @@ namespace Server.Controller
                 }
 
                 client.PlayerState = PlayerState.PlayerOnRoom;
-                client.UpdateMyselfInfo();
 
                 pack.Returncode = ReturnCode.Succeed; // 直接返回成功
                 Logging.Debug.Log($"Player {client.PlayerName} created room {room.GetRoomInfo.Roomid} successfully.");
@@ -763,7 +854,6 @@ namespace Server.Controller
                 if (server.GetActiveClient(friendclient.UID) != null)
                 {
                     friendclient.PlayerState = PlayerState.PlayerOnInvated;
-                    friendclient.UpdateMyselfInfo();
                     MainPack pack = new MainPack
                     {
                         Actioncode = ActionCode.InviteFriend,
@@ -846,7 +936,6 @@ namespace Server.Controller
                     }
                     pack.Actioncode = ActionCode.ActionNone;
                     client.PlayerState = PlayerState.PlayerOnline;
-                    client.UpdateMyselfInfo();
                     return pack;
                 }
             }
@@ -882,9 +971,15 @@ namespace Server.Controller
                     targetRoom.Join(client);
 
                     // 2. 更新客户端状态
+                    //
+                    // 原本这里还会调 client.UpdateMyselfInfo() 与 client.UpdateActiveFriendInfo()，两者都已移除：
+                    //   - UpdateMyselfInfo 遍历 Client.FriendsDic，而该表在服务端从未被写入，所以一直是空转；
+                    //   - UpdateActiveFriendInfo 推送的活跃好友包恒为空，而客户端
+                    //     UIInvatingFriendPanel.UpDateActiveFriendInfo 遇到空 Playerspack 会直接清空好友列表，
+                    //     等于「加入房间就把好友面板清空」。
+                    // 好友列表现在由 FindFriendsInfo 按需从数据库派生（见 UserController.FindFriendsInfo）。
+                    // 实时的好友状态推送留到 P3 用复制替代，不再维护这套半成品缓存。
                     client.PlayerState = PlayerState.PlayerOnRoom;
-                    client.UpdateMyselfInfo();
-                    client.UpdateActiveFriendInfo();
 
                     // 3. 创建一个权威的状态更新包
                     MainPack updatePack = new MainPack();
@@ -906,29 +1001,39 @@ namespace Server.Controller
                 else
                 {
                     client.PlayerState = PlayerState.PlayerOnline;
-                    client.UpdateMyselfInfo();
-                    client.UpdateActiveFriendInfo();
                     pack.Returncode = ReturnCode.Fail;
                     return pack;
                 }
             }
 
             client.PlayerState = PlayerState.PlayerOnline;
-            client.UpdateMyselfInfo();
-            client.UpdateActiveFriendInfo();
             pack.Returncode = ReturnCode.NotRoom;
             return pack;
         }
 
-        public MainPack CancelInviteFriend(Server server, MainPack pack)
+        public MainPack CancelInviteFriend(Server server, Client client, MainPack pack)
         {
-            Client friend = server.GetClientByPlayerName(pack.Str);
-            Logging.Debug.Log(friend?.PlayerName);
+            string targetName = pack.Str;
+            Client friend = server.GetClientByPlayerName(targetName);
+
+            // 取消邀请的通知对象是「被邀请人」：他那边弹出的是接受/拒绝面板，
+            // 收到本消息后应当把面板关掉（客户端 UIAplyInvateFriendPanel 的处理逻辑）。
+            // 这里用独立包发送，避免与「回给发起者的响应」共用同一个实例而互相污染
+            // （原实现把同一个 pack 既发给被邀请人又返回给发起者，并把 Str 改成了 "?"）。
+            if (friend != null)
+            {
+                MainPack notify = new MainPack();
+                notify.Requestcode = RequestCode.FriendRoom;
+                notify.Actioncode = ActionCode.CancalInvateFriend;
+                notify.Returncode = friend.FriendRoom != null ? ReturnCode.Fail : ReturnCode.Succeed;
+                notify.Str = client.PlayerName;
+                friend.Send(notify);
+            }
+
+            // 回给发起者：ActionNone 会被客户端路由层直接忽略，仅用于清掉它的 request_id 待确认项。
             pack.Returncode = ReturnCode.Succeed;
-            pack.Actioncode = ActionCode.CancalInvateFriend;
-            if (friend?.FriendRoom != null) pack.Returncode = ReturnCode.Fail;
-            pack.Str = "?";
-            friend?.Send(pack);
+            pack.Str = string.Empty;
+            pack.Actioncode = ActionCode.ActionNone;
             return pack;
         }
 
@@ -961,7 +1066,14 @@ namespace Server.Controller
             client.FriendRoom.BroadCastTCP(client, pack);
         }
 
-        public void ChangeHero(Client client, MainPack pack)
+        /// <summary>
+        /// 房间内广播「某成员切换了英雄」（纯下行）。
+        ///
+        /// 原名 ChangeHero，与 ActionCode.ChangeHero 同名，会被旧反射路由在
+        /// RequestCode.FriendRoom 下误命中，并因参数不匹配在 Invoke 时抛异常导致断连（计划 B1-2）。
+        /// 改为 internal + 改名，彻底消除该风险。
+        /// </summary>
+        internal void BroadcastHeroChangedToRoom(Client client, MainPack pack)
         {
             pack.Requestcode = RequestCode.FriendRoom;
             pack.Returncode = ReturnCode.Succeed;
@@ -992,7 +1104,7 @@ namespace Server.Controller
         /// <returns></returns>
         public MainPack AplyAddFriend(Server server, Client client, MainPack pack)
         {
-            if (client.GetUserData.AplyAddFriend(pack, client.GetMysqlConnecet, server))
+            if (client.GetUserData.AplyAddFriend(pack, server))
             {
                 pack.Returncode = ReturnCode.Succeed;
             }
@@ -1001,7 +1113,7 @@ namespace Server.Controller
         }
         public MainPack AcceptAddFriend(Server server, Client client, MainPack pack)
         {
-            if (client.GetUserData.AcceptAddFriend(ref pack,client, client.GetMysqlConnecet, server))
+            if (client.GetUserData.AcceptAddFriend(ref pack, client, server))
             {
                 pack.Returncode = ReturnCode.Succeed;
             }
@@ -1011,7 +1123,7 @@ namespace Server.Controller
 
         public MainPack RejectAddFriend(Server server, Client client, MainPack pack)
         {
-            client.GetUserData.RejectAddFriend(pack, client.GetMysqlConnecet, server);
+            client.GetUserData.RejectAddFriend(pack, server);
             pack.Returncode = ReturnCode.Fail;
             return pack;
         }
@@ -1028,8 +1140,8 @@ namespace Server.Controller
         /// <returns></returns>
         public MainPack Logon(Server server, Client client, MainPack pack)
         {
-            //1.3将账号密码信息录入数据库
-            if (client.GetUserData.Logon(pack, client.GetMysqlConnecet))
+            //1.3将账号密码信息录入用户库（内存实现，见 UserStore）
+            if (client.GetUserData.Logon(pack))
             {
                 pack.Returncode = ReturnCode.Succeed;
             }
@@ -1058,10 +1170,16 @@ namespace Server.Controller
                 pack.Returncode = ReturnCode.Fail;
                 return pack;
             }
-            //0.3.查寻数据库用户信息
-            if (client.GetUserData.Login(pack, client.GetMysqlConnecet))
+            //0.3.查寻用户信息（内存实现；账号不存在时由 UserData.Login 自动建号）
+            if (client.GetUserData.Login(pack))
             {
                 pack.Returncode = ReturnCode.Succeed;
+
+                // 计划 B4：原本「登记为活跃玩家」只发生在后续的 FindPlayerInfo 里，
+                // 形成一个「已登录但 GetActiveClient 返回 null」的窗口期，
+                // 使匹配/邀请/开战这些依赖在线集合的功能有几率看不到刚登录的玩家。
+                // 现在登录成功即登记；FindPlayerInfo 仍会幂等地再调一次做兜底。
+                server.RegisterActiveClient(client);
             }
             else pack.Returncode = ReturnCode.Fail;
 
@@ -1082,12 +1200,10 @@ namespace Server.Controller
             if (client.GetUserData.FindPlayerInfo(ref pack, client))
             {
                 pack.Returncode = ReturnCode.Succeed;
-                if (server.GetActiveClient(client.UID) != null && server.GetActiveClient(client.UID) != client)
-                {
-                    server.RemoveActiveClient(server.GetActiveClient(client.UID));
-                }
-                server.AddActiveClient(client.UID, client);
-                Logging.Debug.Log($"[ACTIVE-ADD] id={client.UID} 玩家{client.PlayerName} 加入活跃字典(FindPlayerInfo后)");
+
+                // 幂等登记（Login 已登记过一次）。保留这里是为了兼容
+                // 「重登录 / 旧连接残留」场景：同 uid 的旧连接会被顶掉。
+                server.RegisterActiveClient(client);
             }
             else pack.Returncode = ReturnCode.Fail;
             //2.4返回查询结果
@@ -1103,14 +1219,33 @@ namespace Server.Controller
         /// <returns></returns>
         public MainPack FindFriendsInfo(Server server, Client client, MainPack pack)
         {
-            if (client.GetUserData.FindFriendsInfo(ref pack,client, client.GetMysqlConnecet,server))
+            // UserData.FindFriendsInfo 从用户库（内存）拉取好友，并为每项写入 State
+            // （server.GetPlayerState：在线好友是真实状态，离线为 PlayerOutline）。
+            if (!client.GetUserData.FindFriendsInfo(ref pack, client, server))
             {
-                pack = client.GetActiveFriendInfoPack();
-                pack.Actioncode = ActionCode.FindFriendsInfo;
-                pack.Requestcode = RequestCode.User;
-                pack.Returncode = ReturnCode.Succeed;
+                pack.Returncode = ReturnCode.Fail;
+                return pack;
             }
-            else pack.Returncode = ReturnCode.Fail;
+
+            // 客户端 UIInvatingFriendPanel.UpDateActiveFriendInfo 读的是 Playerspack，不是 Friendspack，
+            // 所以这里要按客户端契约把「在线好友」搬到 Playerspack。
+            //
+            // 原实现是 `pack = client.GetActiveFriendInfoPack();`：它直接丢掉上面刚查出来的数据库结果，
+            // 换成一个由 Client.FriendsDic 驱动的包；而该字典在服务端从未被写入，
+            // 于是这里恒返回空列表，好友面板永远为空。这是计划 B5 真正的功能性缺陷。
+            pack.Playerspack.Clear();
+            for (int i = 0; i < pack.Friendspack.Count; i++)
+            {
+                PlayerPack friend = pack.Friendspack[i];
+                if (friend.State != PlayerState.PlayerOutline)
+                {
+                    pack.Playerspack.Add(friend);
+                }
+            }
+
+            pack.Actioncode = ActionCode.FindFriendsInfo;
+            pack.Requestcode = RequestCode.User;
+            pack.Returncode = ReturnCode.Succeed;
             return pack;
         }
         /// <summary>
@@ -1119,7 +1254,7 @@ namespace Server.Controller
         /// <returns></returns>
         public MainPack UpdateName(Server server, Client client, MainPack pack)
         {
-            if (client.GetUserData.UpdateName(pack, client.GetMysqlConnecet))
+            if (client.GetUserData.UpdateName(pack))
             {
                 pack.Returncode = ReturnCode.Succeed;
             }
@@ -1133,7 +1268,7 @@ namespace Server.Controller
             if (pack.Str == "Room")
             {
                 FriendRoomController friendRoomController = (FriendRoomController)server._controllerManger.GetControllerByName(nameof(FriendRoomController));
-                friendRoomController.ChangeHero(client, pack);
+                friendRoomController.BroadcastHeroChangedToRoom(client, pack);
             }            
             pack.Actioncode = ActionCode.ActionNone;
             return pack;

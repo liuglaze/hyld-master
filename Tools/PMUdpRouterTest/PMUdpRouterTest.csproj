@@ -1,0 +1,42 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      P3'-1 验收：战斗 UDP 路由层的功能测试（真实 UDP 回环，无需 Unity）。
+
+      为什么是 net8.0 而不是 netstandard2.0：
+      本工程是要**运行**的测试，不是编译门禁。被编译的代码（Net/*.cs）仍然受
+      PMUdpRouterCheck 的 netstandard2.0 + C# 7.3 门禁约束，此处放宽只是为了能用
+      现代 SDK 跑起来。
+
+      它验证的是「编译得过」之外的东西：
+        1) 真实数据报 → 解析 → 建链 → 路由 → 分发 的完整链路；
+        2) 线程纪律：OnDatagramReceived **不得**执行 handler（本设计最核心的性质）；
+        3) 队列有界、handler 异常隔离、Send 永不抛出。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMUdpRouterTest</AssemblyName>
+    <RootNamespace>PMUdpRouterTest</RootNamespace>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- protoc 生成物用了 pb/pbc/pbr/scg 这类小写别名，CS8981 是噪音 -->
+    <NoWarn>CS8981</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Client\Assets\Scripts\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Net\**\*.cs" LinkBase="Net" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\SocketProto.cs" LinkBase="Proto" />
+  </ItemGroup>
+
+</Project>

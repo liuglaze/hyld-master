@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      P3'-2 门禁：英雄数据模型（Client/Assets/HYLD1.0/Scripts/OldScripts/HeroData.cs）的编译校验。
+
+      为什么需要它：
+      HeroData.cs 是本次「数值/表现分离」的核心 —— 它的数值全部改成只读属性、委托给共享表，
+      而这类改造最容易犯的错误就是**还有一处 `hero.X = y` 没改干净**。
+      本门禁以 Unity 2019.4 的语言面（netstandard2.0 + C# 7.3）编译它，
+      任何对只读属性的赋值都会在这里直接报 CS0200，而不是等 Unity 里才发现。
+
+      覆盖范围与依赖边界：
+        - Client/Assets/HYLD1.0/Scripts/OldScripts/HeroData.cs   （被校验对象）
+        - Client/Assets/Scripts/Shared/**                        （共享数值表）
+        - UnityStubs.cs                                          （只需要 GameObject）
+
+      ⚠ 它只覆盖 HeroData.cs，**覆盖不到消费侧**（PlayerLogic / HYLDBulletManger / BattleData.* 等）。
+      那些文件依赖大量 Unity 类型（Animator / Transform / 协程 / UI），桩件成本远高于收益；
+      它们的正确性依赖：共享表门禁 + 等价性测试 + 真实 Unity 编译。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMHeroDataCheck</AssemblyName>
+    <RootNamespace>PMHeroDataCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="UnityStubs.cs" />
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Shared" />
+    <Compile Include="..\..\Client\Assets\HYLD1.0\Scripts\OldScripts\HeroData.cs" LinkBase="HeroData" />
+  </ItemGroup>
+
+</Project>

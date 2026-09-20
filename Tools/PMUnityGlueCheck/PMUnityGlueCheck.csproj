@@ -1,0 +1,100 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      计划 P2' 的门禁：Unity 胶水代码的可编译性。
+
+      为什么需要它：
+      本项目的 DS 改造在「没有 Unity 编辑器」的环境下推进（用户侧无 Unity 客户端可测），
+      而 PMNet 核心的门禁（PMNetLangCheck）刻意不引用 UnityEngine，因此**完全覆盖不到胶水代码**。
+      没有本门禁，「胶水代码能不能编译」在合并前没有任何自动化信号。
+
+      覆盖范围：
+        Client/Assets/Scripts/Server/Boot/PMNetBootstrap.cs   ← 启动身份判定与分流
+        Client/Assets/Scripts/Server/Boot/PMDsHost.cs         ← DS 进程宿主（socket / tick / 心跳 / 路由接线）
+        Client/Assets/Scripts/Server/Net/*.cs                ← P3'-1 战斗 UDP 路由层
+        Client/Assets/Editor/PMDsBuild.cs                      ← DS 构建入口
+        Client/Assets/Scripts/Log/Loging.cs                    ← 真实日志类（校验日志 API 用法）
+
+      ⚠ 重要限制：UnityStubs.cs 里的 Unity API 是**手写桩件**，只保证形状接近，
+      不保证签名与语义与真实 Unity 一致。本门禁通过 ≠ 逻辑正确。
+      它只能证明「这些文件自身语法正确、类型自洽」，运行时行为必须回到 Unity 里验证。
+
+      为什么用 netstandard2.0 + C# 7.3：
+      与 Unity 2019.4 的编译能力上限保持一致，避免写出编辑器能编、Unity 编不过的代码。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMUnityGlueCheck</AssemblyName>
+    <RootNamespace>PMUnityGlueCheck</RootNamespace>
+    <!-- 桩件会有未使用字段等噪音，且这些告警不反映胶水代码本身的问题。 -->
+    <NoWarn>CS0169;CS0414;CS0649;CS0108;CS0067;CS8981</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Client\Assets\Scripts\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 桩件：UnityEngine / UnityEditor 的最小替身（见文件头说明与限制） -->
+    <Compile Include="UnityStubs.cs" />
+
+    <!-- 真实日志类：把 Loging.cs 也编进来，才能验证胶水对日志 API 的用法正确 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Log\Loging.cs" LinkBase="Client\Log" />
+
+    <!-- PMNet 核心：胶水依赖它（PMNetLaunchOptions / PMNetRuntime） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="Client\PMNet" />
+
+    <!--
+      R4-C / C3：DS 宿主现在读 Shared/BattleNumericConfig（正式名册的 HeroId → MaxSpeed），
+      因此本门禁必须把 Shared/** 也编进来（与 Server.csproj / PMClientCheck 同口径）。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Client\Shared" />
+
+    <!-- 权威 protoc 产物：路由层的 MainPack / ActionCode 来自它 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\SocketProto.cs" LinkBase="Client\Proto" />
+
+    <!-- P3'-1 新增的战斗 UDP 路由层（同时由 PMUdpRouterCheck 单独门禁） -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Net\**\*.cs" LinkBase="Client\Net" />
+
+    <!-- 被校验的胶水文件 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMNetBootstrap.cs" LinkBase="Client\Boot" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsHost.cs" LinkBase="Client\Boot" />
+
+    <!--
+      R3-B 新增的胶水文件（真实的 DS 宿主与控制代理）：
+        PMDsLobbyAgent.cs   纯 C#（无 Unity 依赖）—— 控制通道/分帧/MAC/结果重发；
+        PMDsSessionHost.cs  DS 侧装配 + 运行时程序化建固定测试碰撞场景。
+      注：PMClientSessionHost.cs 依赖旧客户端链路（UDPSocketManger / HYLDManger 一串），
+      它由 PMClientCheck（已编 Scripts/Server/**）覆盖，这里不重复引入。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsLobbyAgent.cs" LinkBase="Client\Boot" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsSessionHost.cs" LinkBase="Client\Boot" />
+
+    <!-- R3-B 的声明对象 + 生成物（PMR3 在 PMNet 目录之外，不会被上面的 PMNet 通配符收进来） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="Client\PMR3\Generated" />
+
+    <!--
+      R4-B（B3）：运动核心 + 网络 Driver + Unity 适配 + 两个真实宿主。
+      契约要求两个宿主在无 Unity / 无 editor 的环境下也能被“真实编码”验证，
+      因此这里把新核心全部编进来（Driver / Session / Physics 一律真实源码，不桩），
+      Unity 部分由 UnityStubs.cs 提供**形状**替身（不保证语义，见文件头）。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="Client\PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="Client\PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR4MovementCodec.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR4MovementDriver.cs" LinkBase="Client\PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\**\*.cs" LinkBase="Client\PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMClientSessionHost.cs" LinkBase="Client\Boot" />
+
+    <Compile Include="..\..\Client\Assets\Editor\PMDsBuild.cs" LinkBase="Client\Editor" />
+  </ItemGroup>
+
+</Project>

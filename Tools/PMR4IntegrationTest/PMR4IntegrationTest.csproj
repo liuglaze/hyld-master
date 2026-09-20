@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-B / B3 集成门禁（契约 Docs/plans/net-r4-network-contract.md §B3，主计划 P4B4）。
+
+      为什么需要它：
+        B1 的 PMR4NetworkTest 用手工 link（内存投递）验证 Driver 本身；
+        B2 的 PMR4UnityCheck 验证 Unity 适配器能在真实 Unity 程序集上编译。
+        两者都没有证明“真 UDP 上两个客户端各自 AP、互相看到 SP、跳跃事件经可靠通道到达、
+        权威差异能收敛、重同步能升流并挡住旧流、断线能冻结并释放”这条**跨模块闭环**。
+        这只能把真实组件接起来、在真实回环 UDP 上跑才能证明。
+
+      本工程编的都是**真实实现**（不引 UnityEngine，不桩任何本项目类型）：
+        - Client/Assets/Scripts/PMNet/**      （Transport / Session / World / Replication /
+                                                Generated / Control：真实 socket、真实票据验签）
+        - Client/Assets/Scripts/PMPrediction/**（真实预测时间轴 / DS 输入预算 / SP 插值）
+        - Client/Assets/Scripts/PMMover/**     （真实运动模型 + 确定性碰撞替身 PMMoverTestWorld）
+        - Client/Assets/Scripts/PMR3/**        （声明对象 + 真实生成桩 + codec + Driver）
+
+      网络全部是真实回环：真实 UDP（入局/复制/RPC）+ 真实握手（hello/accept）+ 真实票据验签
+      （PMDsTicketIssuer 签发、PMHandshakeServer 逐身份验签）。端口由系统分配，不碰 7777/7778/7800。
+
+      **诚实边界（不可误读为已验收）**：
+        · 碰撞环境是确定性 AABB 替身（PMMoverTestWorld），**不是** Unity PhysX——
+          本机无 Unity，net8 里不可能跑 PhysX；
+        · 没有 Unity 宿主的表现层与相机；输入由测试显式给出（真实宿主用 PMUnityMoverInput 采样）；
+        · 真实 Unity 物理与真实 DS 进程的最终验收是 P4B6（PENDING_USER）。
+
+      运行：dotnet Tools/PMR4IntegrationTest/bin/Release/net8.0/PMR4IntegrationTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR4IntegrationTest</AssemblyName>
+    <RootNamespace>PMR4IntegrationTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实源码面：测的就是这些实现本身。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3" />
+  </ItemGroup>
+
+</Project>

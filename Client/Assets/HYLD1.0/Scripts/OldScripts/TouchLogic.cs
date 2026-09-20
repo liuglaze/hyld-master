@@ -127,7 +127,7 @@ public class TouchLogic : MonoBehaviour
 					return;
 				}
 				if (selfPlayer.hero == null
-					|| selfPlayer.hero.superBullet == null
+					|| !selfPlayer.hero.HasSuperBullet
 					|| selfPlayer.hero.大招实体 == null
 					|| selfPlayer.hero.isSuperMovingType)
 				{

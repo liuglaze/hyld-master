@@ -27,6 +27,19 @@ public class HYLDManger : Singleton<HYLDManger>
     }
     protected override void Awake()
     {
+        // 专用服务器进程（由 Lobby 以 -server 拉起）：不初始化客户端链路。
+        // 判定来自 PMNetRuntime（启动期参数解析，见 PMNetBootstrap）。
+        // 不带 -server 时该值恒为 false，因此客户端路径与改动前逐字一致。
+        //
+        // 保留 base.Awake() 是为了让 Instance 有效（避免散落各处的 HYLDManger.Instance
+        // 调用点空引用）；被跳过的只是 UI / 大厅 TCP / PingPong 这些客户端专属部分。
+        if (PMNet.PMNetRuntime.IsDedicatedServer)
+        {
+            base.Awake();
+            Logging.HYLDDebug.Log("[HYLDManger] 专用服务器进程，跳过客户端初始化（UI / 大厅TCP / PingPong）");
+            return;
+        }
+
         if (HYLDStaticValue.isNet)
         {
             base.Awake();
@@ -74,6 +87,16 @@ public class HYLDManger : Singleton<HYLDManger>
     }
     private void Update()
     {
+        // DS 进程不跑客户端 Update 管线（大厅 PingPong、UI、Trace 刷盘）。
+        // 当前 DS 上 `是否为连接状态` 恒为 false，因此这里并不是在修复一个已发生的故障，
+        // 而是把「客户端 Update 管线不参与 DS」变成显式约定，避免日后有人在下面新增
+        // 一条不依赖该标志的调用（如直接在 Update 里用 _socketManger）而引入空引用。
+        // DS 侧的日志刷盘由 PMDsHost 的心跳负责。
+        if (PMNet.PMNetRuntime.IsDedicatedServer)
+        {
+            return;
+        }
+
         if (!HYLDStaticValue.isNet) return;
         if (HYLDStaticValue.是否为连接状态)
         {
@@ -90,6 +113,10 @@ public class HYLDManger : Singleton<HYLDManger>
         {
             _uiManger.Excute(Time.deltaTime);
         }
+
+        // 扫描大厅请求超时（计划 P1 / B3）。
+        // 只处理「请求-响应」类超时，与下方心跳一起构成客户端侧的网络看护。
+        PmRpcClient.Tick(Time.time);
 
         if (Time.unscaledTime >= _nextTraceFlushTime)
         {
@@ -174,6 +201,14 @@ public class HYLDManger : Singleton<HYLDManger>
     }
     public void Send(MainPack pack)
     {
+        if (_socketManger == null)
+        {
+            // DS 进程不建立大厅 TCP 链路。若仍有调用点走到这里，记为告警而不是空引用，
+            // 避免一个非关键包把无头进程直接打死。
+            Logging.HYLDDebug.LogWarning("[HYLDManger] Send 时大厅 TCP 未初始化（DS 进程或尚未连接），已忽略该包");
+            return;
+        }
+
         //5.发送消息
         _socketManger.Send(pack);
     }

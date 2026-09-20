@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-B / B2 验收：PMUnityMoverInput 的**纯转换与跳跃边沿语义**在 net8 上真跑。
+
+      为什么需要它：
+        "轴钳制 / NaN 拒绝 / 朝向推导 / 死区 / 真实步判定"都是纯函数，但"跳跃边沿缓存到
+        真实步、零 ms 帧不丢边沿、补子步不重复跳跃"是**状态机**性质——它失败的样子是
+        "偶尔跳两下 / 偶尔吞跳"，编译期完全看不出来，只有断言能钉住。
+
+      它编什么（都是**真实源码**，不复制、不快照）：
+        · Client/Assets/Scripts/PMUnity/PMUnityMoverInput.cs（被测对象）；
+        · Client/Assets/Scripts/PMMover/PMMoverState.cs（PMVector3 / PMMoverInput / PMMoverDefaults）；
+        · Client/Assets/Scripts/PMMover/IPMMoverCollisionQuery.cs（PMVector3 的类型依赖面）；
+        · Program.cs 尾部的 UnityEngine 替身（**只**桩 Input / KeyCode 两个类型；见该处边界声明）——
+          刻意不做成独立文件：B2 契约限定「新测试工程最多 Program.cs/csproj」。
+
+      **它刻意不编什么**（这是本工程最重要的边界）：
+        · 不编 PMUnityMoverCollisionQuery.cs / PMUnityMoverPresentation.cs —— 它们依赖
+          UnityEngine.Physics / GameObject / Camera，在 net8 上用替身跑等于"假验物理"。
+          物理与表现由 Tools/PMR4UnityCheck（引真实 Unity DLL 编译）+ Unity 内菜单
+          Client/Assets/Editor/PMR4UnityValidation.cs（真实 PhysX 运行）覆盖。
+        · 不编 PMMoverModel（模型行为属 R4-A 门禁 Tools/PMMoverTest / PMMoverPredictionTest）。
+
+      运行：dotnet build Tools/PMR4UnityAdapterTest -c Release
+            dotnet Tools/PMR4UnityAdapterTest/bin/Release/net8.0/PMR4UnityAdapterTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR4UnityAdapterTest</AssemblyName>
+    <RootNamespace>PMR4UnityAdapterTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityMoverInput.cs" LinkBase="PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\IPMMoverCollisionQuery.cs" LinkBase="PMMover" />
+  </ItemGroup>
+
+</Project>

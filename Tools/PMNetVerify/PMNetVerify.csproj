@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMNetVerify</AssemblyName>
+    <RootNamespace>PMNetVerify</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!--
+      计划 T1：强制 C# 7.3，证明 PMNet 核心与生成产物不越过 Unity 2019.4 的语言面天花板。
+      计划 T2：与 Google.Protobuf 逐字节对照。
+    -->
+    <LangVersion>7.3</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      PMNet 核心与生成产物：直接编译客户端 Assets 下的同一份源码（单一事实源），
+      不做副本，避免框架核心在客户端/服务端之间分叉。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- 对照组：protoc 生成的现有产物 + 其运行时 -->
+    <Compile Include="..\..\Server\Server\SocketProto.cs" LinkBase="SocketProto" />
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Server\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

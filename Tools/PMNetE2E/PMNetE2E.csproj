@@ -1,0 +1,98 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R2-C 端到端总门禁（T40 + T41 收口）。
+
+      为什么需要它：
+        A 块（PMDeclCheck）证明「声明 → ID → 生成物」自洽，B 块（PMReplicationTest）
+        证明「手写描述符 → 复制层」自洽 —— 但两块各自都能全绿，而**接口接不上**：
+        生成物产出的描述符/调用桩/OnRep 分发表从未与运行时复制层、RPC 分发一起跑过。
+        本门禁就把这条链串起来：
+          声明（E2eFixtures.cs）→ PMNetGen 生成 → 零反射注册表 → 复制收敛（T41）→ RPC 双向（T40）。
+
+      生成物怎么来（二选一，本项目选「csproj pre-build target」）：
+        `PMNetGenE2eFixtures` target 在 BeforeCompile 之前调 PMNetGen（decl-gen 模式）写出
+        `Generated/` 与 `e2e-ids.json`；程序**运行期**再调一次 decl-check 模式做逐字节比对，
+        把「编译进 DLL 的产物」与「此刻的声明」钉在一起。
+        选 pre-build 的理由：产物必须参与本工程的编译（`<Compile Include="Generated\**\*.cs" />`），
+        而 `Compile` 通配符在工程求值期展开 —— 若改成运行期生成，
+        夹具里对 `PMNet_<方法名>` / 生成描述符的引用会在**首次编译**时找不到符号。
+
+      运行：dotnet Tools/PMNetE2E/bin/Release/net8.0/PMNetE2E.dll
+      退出码：0 = 全部通过；1 = 否则
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMNetE2E</AssemblyName>
+    <RootNamespace>PMNetE2E</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      求值期把「生成物是否存在」记一份快照。
+      原因：`Compile` 通配符是在**工程求值期**展开的，而生成目标跑在编译前 ——
+      若 checkout 里还没有 Generated/（首次构建），通配符展开为空，
+      目标虽然生成了文件却不会被编译，于是夹具引用生成成员时会报一堆 CS0103/CS0117。
+      下面这个快照让目标在「求值期确实是空的」时补一次 Include（不会重复）。
+    -->
+    <PME2eGeneratedAtEvalTime Include="Generated\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="E2eFixtures.cs" />
+    <!-- 生成产物：由 PMNetGenE2eFixtures target 在编译前刷新。 -->
+    <Compile Include="Generated\**\*.cs" />
+    <!--
+      直接编真实源码：端到端测的就是这份实现本身。
+      排除 Client 侧的 Generated/**（那是 proto 产物，依赖 Google.Protobuf，
+      与 R2 的声明生成无关，引进来只会掩盖链接错误 —— 见主计划 §9.5 教训 7）。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs"
+             Exclude="..\..\Client\Assets\Scripts\PMNet\Generated\**\*.cs"
+             LinkBase="PMNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      只用来做「生成物 + 夹具 + PMNet 运行时在 C# 7.3 / netstandard2.0 下真编译」这一条断言。
+      与 PMNetGen / PMDeclCheck 用的是同一个包，不引入新的第三方依赖。
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只保证生成器先被构建出来（本工程不引用它的程序集，是当进程调用的）。 -->
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <!--
+    ★ 生成步骤：契约 §7-C「门禁自己调用 PMNetGen」。
+
+    传的是**夹具文件**而不是整个工程目录 —— 若传目录，`Program.cs` 也会被当成声明源扫一遍
+    （虽然它没有标记类，但扫描范围一旦放宽，"夹具里到底声明了什么"就不再可复核）。
+    PMNetGen 的声明模式接受「目录或 .cs 文件」，这里刻意钉到单文件。
+  -->
+  <Target Name="PMNetGenE2eFixtures" BeforeTargets="BeforeCompile">
+    <PropertyGroup>
+      <PMNetGenDll>$(MSBuildThisFileDirectory)..\PMNetGen\bin\$(Configuration)\net8.0\PMNetGen.dll</PMNetGenDll>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(PMNetGenDll)')"
+           Text="PMNetGen.dll 不存在：$(PMNetGenDll)。请先 dotnet build Tools/PMNetGen -c $(Configuration)" />
+    <Exec Command="dotnet &quot;$(PMNetGenDll)&quot; --decl-gen &quot;$(MSBuildThisFileDirectory)E2eFixtures.cs&quot; --out-dir &quot;$(MSBuildThisFileDirectory)Generated&quot; --id-lock &quot;$(MSBuildThisFileDirectory)e2e-ids.json&quot;"
+          WorkingDirectory="$(MSBuildThisFileDirectory)" />
+    <!-- 仅在「求值期生成物为空」时补 Include；有生成物时求值期已经收了，补了会重复。 -->
+    <ItemGroup Condition="'@(PME2eGeneratedAtEvalTime)' == ''">
+      <Compile Include="Generated\**\*.cs" />
+    </ItemGroup>
+  </Target>
+
+</Project>

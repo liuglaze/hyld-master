@@ -11,7 +11,41 @@ using UnityEngine.Serialization;
 using Image = UnityEngine.UI.Image;
 
 /// <summary>
-/// 
+/// 玩家世界表现体（血条/名字/受击飘字/死亡动画）。
+///
+/// <para>
+/// <b>P3'-3c 改动</b>：删掉了四个**只在客户端生效、且联机下无效或有害**的机制
+/// （乌鸦毒 tick 扣血、回血、护盾计时、减速/加速）。它们共用同一个病灶：
+/// 由客户端直接改写「权威字段」（<c>Players[].playerBloodValue</c> / <c>移动速度</c>），
+/// 而服务端从不实现这些机制、每批权威帧还会把 HP 覆写回去。
+/// 结果是这段代码在联机下要么完全无效（写了立刻被覆盖），
+/// 要么主动制造预测分歧（改 <c>移动速度</c> 会让本地预测与服务端权威持续对不上）。
+/// </para>
+///
+/// <para>
+/// 删掉的直接证据（不只是「推测无效」）：
+/// <list type="bullet">
+/// <item>触发链不可达：`shell.cs:344/388` 与 `移动型大招.cs:89` 都在碰撞回调里，
+/// 而联机的视觉子弹碰撞体被全部禁用（<c>shell.cs:129-139</c>）→ <c>OnTriggerEnter</c> 永不触发。</item>
+/// <item>`isPoisoning` 的唯一写入点是 <c>shell.cs:344</c>（同上，不可达）。</item>
+/// <item>`isCanCure` 全项目**没有任何地方置 true**（默认 false，只有 `HYLDBulletManger.cs:130` 置 false）
+/// → 回血条件 `isCanCure1 &amp;&amp; isCanCure &amp;&amp; ...` 恒不成立。</item>
+/// <item>护盾与减速的两段代码**一旦执行就会 NRE**：<c>防护罩</c> 字段在所有 prefab 里都没有绑定（运行时为 null），
+/// 且全资产里不存在名为 `减速` 的 GameObject（`Find("减速")` 返回 null）—— 说明确实从来没有人走过它们。</item>
+/// </list>
+/// </para>
+///
+/// <para>
+/// <b>刻意保留</b>：HP 从权威值下降时的受击飘字/动画（<c>playerBlood &lt; tempBlood</c> 分支）——
+/// 那是**纯表现**，读的是权威值，不改任何东西。死亡判定同理，
+/// 见 <see cref="playerDieLogic"/> 上的说明。
+/// </para>
+///
+/// <para>
+/// <b>刻意不动</b>：<c>TextLogic.cs</c>（试玩模式的机器人）里有另一份毒/减速实现。
+/// 它用的是自己硬编码的 <c>playerBlood = 10000</c>，**从不读写** <c>Players[].playerBloodValue</c>，
+/// 因此不是「第二权威源」。删它只会破坏单机试玩，对权威收口没有贡献。
+/// </para>
 /// </summary>
 public class PlayerLogic : MonoBehaviour
 {
@@ -36,12 +70,6 @@ public class PlayerLogic : MonoBehaviour
 
 	public Animator bodyAnimator;
 
-	private float timerisPoisoning = 0;
-	private int PoisoningTime = 0;
-	private float cureTime = 0;
-	private float damageTime = 0;
-	public GameObject 防护罩;
-	private float 防护罩时间戳 = 0;
 	void Start ()
 	{
 		playerBlood=HYLDStaticValue.Players[playerID].playerBloodValue;
@@ -52,7 +80,6 @@ public class PlayerLogic : MonoBehaviour
 		changeColor(HYLDStaticValue.Players[playerID].playerType);
 		tempBlood = playerBlood;
 
-		原始速度 = HYLDStaticValue.Players[playerID].移动速度;
 		if(HYLDStaticValue.ModenName== "HYLDTryGame")
 		试玩模式复活点 = transform.position;
 	}
@@ -95,57 +122,27 @@ public class PlayerLogic : MonoBehaviour
 		if (HYLDStaticValue.isloading) return;
 
 		
-		//因为吃道具等因素使得玩家的最大血上限不等于英雄本来的血上限
-		if (playerBloodMax != HYLDStaticValue.Players[playerID].hero.BloodValue)
+		//最大血上限来自**每玩家状态**（P3'-2）：初值是共享配置，之后可能被权威值覆盖或被道具改过。
+		//历史实现读的是 hero.BloodValue（共享配置），使得「同英雄所有玩家」的上限被一起改。
+		if (playerBloodMax != HYLDStaticValue.Players[playerID].playerBloodMax)
 		{
 			//玩家的血量已经满血了，则让玩家增加到最新的血上限状态
 			if (playerBlood == playerBloodMax)
 			{
-				playerBloodMax = HYLDStaticValue.Players[playerID].hero.BloodValue;
+				playerBloodMax = HYLDStaticValue.Players[playerID].playerBloodMax;
 				playerBlood = playerBloodMax;
 				ImageChangeLogic(playerBloodImage, playerBlood, playerBloodMax);
 			}
 			//否则只改变最大生命值
 			else
 			{
-				playerBloodMax = HYLDStaticValue.Players[playerID].hero.BloodValue;
+				playerBloodMax = HYLDStaticValue.Players[playerID].playerBloodMax;
 			}
 
 		}
-
-
-		#region 乌鸦毒标记
-		timerisPoisoning += Time.deltaTime;
-		if (HYLDStaticValue.Players[playerID].isPoisoning && timerisPoisoning >= 1)
-		{
-			if (PoisoningTime >= 5)
-			{
-				PoisoningTime = 0;
-				HYLDStaticValue.Players[playerID].isPoisoning = false;
-				HYLDStaticValue.Players[playerID].body.transform.Find("Canvas").Find("HeiYa").gameObject.SetActive(false);
-				return;
-			}
-			HYLDStaticValue.Players[playerID].body.transform.Find("Canvas").Find("HeiYa").gameObject.SetActive(true);
-			timerisPoisoning = 0;
-			PoisoningTime++;
-			playerBlood -= 85;
-			HYLDStaticValue.Players[playerID].playerBloodValue -= 85;
-			playerBloodValueText.text = HYLDStaticValue.Players[playerID].playerBloodValue.ToString();
-			selfUITransform.position = selfBodyTransform.position;
-			ImageChangeLogic(playerBloodImage, playerBlood, playerBloodMax);
-			damageTime = 0;
-			HYLDStaticValue.Players[playerID].isCanCure1 = false;
-			playerHurt(85);
-			if (playerBlood < 0)//玩家死亡
-			{
-				HYLDStaticValue.ConfirmWinOrNot = true;
-				playerDieLogic();
-			}
-			return;
-		}
-		#endregion
 
 		//血量，位置
+		// P3'-3c：HP 只从权威值读进来显示，不再在本地做任何加减。
 		playerBlood = HYLDStaticValue.Players[playerID].playerBloodValue;
 		playerBloodValueText.text = HYLDStaticValue.Players[playerID].playerBloodValue.ToString();
 		selfUITransform.position = selfBodyTransform.position;
@@ -164,41 +161,29 @@ public class PlayerLogic : MonoBehaviour
 		ImageChangeLogic(playerBloodImage, playerBlood, playerBloodMax);
 		ImageChangeLogic(playerManaImage, HYLDStaticValue.Players[playerID].playerManaValue, 90);
 
-		//护盾
-		if (HYLDStaticValue.Players[playerID].是否有防护罩)
+		//受击表现：HP 相对自己上一帧下降了才飘字/播受击动画。
+		//
+		//注意这里**只读**权威 HP（playerBlood 上面刚从 Players[].playerBloodValue 取），
+		//不做任何扣血 —— 扣血是服务端的事。历史实现在这里连带做了「毒伤/回血」，
+		//以及用 `damageTime`/`cureTime` 给回血计时，均已删除（见类注释）。
+		if (playerBlood < tempBlood)
 		{
-			防护罩.SetActive(true);
-			防护罩时间戳 += Time.deltaTime;
-			if (防护罩时间戳 > 3)
-			{
-				防护罩时间戳 = 0;
-				防护罩.SetActive(false);
-				HYLDStaticValue.Players[playerID].是否有防护罩 = false;
-			}
-			return;
-		}
-		//回血和扣血判断
-		cureTime += Time.deltaTime;
-		damageTime += Time.deltaTime;
-		if (damageTime > 3f && !HYLDStaticValue.Players[playerID].isPoisoning) HYLDStaticValue.Players[playerID].isCanCure1 = true;//加血条件
-		if (playerBlood < tempBlood)//扣血了，则不能回复生命
-		{
-			damageTime = 0;
-			HYLDStaticValue.Players[playerID].isCanCure1 = false;
 			playerHurt(tempBlood - playerBlood);
 		}
-		//如果可以回复生命并且血量到达回复生命的时间。
-		//Logging.HYLDDebug.LogError($"{HYLDStaticValue.Players[playerID].isCanCure} + {HYLDStaticValue.Players[playerID].isCanCure1} + {cureTime > 1f}");
-		if (HYLDStaticValue.Players[playerID].isCanCure1 && HYLDStaticValue.Players[playerID].isCanCure&&cureTime>1f)//加血了
-		{
-			cureTime = 0;
-			playerCure();
-		}
 		tempBlood = playerBlood;
-		
-		if (playerBlood < 0)//玩家死亡
+
+		//【兜底死亡判定 —— 不参与权威】
+		//
+		//权威死亡结论来自服务端：`BattleData.HitEvent.cs` 会按 `IsDead` 置 `isNotDie=false`
+		//并播死亡动画。这里保留的是一条**表现层兜底**：如果服务端的死亡状态这一刻还没到，
+		//但本地读到的权威 HP 已经小于 0，就先做「关 UI / 关碰撞体 / 播死亡动画」这些表现动作，
+		//避免出现「血条空了人还站着」的观感。
+		//
+		//它**不决定胜负**（胜负由服务端 `GameOver` 下发，写 `HYLDStaticValue.玩家输了吗`），
+		//也不改 HP。判定条件里的 `playerBlood` 是权威值的本地镜像，所以这里不会与权威打架。
+		if (playerBlood < 0)
 		{
-            HYLDStaticValue.ConfirmWinOrNot = true;
+			HYLDStaticValue.ConfirmWinOrNot = true;
 			playerDieLogic();
 		}
 		
@@ -216,17 +201,8 @@ public class PlayerLogic : MonoBehaviour
 		changeGameObject.transform.localScale=temp;
 	}
 	
-	void playerCure()
-	{
-		HYLDStaticValue.Players[playerID].playerBloodValue+=(int)(HYLDStaticValue.Players[playerID].hero.BloodValue*0.18);
-		if(HYLDStaticValue.Players[playerID].playerBloodValue>= HYLDStaticValue.Players[playerID].hero.BloodValue)
-		{
-			HYLDStaticValue.Players[playerID].playerBloodValue = HYLDStaticValue.Players[playerID].hero.BloodValue;
-		}
-	}
-
 	Vector3 试玩模式复活点;
-	void playerRevive()//复活 开UI 开人物 切换位置  给防护盾
+	void playerRevive()//复活 开UI 开人物 切换位置
 	{
 		Vector3 RevivePositon=new Vector3(-999,0,-999);;
 		HYLDStaticValue.Players[playerID].isNotDie = true;
@@ -263,15 +239,14 @@ public class PlayerLogic : MonoBehaviour
 		selfBodyTransform.GetComponent<BoxCollider>().enabled = true;
 		selfUITransform.gameObject.SetActive(true);
 		bodyAnimator.SetBool("Die", false);
-		HYLDStaticValue.Players[playerID].是否有防护罩 = true;
+		// P3'-3c：原本这里还会给复活者一个防护罩（`Players[playerID].是否有防护罩 = true`）。
+		// 已随护盾机制一并删除 —— 服务端不实现护盾，这个标记在联机下没有任何正确含义。
 	}
 	void playerDieLogic()//死亡：关UI关人物 放动画（联网模式不复活，等服务端 GameOver）
 	{
-		#region  乌鸦
-		PoisoningTime = 0;
-		HYLDStaticValue.Players[playerID].isPoisoning = false;
-		HYLDStaticValue.Players[playerID].body.transform.Find("Canvas").Find("HeiYa").gameObject.SetActive(false);
-        #endregion
+		// P3'-3c：原这里还会清毒状态（PoisoningTime / isPoisoning / 隐藏 HeiYa 图标）。
+		// 毒机制已删除；HeiYa 图标在 prefab 里的默认状态就是未激活（m_IsActive: 0），
+		// 所以不再需要在这里兜底隐藏它。
         selfBodyTransform.GetComponent<BoxCollider>().enabled = false;
 
 		HYLDStaticValue.Players[playerID].isNotDie = false;
@@ -313,24 +288,13 @@ public class PlayerLogic : MonoBehaviour
 		}
 		HYLDStaticValue.Players[playerID].gemTotal = 0;
 	}
-	#region 减速
-	private float 原始速度;
-	public void 减速(float value)
-	{
-		//Logging.HYLDDebug.LogError(playerID);
-		//Logging.HYLDDebug.LogError(HYLDStaticValue.Players[playerID].hero.移动速度);
-		HYLDStaticValue.Players[playerID].移动速度 = 原始速度-value;
-		//Logging.HYLDDebug.LogError(HYLDStaticValue.Players[playerID].hero.移动速度);
-		HYLDStaticValue.Players[playerID].body.transform.Find("Canvas").Find("减速").gameObject.SetActive(true);
-		CancelInvoke();
-		Invoke("Recover", 3);
-	}
-
-	public void Recover()
-	{
-		HYLDStaticValue.Players[playerID].移动速度 =原始速度;
-		HYLDStaticValue.Players[playerID].body.transform.Find("Canvas").Find("减速").gameObject.SetActive(false);
-	}
-	#endregion
+	// P3'-3c：原 `#region 减速`（减速/Recover + 原始速度）已删除。
+	//
+	// 它改写 `Players[].移动速度` —— 那是**客户端预测的输入**。服务端的移速来自配置表
+	// （`Battle.cs:GetMoveSpeedFor`），所以本地改速只会让预测与权威分叉，随后被 MoveAck
+	// 持续回校正（表现为位置被「拉回」）。两个调用点（`shell.cs:388` 贝亚减速、
+	// `移动型大招.cs:89` 麦克斯给队友加速）在联机下都不可达。
+	//
+	// 另外这段代码一旦执行就会 NRE：`Find("Canvas").Find("减速")` 找不到同名子物体
+	// （全资产确认不存在），`防护罩` 也没有 prefab 绑定。这也佐证了它从未被真正走过。
 }
-

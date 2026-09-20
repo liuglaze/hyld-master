@@ -1,4 +1,4 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -35,15 +35,15 @@ public abstract class IFSMState
     {
         if(trans==FSMTransition.NullTransition)
         {
-            Logging.HYLDDebug.LogError("State Error!!  trans´íÎó");
+            Logging.HYLDDebug.LogError("State Error!!  transé”™è¯¯");
         }
         else if(id==FSMStateID.None)
         {
-            Logging.HYLDDebug.LogError("State Error!! id´íÎó");
+            Logging.HYLDDebug.LogError("State Error!! idé”™è¯¯");
         }
         else if(mMap.ContainsKey(trans))
         {
-            Logging.HYLDDebug.LogError("State Error!! µ±Ç°ÖµÒÑ¾­´æÔÚ");
+            Logging.HYLDDebug.LogError("State Error!! å½“å‰å€¼å·²ç»å­˜åœ¨");
         }
         else
         mMap.Add(trans, id);
@@ -56,7 +56,7 @@ public abstract class IFSMState
         }
         else
         {
-            Logging.HYLDDebug.LogError("State Error!! µ±Ç°key²»´æÔÚ");
+            Logging.HYLDDebug.LogError("State Error!! å½“å‰keyä¸å­˜åœ¨");
         }
     }
 
@@ -68,7 +68,7 @@ public abstract class IFSMState
         }
         else
         {
-            Logging.HYLDDebug.LogError("State Error!! µ±Ç°key²»´æÔÚ");
+            Logging.HYLDDebug.LogError("State Error!! å½“å‰keyä¸å­˜åœ¨");
             return FSMStateID.None;
         }
     }
@@ -99,7 +99,7 @@ public class AIFSMSystem
     {
         if(state==null)
         {
-            Logging.HYLDDebug.LogError("FSMSystem Error£¡ ÒªÌí¼ÓµÄ×´Ì¬Îª¿Õ");
+            Logging.HYLDDebug.LogError("FSMSystem Errorï¼ è¦æ·»åŠ çš„çŠ¶æ€ä¸ºç©º");
         }
         if(mState.Count==0)
         {
@@ -111,7 +111,7 @@ public class AIFSMSystem
         {
             if(s.StateID==state.StateID)
             {
-                Logging.HYLDDebug.LogError($"FSMSystem Error£¡ ÒªÌí¼ÓµÄ×´Ì¬{s.StateID}ÎªÒÑ¾­Ìí¼Ó¹ıÁË");
+                Logging.HYLDDebug.LogError($"FSMSystem Errorï¼ è¦æ·»åŠ çš„çŠ¶æ€{s.StateID}ä¸ºå·²ç»æ·»åŠ è¿‡äº†");
                 return;
             }
 
@@ -122,7 +122,7 @@ public class AIFSMSystem
     {
         if(stateid==FSMStateID.None)
         {
-            Logging.HYLDDebug.LogError("FSMSystem Error£¡ ÒªÉ¾³ıµÄ×´Ì¬Îª¿Õ");
+            Logging.HYLDDebug.LogError("FSMSystem Errorï¼ è¦åˆ é™¤çš„çŠ¶æ€ä¸ºç©º");
             return;
         }
         foreach (IFSMState s in mState)
@@ -134,7 +134,7 @@ public class AIFSMSystem
             }
 
         }
-        Logging.HYLDDebug.LogError("FSMSystem Error£¡ ÒªÉ¾³ıµÄ×´Ì¬Îª²»ÔÚ×´Ì¬ÁĞ±í");
+        Logging.HYLDDebug.LogError("FSMSystem Errorï¼ è¦åˆ é™¤çš„çŠ¶æ€ä¸ºä¸åœ¨çŠ¶æ€åˆ—è¡¨");
 
     }
 
@@ -142,13 +142,13 @@ public class AIFSMSystem
     {
         if(trans==FSMTransition.NullTransition)
         {
-            Logging.HYLDDebug.LogError("FSMSystem Error£¡ Òª×ª»»µÄ×´Ì¬Îª¿Õ");
+            Logging.HYLDDebug.LogError("FSMSystem Errorï¼ è¦è½¬æ¢çš„çŠ¶æ€ä¸ºç©º");
             return;
         }
         FSMStateID nextstateID = mCurrentFSMState.GetOutPutState(trans);
         if (nextstateID == FSMStateID.None)
         {
-            Logging.HYLDDebug.LogError("FSMSystem Error£¡ Òª×ª»»µÄidÎª¿Õ");
+            Logging.HYLDDebug.LogError("FSMSystem Errorï¼ è¦è½¬æ¢çš„idä¸ºç©º");
             return;
         }
         foreach(IFSMState s in mState)
@@ -161,7 +161,7 @@ public class AIFSMSystem
                 return;
             }
         }
-        Logging.HYLDDebug.LogError("FSMSystem Error£¡ Òª×ª»»µÄidÎª¿Õ");
+        Logging.HYLDDebug.LogError("FSMSystem Errorï¼ è¦è½¬æ¢çš„idä¸ºç©º");
     }
 }
 

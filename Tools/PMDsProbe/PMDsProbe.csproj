@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      DS 协议探针：向运行中的 HyldDS 发送真实 protobuf 包并检查响应。
+
+      为什么需要它：
+      DS 是**无头进程**，除了看它的日志，没有别的方式判断「包到底有没有进来、有没有被路由」。
+      在 P3'-1 之前，占位协议是固定字符串 PMDS-PONG，随便 ping 一下就完事；
+      现在有了真实路由层，验证就必须构造**合法 protobuf 包**（不同的 ActionCode 走不同字段），
+      手搓字节不可行，所以固定成工具。
+
+      用途（后续阶段会一直用）：
+        - P3'-1：验证 BattleReady 建链 / 业务包分发 / Ping-Pong
+        - P3'-3：验证权威帧下行、移动上行、ack 回带
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMDsProbe</AssemblyName>
+    <RootNamespace>PMDsProbe</RootNamespace>
+    <NoWarn>CS8981</NoWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Client\Assets\Scripts\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\SocketProto.cs" LinkBase="Proto" />
+  </ItemGroup>
+
+</Project>

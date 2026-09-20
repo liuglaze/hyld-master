@@ -1,4 +1,4 @@
-/*
+﻿/*
  ****************
  * Author:        邓龙浩
  * CreatTime:  
@@ -77,7 +77,11 @@ public class Boom : MonoBehaviour
                 {
                     if (HYLDStaticValue.Players[targetPlayerId].teamID == HYLDStaticValue.Players[BoomOnwerID].teamID)
                     {
-                        if (HYLDStaticValue.Players[targetPlayerId].是否有防护罩) return;
+                        // P3'-3c：删掉了「是否有防护罩」检查（该字段已随护盾机制删除）。
+                        // 下面这行是**客户端改写权威 HP**，与 P3'-3c 处理的病灶同类；
+                        // 已核实它在联机下**不可达**（本 Boom 只由单机链 BulletLogic/BoomCreater 生成：
+                        // 联机生成的两组 prefab（BetterShells / 大招实体）与含 BoomCreater 的 prefab 交集为 0），
+                        // 所以本次只标注、未改动，以免顺手改掉单机玩法。
                         if (BeHurted[targetPlayerId] != true)
                         {
                             HYLDStaticValue.Players[targetPlayerId].playerBloodValue -= BoomDamage;
@@ -90,7 +94,8 @@ public class Boom : MonoBehaviour
                 {
                     if (HYLDStaticValue.Players[targetPlayerId].teamID != HYLDStaticValue.Players[BoomOnwerID].teamID)
                     {
-                        if (HYLDStaticValue.Players[targetPlayerId].是否有防护罩) return;
+                        // P3'-3c：护盾检查已删（同 A）。这行同样是客户端改写权威 HP，
+                        // 联机不可达，本次未动。
                         if (BeHurted[targetPlayerId] != true)
                         {
                             HYLDStaticValue.Players[targetPlayerId].playerBloodValue -= BoomDamage;

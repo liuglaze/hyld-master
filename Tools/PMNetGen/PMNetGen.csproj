@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMNetGen</AssemblyName>
+    <RootNamespace>PMNetGen</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!--
+      R2 起本工具多了一项职责：用 Roslyn 扫描业务侧的 `[PMNetworkObject]` 声明。
+      因此多了唯一的第三方依赖 Microsoft.CodeAnalysis.CSharp（4.11.0，与本机
+      NuGet 缓存内版本一致，可离线还原）。
+
+      NoWarn 说明：
+        CS1591 —— 生成器内部类不需要 XML 文档；
+        NU1603/NU1701 —— 4.11.0 的依赖组选择是 net8.0，不涉及兼容回退。
+    -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Roslyn：只用来做**语法级**声明扫描（不建 Compilation、不引运行时程序集），
+      因为生成期只需要「谁是 [PMNetworkObject]、它声明了哪些被标记的成员」。
+    -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      声明模型 IR（PMDeclModel / PMIdLock）与**运行时侧的 PMNet 核心**。
+      后者是刻意链接进来的：稳定 ID 与协议摘要必须由生成期与运行期算出**同一个**值，
+      抄一份实现迟早会分叉，而分叉的表现是「线协议静默不兼容」（见 PMStableHash 注释）。
+    -->
+    <ProjectReference Include="..\PMDeclModel\PMDeclModel.csproj" />
+  </ItemGroup>
+
+</Project>

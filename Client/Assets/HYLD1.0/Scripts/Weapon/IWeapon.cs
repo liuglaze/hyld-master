@@ -1,8 +1,8 @@
-/*
+ï»¿/*
  * * * * * * * * * * * * * * * * 
- * Author:        ÕÔÔªâı
- * CreatTime:  2020/11/7 2£º38 
- * Description:  ÎäÆ÷Àà
+ * Author:        èµµå…ƒæº
+ * CreatTime:  2020/11/7 2ï¼š38 
+ * Description:  æ­¦å™¨ç±»
  * * * * * * * * * * * * * * * * 
 */
 using System.Collections;
@@ -55,16 +55,16 @@ public abstract class IWeapon
 
     public void Fire()
     {
-        //ÏÔÊ¾Ç¹¿ÚÌØĞ§
+        //æ˜¾ç¤ºæªå£ç‰¹æ•ˆ
         PlayMuzzleEffect();
 
-        //ÏÔÊ¾×Óµ¯¹ì¼£ÌØĞ§
+        //æ˜¾ç¤ºå­å¼¹è½¨è¿¹ç‰¹æ•ˆ
         PlayBulletEffect();
 
-        //ÉèÖÃÌØĞ§ÏÔÊ¾Ê±¼ä
+        //è®¾ç½®ç‰¹æ•ˆæ˜¾ç¤ºæ—¶é—´
         SetEffetDisplayTime();
 
-        //²¥·ÅÉùÒô
+        //æ’­æ”¾å£°éŸ³
         PlaySound();
     }
 
@@ -104,7 +104,7 @@ public abstract class IWeapon
 }
 public class WeaponBaseAttribute
 {
-    //Ó¢ĞÛÇ¹ÊôĞÔ
+    //è‹±é›„æªå±æ€§
     protected string mName;
     protected string mAssetName;
     protected WeaponType mWeaponType;
@@ -119,7 +119,7 @@ public class WeaponBaseAttribute
     protected int mReloadSpeed;
 
     
-    public WeaponBaseAttribute(string name, string assetName,WeaponType weaponType,float Ã¿´Î·¢Éä¼ä¸ô, int _×°µ¯ËÙ¶È,float _shootDistance, float _shootWidth, int _bulletCount, int _bulletDamage, float _LaunchAngle, float _speed, int _bulletCountByEachTime, float _EachTimebulletsShootSpace = 0.1f)
+    public WeaponBaseAttribute(string name, string assetName,WeaponType weaponType,float æ¯æ¬¡å‘å°„é—´éš”, int _è£…å¼¹é€Ÿåº¦,float _shootDistance, float _shootWidth, int _bulletCount, int _bulletDamage, float _LaunchAngle, float _speed, int _bulletCountByEachTime, float _EachTimebulletsShootSpace = 0.1f)
     {
 
         mName = name;
@@ -133,8 +133,8 @@ public class WeaponBaseAttribute
         mbulletshootspeed = _speed;
         mbulletCountByEachTime = _bulletCountByEachTime;
         mEachTimebulletsShootSpace = _EachTimebulletsShootSpace;
-        mEachTimebulletsShootSpace = Ã¿´Î·¢Éä¼ä¸ô;
-        mReloadSpeed = _×°µ¯ËÙ¶È;
+        mEachTimebulletsShootSpace = æ¯æ¬¡å‘å°„é—´éš”;
+        mReloadSpeed = _è£…å¼¹é€Ÿåº¦;
     }
     public string name { get { return mName; } }
     public string assetName { get { return mAssetName; } }

@@ -1,4 +1,4 @@
-using System;
+ï»¿using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -24,21 +24,21 @@ public class AttributeFactory : IAttributeFactory
     {
         mCharacterBaseAttrDict = new Dictionary<HeroName, CharacterBaseAttribute>
         {
-            { HeroName.DaLiEr, new CharacterBaseAttribute("ĞÂÊÖÊ¿±ø", 80, 2.5f, "RookieIcon", "Player2") },
-            { HeroName.GongNiu, new CharacterBaseAttribute("ÖĞÊ¿Ê¿±ø", 90, 3, "SergeantIcon", "Player3") },
-            { HeroName.RuiKe, new CharacterBaseAttribute("ÉÏÎ¾Ê¿±ø", 100, 3, "CaptainIcon", "Player1") },
-            { HeroName.BuLuoKe, new CharacterBaseAttribute("Ğ¡¾«Áé", 100, 3, "ElfIcon", "Player1") },
-            { HeroName.GeEr, new CharacterBaseAttribute("¹ÖÎï", 120, 2, "OgreIcon", "Player2") },
-            { HeroName.HeiYa, new CharacterBaseAttribute("¾ŞÄ§", 200, 1, "TrollIcon", "Player3") }
+            { HeroName.DaLiEr, new CharacterBaseAttribute("æ–°æ‰‹å£«å…µ", 80, 2.5f, "RookieIcon", "Player2") },
+            { HeroName.GongNiu, new CharacterBaseAttribute("ä¸­å£«å£«å…µ", 90, 3, "SergeantIcon", "Player3") },
+            { HeroName.RuiKe, new CharacterBaseAttribute("ä¸Šå°‰å£«å…µ", 100, 3, "CaptainIcon", "Player1") },
+            { HeroName.BuLuoKe, new CharacterBaseAttribute("å°ç²¾çµ", 100, 3, "ElfIcon", "Player1") },
+            { HeroName.GeEr, new CharacterBaseAttribute("æ€ªç‰©", 120, 2, "OgreIcon", "Player2") },
+            { HeroName.HeiYa, new CharacterBaseAttribute("å·¨é­”", 200, 1, "TrollIcon", "Player3") }
         };
     }
     private void InitWeaponBaseAttr()
     {
         mWeaponBaseAttrDict = new Dictionary<HeroName, WeaponBaseAttribute>
         {
-            { HeroName.DaLiEr, new WeaponBaseAttribute("ÊÖÇ¹", "WeaponGun", WeaponType.Gun, 0.5f, 2, 6, 0, 30, 90, 45, 16, 15, 0.1f) },
-            { HeroName.GongNiu, new WeaponBaseAttribute("³¤Ç¹", "WeaponRifle", WeaponType.Rifle, 0.5f, 1, 4, 0, 50, 45, 40, 8, 10, 0.01f) },
-            { HeroName.RuiKe, new WeaponBaseAttribute("»ğ¼ı", "WeaponRocket", WeaponType.Rocket, 1f, 1, 10, 0.04f, 5, 400, 0, 13, 1, 0.1f) }
+            { HeroName.DaLiEr, new WeaponBaseAttribute("æ‰‹æª", "WeaponGun", WeaponType.Gun, 0.5f, 2, 6, 0, 30, 90, 45, 16, 15, 0.1f) },
+            { HeroName.GongNiu, new WeaponBaseAttribute("é•¿æª", "WeaponRifle", WeaponType.Rifle, 0.5f, 1, 4, 0, 50, 45, 40, 8, 10, 0.01f) },
+            { HeroName.RuiKe, new WeaponBaseAttribute("ç«ç®­", "WeaponRocket", WeaponType.Rocket, 1f, 1, 10, 0.04f, 5, 400, 0, 13, 1, 0.1f) }
         };
     }
     public CharacterBaseAttribute GetCharacterBaseAttr(HeroName hero)
@@ -49,7 +49,7 @@ public class AttributeFactory : IAttributeFactory
         }
         else
         {
-            Logging.HYLDDebug.LogError("ÎŞ·¨¸ù¾İÀàĞÍ:" + hero + "µÃµ½½ÇÉ«»ù´¡ÊôĞÔ(GetCharacterBaseAttr)"); return null;
+            Logging.HYLDDebug.LogError("æ— æ³•æ ¹æ®ç±»å‹:" + hero + "å¾—åˆ°è§’è‰²åŸºç¡€å±æ€§(GetCharacterBaseAttr)"); return null;
         }
     }
 
@@ -62,7 +62,7 @@ public class AttributeFactory : IAttributeFactory
         }
         else
         {
-            Logging.HYLDDebug.LogError("ÎŞ·¨¸ù¾İÀàĞÍ:" + hero + "µÃµ½ÎäÆ÷»ù´¡ÊôĞÔ"); return null;
+            Logging.HYLDDebug.LogError("æ— æ³•æ ¹æ®ç±»å‹:" + hero + "å¾—åˆ°æ­¦å™¨åŸºç¡€å±æ€§"); return null;
         }
     }
 }

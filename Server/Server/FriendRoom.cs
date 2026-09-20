@@ -139,22 +139,12 @@ namespace Server
             }
 
             client.PlayerState = PlayerState.PlayerOnline;
-            /*
-            Logging.Debug.Log("Start Find  FriendsDic:\n");
-            foreach (Client friend in client.FriendsDic.Values)
-            {
-                Logging.Debug.Log(friend.PlayerName+":  "+friend.FriendActiveList.Count);
-                client.FriendActiveList.Add(friend);
-            }
-            Logging.Debug.Log("End Find  FriendsDic:\n");*/
-            client.UpdateMyselfInfo();
 
             client.FriendRoom = null;
             if (roomIsEmpty)
             {
                 FriendRoomController friendRoomController = (FriendRoomController)_server._controllerManger.GetControllerByName(nameof(FriendRoomController));
                 friendRoomController.RemoveFriendRoom(this);
-                client.UpdateActiveFriendInfo();
                 return;
             }
 

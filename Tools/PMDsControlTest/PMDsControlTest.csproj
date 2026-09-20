@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R3-A1 验收：控制协议 / 票据 / Lobby 进程协调器。
+
+      事实来源：Docs/plans/net-r3-control-contract.md §3/§5 与
+                Docs/plans/net-architecture-migration.md 的 R3A1/R3A2 行。
+
+      它验证什么：
+        - 控制帧编解码的**严格有界**行为（半包/粘包/超限/未知字段/尾部字节）；
+        - 票据的 HMAC-SHA256 绑定与各类拒绝原因（错局/错世代/错摘要/过期/篡改）；
+        - Lobby 侧状态机（Allocated..Exited）在虚拟时钟与故障注入下的全部转移；
+        - 结果幂等、ResultAck 重发、终态资源释放与有界墓碑；
+        - **真实 loopback TCP** 上跑一遍「分帧 → 解码 → 验签 → 状态推进」。
+
+      它不验证什么（避免把替身当验收）：
+        - 不启动真实 HyldDS；进程交互走替身，因此进程相关结论**只代表状态机**；
+        - 不验证 Unity 侧运行（Unity 编译与实机由 A5/R3-B 负责）；
+        - 不验证端点防重放账本（属 R3-B 的连接接受器）。
+
+      为什么直接编真实源码：测的就是那份实现本身，链接共享源与 Server/DS 源，
+      避免「测试里另写一份等价实现」这种自欺。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMDsControlTest</AssemblyName>
+    <RootNamespace>PMDsControlTest</RootNamespace>
+    <NoWarn>CS8981</NoWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 被测共享源（Unity 与 Server 共用同一份） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Control\PMDsControlProtocol.cs" LinkBase="PMNet\Control" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Control\PMDsTicket.cs" LinkBase="PMNet\Control" />
+
+    <!-- 控制帧载荷用 PMNetReader/Writer 编码，测试需要它们来手工构造畸形载荷 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetReader.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetWriter.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMWireType.cs" LinkBase="PMNet" />
+
+    <!-- 被测 Server 侧源（本测试不编 Server 主工程，避免运行中锁文件） -->
+    <Compile Include="..\..\Server\DS\PMDsCoordinator.cs" LinkBase="Server\DS" />
+    <Compile Include="..\..\Server\DS\PMDsProcess.cs" LinkBase="Server\DS" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R3-B2 验收：票据端点绑定 / 重试 / 过期 / 第二端点 / 未激活不 ACK（契约 §7.2）。
+
+      为什么需要它：
+        「失败无回包」「成功应答不大于请求」「同票同端点幂等、第二端点拒且无回包」
+        「断开即消费墓碑」「票据过期不影响已激活会话」「未激活的数据字节不进 Transport（不先 ACK 后丢）」
+        —— 这些全部是**运行时性质**：编译期看不出来，单元桩上也测不出来（桩上没有真实 socket、
+        没有真实 Transport 的 ack/序号路径）。
+
+      它用的是**生产实现**：
+        - 生产票据（PMDsMatchKey.Create + PMDsTicketIssuer + PMDsBootstrapDocument 引导文件）；
+        - 生产握手 codec / 状态机 / 账本（PMHandshakeCodec/Client/Server、PMDsEndpointLedger）；
+        - 生产 PMUdpSessionEndpoint（真实 localhost UDP、随机端口）；
+        - 生产 PMNetSessionBridge + PMNetWorld + PMReplicationChannel + PMTransport（真实分片/序号/ack）。
+        只有**描述符**是手工的（生成链已由 R2 门禁覆盖，这里不伪称验证生成器）。
+
+      不做的事：不碰 7777/7778/7800 等现役服务端口（全部用 port=0 的临时端口）。
+
+      运行：dotnet Tools/PMUdpAdmissionTest/bin/Release/net8.0/PMUdpAdmissionTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMUdpAdmissionTest</AssemblyName>
+    <RootNamespace>PMUdpAdmissionTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实源码：测的就是这份实现本身（含新增的 Session/PMHandshake.cs 等） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

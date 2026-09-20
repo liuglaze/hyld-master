@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      计划 T1：语言面与 API 面门禁。
+      Unity 2019.4 的编译能力上限是 C# 7.3 + .NET Standard 2.0 API。
+      本工程只编译 PMNet 核心与生成产物，不给任何额外依赖，
+      任何越过该天花板的语法或 API 都会在这里编译失败。
+
+      注意：这里刻意不引用 Google.Protobuf、UnityEngine 或任何 NuGet 包，
+      以保证 PMNet 核心与生成代码确实是自包含、可 AOT 的。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMNetLangCheck</AssemblyName>
+    <RootNamespace>PMNetLangCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

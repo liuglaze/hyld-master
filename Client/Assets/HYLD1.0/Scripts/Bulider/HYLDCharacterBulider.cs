@@ -1,8 +1,8 @@
-/*
+ï»¿/*
  * * * * * * * * * * * * * * * * 
- * Author:        ÕÔÔªâı
- * CreatTime:  2020/11/16 13£º51 
- * Description:  ½ÇÉ«½¨ÔìÕß
+ * Author:        èµµå…ƒæº
+ * CreatTime:  2020/11/16 13ï¼š51 
+ * Description:  è§’è‰²å»ºé€ è€…
  * * * * * * * * * * * * * * * * 
 */
 using System.Collections;
@@ -26,15 +26,15 @@ public class HYLDCharacterBulider
     }
     public void  AddCharacterBaseAttribute()
     {
-        //´´½¨½ÇÉ«ÊôĞÔ
+        //åˆ›å»ºè§’è‰²å±æ€§
         CharacterBaseAttribute characterBaseAttribute = FactoryManager.AttributeFactory.GetCharacterBaseAttr(mHeroName);
         mPrefabsName = characterBaseAttribute.PrefabName;
         mCharacter.Attribute = characterBaseAttribute;
     }
     public void AddGameObect()
     {
-        //´´½¨½ÇÉ«ÓÎÏ·ÎïÌå
-        //1£¬¼ÓÔØ 2£¬ÊµÀı»¯
+        //åˆ›å»ºè§’è‰²æ¸¸æˆç‰©ä½“
+        //1ï¼ŒåŠ è½½ 2ï¼Œå®ä¾‹åŒ–
         GameObject hero = FactoryManager.ResourcesAssetFactory.LoadSoldier(mPrefabsName);
         hero.transform.position = mSpawnPosition;
         mCharacter.gameObject = hero;

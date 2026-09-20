@@ -1,0 +1,109 @@
+Mono path[0] = 'D:/UGit/hyld-master/HyldDS/HyldDS_Data/Managed'
+Mono config path = 'D:/UGit/hyld-master/HyldDS/MonoBleedingEdge/etc'
+Initialize engine version: 2019.4.8f1 (60781d942082)
+[Subsystems] Discovering subsystems at path D:/UGit/hyld-master/HyldDS/HyldDS_Data/UnitySubsystems
+Forcing GfxDevice: Null
+GfxDevice: creating device client; threaded=0
+NullGfxDevice:
+    Version:  NULL 1.0 [1.0]
+    Renderer: Null Device
+    Vendor:   Unity Technologies
+Begin MonoManager ReloadAssembly
+- Completed reload, in  0.052 seconds
+OnLevelWasLoaded was found on EasyJoystick
+This message has been deprecated and will be removed in a later version of Unity.
+Add a delegate to SceneManager.sceneLoaded instead to get notifications after scene loading has completed 
+(Filename:  Line: 369)
+
+OnLevelWasLoaded was found on HYLDManger
+This message has been deprecated and will be removed in a later version of Unity.
+Add a delegate to SceneManager.sceneLoaded instead to get notifications after scene loading has completed 
+(Filename:  Line: 369)
+
+Microsoft Media Foundation video decoding to texture disabled: graphics device is Null, only Direct3D 11 and Direct3D 12 (only on desktop) are supported.
+[PMNetBootstrap] process=DedicatedServer mode=DedicatedServer batchmode=1 nographics=1 listen=0.0.0.0:43380 lobby=<none>:0 bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122355-18570ace\bootstrap\r3b6-smoke-303e1976\bootstrap-1.bin control=127.0.0.1:9782 serverSmoke=1 tickrate=30 dsid=r3b6-smoke-303e1976-ds-1 matchid=r3b6-smoke-303e1976 logfile=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122355-18570ace\hyldds-1-r3b6-smoke-303e1976-ds-1.log 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMNetBootstrap] DS 日志目录=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-122355-18570ace 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+UnloadTime: 0.453200 ms
+[PMDsHost] 检测到 -bootstrap，转入 R3-B 新链宿主（旧 UDP 诊断路由不启动） 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] PMDsLobbyAgent: 控制通道已连接：127.0.0.1:9782（密钥指纹 d21f10f4） 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] ===== R3-B 新链 DS 就绪 ===== 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] matchid=r3b6-smoke-303e1976 dsid=r3b6-smoke-303e1976-ds-1 epoch=1 hash=0x7B986DB4 digest=0x52334201 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] UDP boundPort=43380 名册人数=2 控制通道=127.0.0.1:9782 serverSmoke=on 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] 固定测试碰撞场景已建立并校验：地板/墙 BoxCollider enabled+active 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] ============================ 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] PMDsLobbyAgent: 已上报 Ready：boundPort=43380 sceneReady=True digest=0x52334201 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] heartbeat tick=1 objects=0 players=0 udpConns=0 udpIn=0 udpOut=0 unbound=0 | lobby=127.0.0.1:9782 connected=1 ready=1 sceneReady=1 sent=1 recv=0 reject=0 macFail=0 result=<none> acked=0 resultSends=0 fault=<none> 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] PlayerSpawned netId=1 uid=301 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] 玩家副本已创建 uid=301 playerId=1 netId=1 名册进度=1/2 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] PlayerSpawned netId=2 uid=302 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] 玩家副本已创建 uid=302 playerId=2 netId=2 名册进度=2/2 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] smoke 验收：名册 2 人全部完成探针，已提交 smoke 结果（summary=14B） 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] PMDsLobbyAgent: 已上报结果 ResultId=4294967297 winner=0 summary=14B 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsSessionHost] PMDsLobbyAgent: 收到匹配的 ResultAck(4294967297)，结果确认完成，准备退出 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsHost] R3-B 新链请求退出，exitCode=0 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsHost] OnApplicationQuit 触发（应用正在退出）——若 DS 本应常驻，说明有东西在主动退出进程 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsHost] 开始关闭 R3-B 新链宿主，reason=OnApplicationQuit 已存活 0.33 秒 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsHost] 已关闭（reason=OnApplicationQuit，新链） 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+Setting up 12 worker threads for Enlighten.
+  Thread -> id: 7d80 -> priority: 1 
+  Thread -> id: 12a70 -> priority: 1 
+  Thread -> id: 47d0 -> priority: 1 
+  Thread -> id: 15a0 -> priority: 1 
+  Thread -> id: 6fe4 -> priority: 1 
+  Thread -> id: 4944 -> priority: 1 
+  Thread -> id: 10064 -> priority: 1 
+  Thread -> id: bd54 -> priority: 1 
+  Thread -> id: f64c -> priority: 1 
+  Thread -> id: eb78 -> priority: 1 
+  Thread -> id: ffdc -> priority: 1 
+  Thread -> id: 61e8 -> priority: 1 
+[PMDsHost] OnDestroy 触发（对象被销毁/场景卸载）——若 DS 本应常驻，说明 DontDestroyOnLoad 未生效 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+
+[PMDsHost] Shutdown(OnDestroy) 重入，套接字已关闭 
+(Filename: C:\buildslave\unity\build\Runtime/Export/Debug/Debug.bindings.h Line: 35)
+

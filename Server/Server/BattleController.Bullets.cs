@@ -1,4 +1,5 @@
 ﻿using SocketProto;
+using PMNet.Shared;
 using System;
 using System.Collections.Generic;
 
@@ -21,19 +22,16 @@ namespace Server
 
 				foreach (ServerAttack atk in op.Attacks)
 				{
-					HeroConfig.BulletParams cfg;
-					if (atk.AttackType == AttackType.Super)
+					bool isSuper = atk.AttackType == AttackType.Super;
+					if (isSuper && !BattleNumericConfig.TryGetSuper((int)hero, out _))
 					{
-						if (!HeroConfig.TryGetSuper(hero, out cfg))
-						{
-							Logging.Debug.Log($"[SuperBullet][Skip] bp={bpId} attackId={atk.AttackId} hero={hero} reason=missing_super_config");
-							continue;
-						}
+						Logging.Debug.Log($"[SuperBullet][Skip] bp={bpId} attackId={atk.AttackId} hero={hero} reason=missing_super_config");
+						continue;
 					}
-					else
-					{
-						cfg = HeroConfig.Get(hero);
-					}
+
+					// 普通攻击与大招在「本次生成多少颗弹」上用的是不同字段（每次发射数 vs 一轮总数），
+					// 该差异统一由 ResolveAttack 解释，调用侧不再需要知道查哪张表、读哪个字段。
+					ResolvedAttack cfg = BattleNumericConfig.ResolveAttack((int)hero, isSuper);
 					int clientFrameId = atk.AttackMoveFrame;
 					// 服务端 clamp：防止客户端帧号超过服务端当前帧（丢包恢复后 predicted_frameID 跳跃导致）
 					if (clientFrameId > frameid)
@@ -81,7 +79,7 @@ namespace Server
 		/// 返回生成的子弹列表，由调用者决定是否做追帧模拟或直接加入 activeBullets。
 		/// </summary>
 		private List<ServerBullet> SpawnServerBullets(int ownerBattleId, int ownerTeamId,
-			ServerAttack atk, HeroConfig.BulletParams cfg, int clientFrameId)
+			ServerAttack atk, ResolvedAttack cfg, int clientFrameId)
 		{
 			var bullets = new List<ServerBullet>();
 			if (!playerPositions.TryGetValue(ownerBattleId, out ServerVector3 spawnPos))
@@ -104,54 +102,52 @@ namespace Server
 			//   towardy = joystickAxis.y -> 世界 X 轴分量
 			//   towardx = joystickAxis.x -> 世界 Z 轴分量
 			// 客户端消费侧：dir = xAndY2UnitVector3(Towardy, Towardx) 然后 dir.x *= -1 * sign, dir.z *= sign
-			// 服务端必须做相同的变换：
-			//   1) baseX 取反（对应客户端 dir.x *= -1）
-			//   2) 非基准队伍额外取反（对应客户端 sign=-1，与移动方向的 teamSign 一致）
+			// 服务端必须做相同的变换。P3'-3 起这段数学（换轴 + 取反 + 队伍镜像 + 归一化）
+			// 在 PMBattleSim.TryGetAimDirection —— 与客户端 BattleFloatMath.ToWorldDirection
+			// 是同一份实现（改造前两端各写一份，漂移一处就会持续对不上）。
 			float teamSign = 1f;
 			if (playerTeamIds.TryGetValue(ownerBattleId, out int bulletTid) && bulletTid != baseTeamId)
 				teamSign = -1f;
 
-			float baseX = -atk.TowardY * teamSign; // 世界 X：取反 + 队伍镜像
-			float baseZ = atk.TowardX * teamSign;  // 世界 Z：队伍镜像
+			float baseDirX, baseDirZ;
+			if (!PMBattleSim.TryGetAimDirection(atk.TowardX, atk.TowardY, teamSign, out baseDirX, out baseDirZ))
+				return bullets; // 方向无效
 
-			ServerVector3 baseDir = new ServerVector3(baseX, 0, baseZ).Normalized();
-			if (baseDir.Magnitude() < 1e-6f) return bullets; // 方向无效
+			ServerVector3 baseDir = new ServerVector3(baseDirX, 0f, baseDirZ);
 
 			Logging.Debug.Log($"[BulletDir] bp{ownerBattleId} type={atk.AttackType} teamSign={teamSign} raw=({atk.TowardX:F3},{atk.TowardY:F3}) -> dir=({baseDir.X:F3},{baseDir.Z:F3}) pos=({spawnPos.X:F2},{spawnPos.Z:F2})");
 
-			// 散弹扇形生成
-			int bulletCount = cfg.BulletCount;
-			if (bulletCount <= 1)
+			// 散弹扇形生成。用 SpawnBulletCount（本次生成数），不是 BulletCountTotal（一轮总数）。
+			// P3'-3：单发（count <= 1）由 PMBattleSim.SpreadDirection **原样返回**基准方向，
+			// 所以这里用一个循环盖住「单发」与「扇形」两种情形，不再需要分支 ——
+			// 顺带消除了「同一个方向公式在两个分支里各写一遍」这个漂移点。
+			int bulletCount = cfg.SpawnBulletCount;
+			if (bulletCount < 1)
 			{
-				// 单发
-				bullets.Add(CreateServerBullet(ownerBattleId, ownerTeamId, spawnPos, baseDir, cfg, atk.AttackId, clientFrameId));
+				bulletCount = 1;
 			}
-			else
+
+			for (int i = 0; i < bulletCount; i++)
 			{
-				// 扇形：均匀分布在 spreadAngle 范围内
-				float totalAngle = cfg.SpreadAngle;
-				float step = (bulletCount > 1) ? totalAngle / (bulletCount - 1) : 0f;
-				float startAngle = -totalAngle / 2f;
-				for (int i = 0; i < bulletCount; i++)
+				float dirX, dirZ;
+				PMBattleSim.SpreadDirection(baseDir.X, baseDir.Z, cfg.LaunchAngle, bulletCount, i,
+					out dirX, out dirZ);
+
+				// 旋转后退化（与改造前 `.Normalized()` 返回零向量的行为一致）——跳过这颗
+				if (dirX == 0f && dirZ == 0f)
 				{
-					float angleDeg = startAngle + step * i;
-					float angleRad = angleDeg * (float)(Math.PI / 180.0);
-					// 绕 Y 轴旋转 baseDir
-					float cos = (float)Math.Cos(angleRad);
-					float sin = (float)Math.Sin(angleRad);
-					ServerVector3 dir = new ServerVector3(
-						baseDir.X * cos - baseDir.Z * sin,
-						0,
-						baseDir.X * sin + baseDir.Z * cos).Normalized();
-					bullets.Add(CreateServerBullet(ownerBattleId, ownerTeamId, spawnPos, dir, cfg, atk.AttackId, clientFrameId));
+					continue;
 				}
+
+				bullets.Add(CreateServerBullet(ownerBattleId, ownerTeamId, spawnPos,
+					new ServerVector3(dirX, 0f, dirZ), cfg, atk.AttackId, clientFrameId));
 			}
 
 			return bullets;
 		}
 
 		private ServerBullet CreateServerBullet(int ownerBattleId, int ownerTeamId, ServerVector3 pos,
-			ServerVector3 dir, HeroConfig.BulletParams cfg, int attackId, int clientFrameId)
+			ServerVector3 dir, ResolvedAttack cfg, int attackId, int clientFrameId)
 		{
 			var bullet = new ServerBullet
 			{
@@ -161,9 +157,9 @@ namespace Server
 				Position = pos,
 				Direction = dir,
 				Speed = cfg.BulletSpeed,
-				MaxDistance = cfg.BulletMaxDist,
+				MaxDistance = cfg.ShootDistance,
 				TraveledDistance = 0f,
-				Damage = cfg.Damage,
+				Damage = cfg.BulletDamage,
 				ClientFrameId = clientFrameId,
 			};
 			return bullet;
@@ -191,12 +187,15 @@ namespace Server
 				// D8: 跳过已死亡玩家
 				if (playerIsDead.TryGetValue(targetBpId, out bool isDead) && isDead) continue;
 
-				// 碰撞半径使用 HeroConfig 中的 hitRadius
+				// 命中半径：用**服务端判定半径**，不是客户端的 ShootWidth（弹体表现宽度）。
+				// 两者语义不同，早期注释把二者混为一谈，已在共享表里拆开命名。
 				if (!playerHeroes.TryGetValue(bullet.OwnerBattleId, out Hero ownerHero)) continue;
-				float hitRadius = HeroConfig.Get(ownerHero).HitRadius;
+				float hitRadius = BattleNumericConfig.Get((int)ownerHero).ServerHitRadius;
 
-				float dist = ServerVector3.Distance(bullet.Position, targetPos);
-				if (dist <= hitRadius)
+				// 命中判定的公式（球-点距离 ≤ 半径）在 PMBattleSim.IsHit；
+				// 「半径取自发射者英雄」是**调用侧的策略**，不放进核心。
+				if (PMBattleSim.IsHit(bullet.Position.X, bullet.Position.Y, bullet.Position.Z,
+					targetPos.X, targetPos.Y, targetPos.Z, hitRadius))
 				{
 					// D8: HP 扣减
 					bool isKill = false;
@@ -205,9 +204,9 @@ namespace Server
 						playerHp[targetBpId] -= bullet.Damage;
 						if (playerSuperEnergy != null && playerSuperEnergy.ContainsKey(bullet.OwnerBattleId))
 						{
-							playerSuperEnergy[bullet.OwnerBattleId] = Math.Min(
-								HeroConfig.SuperEnergyMax,
-								playerSuperEnergy[bullet.OwnerBattleId] + bullet.Damage / 2);
+							playerSuperEnergy[bullet.OwnerBattleId] = PMBattleSim.RechargeSuperEnergy(
+								playerSuperEnergy[bullet.OwnerBattleId], bullet.Damage,
+								BattleNumericConfig.SuperEnergyMax);
 						}
 						Logging.Debug.Log($"[HP] bp{targetBpId} hp={playerHp[targetBpId]} (dmg={bullet.Damage} from bp{bullet.OwnerBattleId})");
 
@@ -258,12 +257,13 @@ namespace Server
 		{
 			for (int f = fromFrame; f <= toFrame; f++)
 			{
-				// 推进子弹位置
-				bullet.Position = bullet.Position + bullet.Direction * (bullet.Speed * FrameTimeSec);
-				bullet.TraveledDistance += bullet.Speed * FrameTimeSec;
+				// 推进子弹位置（步长公式与 TickServerBullets 共用同一份：PMBattleSim.BulletStepDistance）
+				float stepDist = PMBattleSim.BulletStepDistance(bullet.Speed, FrameTimeSec);
+				bullet.Position = bullet.Position + bullet.Direction * stepDist;
+				bullet.TraveledDistance += stepDist;
 
 				// 超距检测
-				if (bullet.TraveledDistance >= bullet.MaxDistance)
+				if (PMBattleSim.IsBulletExpired(bullet.TraveledDistance, bullet.MaxDistance))
 				{
 					Logging.Debug.Log($"[LagComp] catchup bullet attackId={bullet.AttackId} expired at frame={f} dist={bullet.TraveledDistance:F2}/{bullet.MaxDistance:F2}");
 					return true; // 子弹超距销毁
@@ -296,12 +296,13 @@ namespace Server
 
 			foreach (ServerBullet bullet in activeBullets)
 			{
-				// 推进位置
-				bullet.Position = bullet.Position + bullet.Direction * (bullet.Speed * FrameTimeSec);
-				bullet.TraveledDistance += bullet.Speed * FrameTimeSec;
+				// 推进位置（步长与追帧路径共用同一份：PMBattleSim.BulletStepDistance）
+				float stepDist = PMBattleSim.BulletStepDistance(bullet.Speed, FrameTimeSec);
+				bullet.Position = bullet.Position + bullet.Direction * stepDist;
+				bullet.TraveledDistance += stepDist;
 
 				// 超距检测
-				if (bullet.TraveledDistance >= bullet.MaxDistance)
+				if (PMBattleSim.IsBulletExpired(bullet.TraveledDistance, bullet.MaxDistance))
 				{
 					toRemove.Add(bullet);
 					continue;

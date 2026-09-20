@@ -1,0 +1,165 @@
+{
+ "presentation": {
+  "ABo": {
+   "boom": null,
+   "displayName": "阿渤",
+   "isSuperMovingType": false,
+   "positioning": "战士",
+   "shell": "BetterShells[3]",
+   "superEntity": "大招实体[1]"
+  },
+  "BaLi": {
+   "boom": "Booms[0]",
+   "displayName": "巴利",
+   "isSuperMovingType": false,
+   "positioning": "投掷手",
+   "shell": "BetterShells[18]",
+   "superEntity": "大招实体[15]"
+  },
+  "BaoPoMaiKe": {
+   "boom": "Booms[2]",
+   "displayName": "爆破麦克",
+   "isSuperMovingType": false,
+   "positioning": "投掷手",
+   "shell": "BetterShells[17]",
+   "superEntity": "大招实体[14]"
+  },
+  "BeiYa": {
+   "boom": null,
+   "displayName": "贝亚",
+   "isSuperMovingType": false,
+   "positioning": "射手",
+   "shell": "BetterShells[15]",
+   "superEntity": "大招实体[12]"
+  },
+  "BuLuoKe": {
+   "boom": null,
+   "displayName": "布洛克",
+   "isSuperMovingType": false,
+   "positioning": "射手",
+   "shell": "BetterShells[14]",
+   "superEntity": "大招实体[11]"
+  },
+  "DaLiEr": {
+   "boom": null,
+   "displayName": "达里尔",
+   "isSuperMovingType": false,
+   "positioning": "坦克",
+   "shell": "BetterShells[0]",
+   "superEntity": null
+  },
+  "DiKe": {
+   "boom": "Booms[1]",
+   "displayName": "迪克",
+   "isSuperMovingType": false,
+   "positioning": "投掷手",
+   "shell": "BetterShells[19]",
+   "superEntity": "大招实体[16]"
+  },
+  "GeEr": {
+   "boom": null,
+   "displayName": "格尔",
+   "isSuperMovingType": false,
+   "positioning": "辅助",
+   "shell": "BetterShells[10]",
+   "superEntity": "大招实体[7]"
+  },
+  "GongNiu": {
+   "boom": null,
+   "displayName": "公牛",
+   "isSuperMovingType": false,
+   "positioning": "坦克",
+   "shell": "BetterShells[1]",
+   "superEntity": null
+  },
+  "HeiYa": {
+   "boom": null,
+   "displayName": "黑鸦",
+   "isSuperMovingType": false,
+   "positioning": "致伤突袭者",
+   "shell": "BetterShells[7]",
+   "superEntity": "大招实体[5]"
+  },
+  "KeErTe": {
+   "boom": null,
+   "displayName": "柯尔特",
+   "isSuperMovingType": false,
+   "positioning": "射手",
+   "shell": "BetterShells[12]",
+   "superEntity": "大招实体[9]"
+  },
+  "LiAng": {
+   "boom": null,
+   "displayName": "里昂",
+   "isSuperMovingType": false,
+   "positioning": "潜行突袭者",
+   "shell": "BetterShells[9]",
+   "superEntity": null
+  },
+  "MaiKeSi": {
+   "boom": null,
+   "displayName": "麦克斯",
+   "isSuperMovingType": true,
+   "positioning": "辅助",
+   "shell": "BetterShells[4]",
+   "superEntity": "大招实体[2]"
+  },
+  "PaMu": {
+   "boom": "Booms[3]",
+   "displayName": "帕姆",
+   "isSuperMovingType": false,
+   "positioning": "辅助",
+   "shell": "BetterShells[6]",
+   "superEntity": "大招实体[4]"
+  },
+  "PanNi": {
+   "boom": null,
+   "displayName": "潘妮",
+   "isSuperMovingType": false,
+   "positioning": "战士",
+   "shell": "BetterShells[11]",
+   "superEntity": "大招实体[8]"
+  },
+  "PeiPei": {
+   "boom": null,
+   "displayName": "佩佩",
+   "isSuperMovingType": false,
+   "positioning": "射手",
+   "shell": "BetterShells[8]",
+   "superEntity": "大招实体[6]"
+  },
+  "RuiKe": {
+   "boom": null,
+   "displayName": "瑞科",
+   "isSuperMovingType": false,
+   "positioning": "射手",
+   "shell": "BetterShells[2]",
+   "superEntity": "大招实体[0]"
+  },
+  "SiPaiKe": {
+   "boom": null,
+   "displayName": "斯派克",
+   "isSuperMovingType": false,
+   "positioning": "射手",
+   "shell": "BetterShells[16]",
+   "superEntity": "大招实体[13]"
+  },
+  "TaLa": {
+   "boom": null,
+   "displayName": "塔拉",
+   "isSuperMovingType": false,
+   "positioning": "战士",
+   "shell": "BetterShells[5]",
+   "superEntity": "大招实体[3]"
+  },
+  "XueLi": {
+   "boom": null,
+   "displayName": "雪莉",
+   "isSuperMovingType": false,
+   "positioning": "战士",
+   "shell": "BetterShells[13]",
+   "superEntity": "大招实体[10]"
+  }
+ },
+ "source": "git HEAD:Client/Assets/HYLD1.0/Scripts/OldScripts/HYLDStaticValue.cs"
+}

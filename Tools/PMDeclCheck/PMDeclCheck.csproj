@@ -1,0 +1,48 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R2 声明门禁（契约 §2.3 的三条不变性 + §5 的 12 条规则 + §6 的类型集）。
+
+      为什么是 net8.0 可执行工程：
+        它要**直接驱动**生成器的三个部件（DeclScanner / DeclValidation / DeclEmitter），
+        而不是把生成器当成黑盒跑一遍 CLI——门禁必须能对 IR 与产物做逐字段比对，
+        也必须能做"注入一个损坏模型"这类 CLI 表达不了的用例。
+
+      它多用一个包（Microsoft.CodeAnalysis.CSharp）：为了在最后一段做
+      「生成物能在 C# 7.3 + netstandard2.0 下编译」的**真实编译**断言。
+      这个包与 PMNetGen 用的是同一个，不引入新的第三方依赖。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMDeclCheck</AssemblyName>
+    <RootNamespace>PMDeclCheck</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Fixtures/ 下的 .cs 是**门禁的输入数据**，不是本工程的源码：
+        - Good.cs 是合法声明集，需要与生成物一起被 Roslyn 编译（由程序内部完成）；
+        - Bad.cs  是**故意非法**的声明集（泛型类、static 复制成员、写错的条件名……），
+          它只被语法解析，永远不会被编译。
+      若让 SDK 默认把它们当源文件编进来，本工程会直接编译失败。
+    -->
+    <Compile Remove="Fixtures/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 复用扫描器/校验器/发射器与冻结 IR，不抄第二份实现。 -->
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" />
+  </ItemGroup>
+
+</Project>

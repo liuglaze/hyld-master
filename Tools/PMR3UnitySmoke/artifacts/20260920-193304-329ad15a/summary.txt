@@ -1,0 +1,57 @@
+=== R3-B6 真实 Unity DS 进程烟测摘要 ===
+matchId=r3b6-smoke-ec94c328
+dsId=r3b6-smoke-ec94c328-ds-1
+dsPid=67084
+controlPort=11820
+dsUdpPort=47380
+bootstrap=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-193304-329ad15a\bootstrap\r3b6-smoke-ec94c328\bootstrap-1.bin
+dsLog=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-193304-329ad15a\hyldds-1-r3b6-smoke-ec94c328-ds-1.log
+assemblyMtime=2026-09-20 19:16:14
+assemblySize=1170432
+assemblySha256=8abc8dacf1ae014e4b16ebf04fd1c0c479ecaa59241b6ea0232e544de06747da
+movementMode=True
+movementSymbols=PMR4MovementDriver=1 PMR4MovementCodec=1 PMUnityMoverCollisionQuery=1 MovementWorldVersion=1 BuildIsolated=1 PendingServerFrame=1 ZeroDistanceContactsIgnored=1 ServerMovementInputV1=1 ClientMovementEventsV1=1
+movementApTicksAccepted=788
+movementApTicksRejected=0
+movementStreams=uid301:stream=1,boundary=394,events=3,apSamples=3148,spSamples=3146 uid302:stream=1,boundary=394,events=3,apSamples=3147,spSamples=3148
+resultSummaryBytes=14
+exitedTerminal=True
+processExited=True
+osExitCode=0
+osExitObservations=1
+lobbyTerminalReason=结果已本地受理，且对端经认证显式 Exited(0)（收到 Exited 消息）
+sessionReleased=True
+midRunPortProbeError=SocketException: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。
+postExitPortProbeError=<ok>
+coordinatorKillRequests=0
+coordinatorGracefulExitObserved=1
+coordinatorGracefulExitWaits=2
+coordinatorGracefulExitTimeouts=0
+coordinatorDeferredCleanupTicks=0
+exitedTerminalAtMs=1789904007867
+osExitObservedAtMs=1789904007879
+holdSecondsConfigured=0
+holdStartWall=<none>
+holdEndWall=<none>
+holdStartMs=0
+holdEndMs=0
+holdMilliseconds=0
+holdHeartbeats=0
+holdHeartbeatReplies=0
+holdDsAliveSamples=0
+holdDsLogHeartbeatTicks=0
+holdDsMaxHbRx=-1
+dropControlAfterReady=False
+dropBlackoutMs=0
+dropExitCode=<none>
+checks=234 passed=224 failed=10
+FAIL: M36 客户端 301 DS 升流：AP 流代次 1 → 1（走真实 ServerMovementResyncV1 生成桩）
+FAIL: M37 客户端 301 AP 真的应用了显式重同步快照（ResyncApplied 0 → 0）
+FAIL: M42 客户端 301 对照组：同帧号的新流包被接纳并驱动真实 DS 位移（Δx=0，发 176 帧）⇒ 差别只能来自 streamVersion
+FAIL: M43 客户端 301 新流继续推进：权威输出边界 394 → 394（输入帧 n 产出边界 n+1）
+FAIL: M44 客户端 301 全程只升了**一次**流（1 → 1），旧流注入没有触发额外升流
+FAIL: M36 客户端 302 DS 升流：AP 流代次 1 → 1（走真实 ServerMovementResyncV1 生成桩）
+FAIL: M37 客户端 302 AP 真的应用了显式重同步快照（ResyncApplied 0 → 0）
+FAIL: M42 客户端 302 对照组：同帧号的新流包被接纳并驱动真实 DS 位移（Δx=0，发 172 帧）⇒ 差别只能来自 streamVersion
+FAIL: M43 客户端 302 新流继续推进：权威输出边界 394 → 394（输入帧 n 产出边界 n+1）
+FAIL: M44 客户端 302 全程只升了**一次**流（1 → 1），旧流注入没有触发额外升流

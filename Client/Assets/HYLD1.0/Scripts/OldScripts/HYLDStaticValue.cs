@@ -76,12 +76,65 @@ public class HYLDStaticValue :MonoBehaviour
 
     public GameObject[] BetterShells;
     public static Dictionary<HeroName, Hero> Heros=new Dictionary<HeroName,Hero>();
+
+    /// <summary>
+    /// 向 <see cref="Heros"/> 登记一个英雄。
+    ///
+    /// <para>
+    /// 存在的理由：<c>heroName</c> 既要做字典键、又要作为 <see cref="Hero"/> 构造的第一个参数
+    /// （Hero 要用它去共享数值表查值）。若在表里写两遍，就有写不一致的风险，
+    /// 而这种不一致不会报错、只会让某个英雄的数值静默错位。这里只接收一次。
+    /// </para>
+    /// </summary>
+    private static void AddHero(HeroName heroName, string displayName, string positioning,
+                                GameObject shell, GameObject superEntity = null, GameObject boom = null,
+                                bool isSuperMovingType = false)
+    {
+        Heros.Add(heroName, new Hero(heroName, displayName, positioning, shell, superEntity, boom, isSuperMovingType));
+    }
     [Header("大招")]
     public GameObject[] 大招实体;
     [Header("金库模式")]
     //金库生命值（金库模式专用）
-    public static int RedBP = 50000;
-    public static int BlueBP = 50000;
+    /// <summary>
+    /// 「金库攻防」模式的金库上限。
+    ///
+    /// <para>
+    /// P3'-2 清理：此前 RedBP/BlueBP 的初值是 <b>50000</b>，而 Toolbox 的 ReStart() 与
+    /// 血条滑条的分母用的是 <b>30000</b> —— 于是**首局与重开局的胜负阈值不一样**，
+    /// 且首局滑条会算出 50000/30000 = 1.67 而溢出。以 30000 为准（滑条分母与模式初始化都用它），
+    /// 并收敛到这个常量，避免再出现两处不一致。
+    /// </para>
+    /// </summary>
+    public const int VaultBPMax = 30000;
+
+    // ---- 客户端玩法数值（单机/表现侧）----
+    //
+    // P3'-2 清理：这些值原先以字面量散落在 PlayerLogic / TextLogic / Toolbox / 本文件里，
+    // 同一个含义在多处重复（毒伤 85 在 2 个文件各写一遍），改一处漏一处就会出现不一致。
+    // 收敛为命名常量，只整理来源、**不改变任何取值**。
+    //
+    // 注意：它们不在共享数值表（Client/Assets/Scripts/Shared/BattleNumericConfig.cs）里，
+    // 因为服务端不需要它们 —— 服务端的战斗数值已经在那边统一了。
+
+    /// <summary>中毒每跳伤害。</summary>
+    public const int PoisonDamagePerTick = 85;
+
+    /// <summary>中毒持续跳数（每次 Update 一跳）。</summary>
+    public const int PoisonTickCount = 5;
+
+    // P3'-3c 删除：CureDamageFreeSeconds / CureIntervalSeconds / CureHpRatio / ShieldSeconds。
+    // 它们只被 PlayerLogic 的「回血 / 护盾」机制使用，而那两个机制已随
+    // 「客户端不再改写权威字段」一并删除（见 PlayerLogic 类注释）。
+    //
+    // 上面的 PoisonDamagePerTick / PoisonTickCount **保留**：试玩模式的 TextLogic
+    // 仍在使用（它是自包含的单机机器人，不读写权威字段）。
+
+    /// <summary>「宝石争霸」模式的胜利宝石数。</summary>
+    public const int GemWinCount = 10;
+
+    public static int RedBP = VaultBPMax;
+    public static int BlueBP = VaultBPMax;
     //爆炸预制体
     [Header("爆炸预制体")]
     public GameObject[] Booms;
@@ -111,83 +164,48 @@ public class HYLDStaticValue :MonoBehaviour
         ConfirmWinOrNot = true;
          玩家输了吗=false;
 
-         RedBP = 50000;
-         BlueBP = 50000;
+         RedBP = VaultBPMax;
+         BlueBP = VaultBPMax;
 
     // Debug.LogError("11");
     //zyk增加部分      名字              名字     定位  血量 移速 进攻距离 子弹预制体 距离 宽度 子弹数量 伤害 角度 速度 每次发射数量 [间隔] 
-    //Heros.Add(HeroName.BoKe,   new Hero("波克",  "战士",4680, 8,     3,5,       shells[0], 6,    1,     4,    260,  30,  10,     4));//ok
-    //Heros.Add(HeroName.LuoSha, new Hero("罗莎",  "坦克",6750, 8,     1,3,       shells[3], 3,   0.5f,   3,    575,  60,  11,     1));//ok
-    //Heros.Add(HeroName.BaBite, new Hero("8比特", "射手", 2730,6,     4,6,       shells[7], 6, 0.4f, 6, 600, 0, 20, 1,0.05f));//ok
-    //Heros.Add(HeroName.LIAng, new Hero("布洛克", "射手", 2730, shells[8], 2, 0.3f, 1, 800, 0, 10, 1));//shell[8]有问题
-    //Heros.Add(HeroName.ABo, new Hero("布洛克", "射手", 2730, shells[9], 10, 0.5f, 1, 1555, 0, 10, 1));//shell[9]有问题
-    //Heros.Add(HeroName.AiErPuLiMo, new Hero("布洛克", "射手", 2730, shells[10], 10, 0.5f, 10, 1555, 0, 10, 10));//shell[10]有问题
-    //Heros.Add(HeroName.BaLi, new Hero("布洛克", "射手", 2730, shells[11], 10, 0.5f, 1, 1555, 0, 10, 1));//shell[11]有bug
-    //Heros.Add(HeroName.BeiYa, new Hero("布洛克", "射手", 2730, shells[12], 10, 0.5f, 1, 1555, 0, 10, 1));//shell[12]有bug
-    //Heros.Add(HeroName.BiBi, new Hero("布洛克", "射手", 2730, shells[13], 10, 0.5f, 1, 1555, 0, 10, 1));//shell[13]有bug
-    //Heros.Add(HeroName.BiBi, new Hero("布洛克", "射手", 2730, shells[14], 10, 0.5f, 1, 1555, 0, 10, 1));//shell[14]有bug
-    //Heros.Add(HeroName.BiBi, new Hero("布洛克", "射手", 2730, shells[15], 10, 0.5f, 1, 1555, 0, 10, 1));//shell[15]有bug
-    // Heros.Add(HeroName.BiBi, new Hero("布洛克", "射手", 2730, shells[16], 10, 0.5f, 1, 1555, 0, 10, 1));//shell[12]有bug
-    //Heros.Add(HeroName.BiBi, new Hero("布洛克", "射手", 2730, shells[17], 10, 0.5f, 1, 1555, 0, 1, 1));//shell[12]有bug
     //以上是劣质特效，特效被删了的子弹。
     //以下是实体子弹
         Heros.Clear();
-        //   名字                    名字    定位        血量  移速  攻击距离   每次发射间隔    装弹速度   子弹预制体     距离    宽度  子弹数量 伤害 角度 速度 每次发射数量[间隔]  大招实体                   爆破手
-        Heros.Add(HeroName.DaLiEr,      new Hero("达里尔", "坦克",      5760, 3.9f,     1, 3,        0.5f,       2,         BetterShells[0],  6,     0,    30,    90,  45,    16,   15, 0.1f));//ok
-        Heros.Add(HeroName.GongNiu,     new Hero("公牛",   "坦克",      5880, 3.9f,     1, 3,        0.5f,       1,         BetterShells[1],  4,     0,    50,    45,  40,     8,   10, 0.01f));//ok
-        Heros.Add(HeroName.RuiKe,       new Hero("瑞科",   "射手",      3250, 3.9f,     4, 5,        1f,         1,         BetterShells[2],  10, 0.04f,     5,   400,   0,    13,    1, 0.1f,        大招实体[0]));//ok
-        Heros.Add(HeroName.ABo,         new Hero("阿渤",   "战士",      3600, 3.9f,     4, 5,        0.6f,       1,         BetterShells[3],  6,     0,     3,   520,  15,    10,    1, 0.1f,         大招实体[1]));//ok
-        Heros.Add(HeroName.MaiKeSi,     new Hero("麦克斯", "辅助",      3200, 4.08f,    3, 5,        0.3f,       2,         BetterShells[4],  7,     0,     4,   320,  10,    14,    1, 0.05f,        大招实体[2]));//ok
-        Heros.Add(HeroName.TaLa,        new Hero("塔拉",   "战士",      3400, 3.9f,     2, 5,        0.4f,       1,         BetterShells[5],  7,     0,     3,   460,  45,    10,    3, 0.05f,        大招实体[3]));//ok
-        Heros.Add(HeroName.PaMu,        new Hero("帕姆",   "辅助",      4800, 3.78f,    1, 6,        1f,         1,         BetterShells[6],  9,     0,     9,   260,  50,    14,    2, 0.15f,        大招实体[4]           ,Booms[3],false,30));//ok
-        Heros.Add(HeroName.HeiYa,       new Hero("黑鸦",   "致伤突袭者",2400, 4.2f,     4, 5,        0.3f,       2,         BetterShells[7],  7,     0,     3,   320,  30,    12,    3, 0.08f,        大招实体[5]));//ok        
-        Heros.Add(HeroName.PeiPei,      new Hero("佩佩",   "射手",      3240, 3.9f,     5, 6,        1f,         1,         BetterShells[8], 11,  0.5f,     1,   650,   0,     12,   1, 0,            大招实体[6]));//ok
-        Heros.Add(HeroName.LiAng ,      new Hero("里昂",   "潜行突袭者",4800, 3.96f,    1, 5,        0.6f,       1,         BetterShells[9],  7,     0,     4,   680,  10,    11,    1, 0.09f));//ok
-        Heros.Add(HeroName.GeEr,        new Hero("格尔",   "辅助",      4420, 3.9f,     3, 5,        0.6f,       1,         BetterShells[10], 7,    3f,     6,   448,   0,    11,    6, 0,            大招实体[7]));//ok
-        Heros.Add(HeroName.PanNi,       new Hero("潘妮",   "战士",      4160, 3.9f,     5, 4,        0.6f,       1,         BetterShells[11], 6, 0.01f,     1,   400,   0,    11,    1, 0,            大招实体[8]));//ok
-        Heros.Add(HeroName.KeErTe,      new Hero("柯尔特", "射手",      3640, 4.05f,    5, 5,        1f,         1,         BetterShells[12], 8,  0.4f,     6,    340,  0,    12,    2, 0.1f,            大招实体[9]));//ok
-        Heros.Add(HeroName.XueLi,       new Hero("雪莉",   "战士",      4680, 3.9f,     1, 3,        0.5f,       1,         BetterShells[13], 6,  0.5f,    20,     80, 30,    11,    5, 0.005f,       大招实体[10]));//ok
-        Heros.Add(HeroName.BuLuoKe,     new Hero("布洛克", "射手",      2730, 3.9f,     6, 6,        0.8f,       1,         BetterShells[14],10,  0.5f,     1,   1155,  0,    10,    1, 0,            大招实体[11]));//ok
-        Heros.Add(HeroName.BeiYa,       new Hero("贝亚",   "射手",      2400, 3.9f,     6, 6,        1f,         9,         BetterShells[15],10,  0.5f,     1,    800,  0,    10,    1, 0,            大招实体[12]));//ok
-        Heros.Add(HeroName.SiPaiKe,     new Hero("斯派克", "射手",      2400, 3.9f,     2, 5,        0.4f,       1,         BetterShells[16],10,  0.5f,     1,      0,  0,    10,    1, 0,            大招实体[13]));//ok
-        Heros.Add(HeroName.BaoPoMaiKe,  new Hero("爆破麦克", "投掷手",  2940, 3.9f,     3, 5,        0.5f,       1,         BetterShells[17], 5,    0.2f,   2,    840,  20,    5,    1, 0.01f,        大招实体[14],              Booms[2],true, 10));//ok
-        Heros.Add(HeroName.BaLi,        new Hero("巴利", "投掷手",      2880, 3.9f,     3, 5,        0.5f,       1,         BetterShells[18], 5,    2f,     1,    816,  0,    5,    1, 0.01f,         大招实体[15],              Booms[0],true,10));//ok
-        Heros.Add(HeroName.DiKe,        new Hero("迪克", "投掷手",      2200, 3.9f,     3, 5,        0.5f,       1,         BetterShells[19], 5,    0.4f,   4,    680,  20,    5,    4, 0.01f,        大招实体[16],              Booms[1],true,10));//ok
 
-        // ── 大招子弹参数配置（数据驱动，消除 Attack() 中的 if-else 硬编码） ──
-        // 麦克斯：移动型大招，不走子弹系统
-        Heros[HeroName.MaiKeSi].isSuperMovingType = true;
-        Heros[HeroName.MaiKeSi].normalAttackManaRecover = 3;
-        // 瑞科：大招 shootWidth=0.2, shootDistance=14, speed=19, bulletCount=12
-        Heros[HeroName.RuiKe].superBullet = new SuperBulletParams(
-            shootDistance: 14f, shootWidth: 0.2f, bulletCount: 12, speed: 19f);
-        // 柯尔特：大招 shootWidth=0.2, shootDistance=12, speed=18, bulletCount=12
-        Heros[HeroName.KeErTe].superBullet = new SuperBulletParams(
-            shootDistance: 12f, shootWidth: 0.2f, bulletCount: 12, speed: 18f);
-        // 雪莉：大招 LaunchAngle=40, bulletCount=40, speed=14
-        Heros[HeroName.XueLi].superBullet = new SuperBulletParams(
-            shootDistance: 6f, shootWidth: 0.5f, bulletCount: 40, LaunchAngle: 40f, speed: 14f);
-        // 格尔：大招 shootWidth=4, bulletCountByEachTime=4, bulletCount=4, speed=14, EachTimebulletsShootSpace=0
-        Heros[HeroName.GeEr].superBullet = new SuperBulletParams(
-            shootDistance: 7f, shootWidth: 4f, bulletCount: 4, speed: 14f,
-            bulletCountByEachTime: 4, EachTimebulletsShootSpace: 0f);
-        // 贝亚：大招 shootWidth=0.8, bulletCountByEachTime=6, bulletCount=6, bulletDamage=60
-        Heros[HeroName.BeiYa].superBullet = new SuperBulletParams(
-            shootDistance: 10f, shootWidth: 0.8f, bulletCount: 6, bulletDamage: 60,
-            speed: 10f, bulletCountByEachTime: 6);
-        Heros[HeroName.BeiYa].normalAttackManaCost = 90;
-        // 帕姆：大招全覆写
-        Heros[HeroName.PaMu].superBullet = new SuperBulletParams(
-            shootDistance: 2f, shootWidth: 1f, bulletCount: 1, bulletDamage: 300,
-            LaunchAngle: 0f, speed: 5f, bulletCountByEachTime: 1,
-            EachTimebulletsShootSpace: 0f, IsParadola: true);
-
-        // ── 统一赋值 heroName 枚举（反向映射） ──
-        foreach (var kvp in Heros)
-        {
-            kvp.Value.heroName = kvp.Key;
-        }
-
+        // 表里只放「身份 + 表现引用」。数值（血量/移速/弹道/伤害/大招参数）全部来自
+        // PMNet.Shared.BattleNumericConfig（两端编译同一份源码），所以这里不应出现任何数字。
+        // 某个数值不对就改那个文件，不要改这里。
+        //
+        // 用 AddHero 而不是 Heros.Add + new Hero(...)：heroName 既要做字典键，又要作为
+        // Hero 构造的第一个参数（它要用它去查共享表）。写两遍就有一致性风险，AddHero 只收一次。
+        //
+        // 行序与 PMHeroId 编号（= proto Hero 枚举值）一致，便于与共享表逐行交叉核对；
+        // Heros 是 Dictionary，行序不影响运行。形状与表现引用由
+        // Tools/check_hero_table_shape.py 校验（含与改造前基准的逐字段比对）。
+        //
+        //  英雄              显示名      定位          子弹预制体          大招实体        爆炸特效      移动型大招
+        //  ----              ------      ----          ----------          --------        --------      ----------
+        AddHero(HeroName.XueLi,      "雪莉", "战士", BetterShells[13], 大招实体[10], null, false);
+        AddHero(HeroName.KeErTe,     "柯尔特", "射手", BetterShells[12], 大招实体[9], null, false);
+        AddHero(HeroName.PeiPei,     "佩佩", "射手", BetterShells[8], 大招实体[6], null, false);
+        AddHero(HeroName.PanNi,      "潘妮", "战士", BetterShells[11], 大招实体[8], null, false);
+        AddHero(HeroName.BaLi,       "巴利", "投掷手", BetterShells[18], 大招实体[15], Booms[0], false);
+        AddHero(HeroName.GongNiu,    "公牛", "坦克", BetterShells[1], null, null, false);
+        AddHero(HeroName.DaLiEr,     "达里尔", "坦克", BetterShells[0], null, null, false);
+        AddHero(HeroName.GeEr,       "格尔", "辅助", BetterShells[10], 大招实体[7], null, false);
+        AddHero(HeroName.BuLuoKe,    "布洛克", "射手", BetterShells[14], 大招实体[11], null, false);
+        AddHero(HeroName.BaoPoMaiKe, "爆破麦克", "投掷手", BetterShells[17], 大招实体[14], Booms[2], false);
+        AddHero(HeroName.ABo,        "阿渤", "战士", BetterShells[3], 大招实体[1], null, false);
+        AddHero(HeroName.DiKe,       "迪克", "投掷手", BetterShells[19], 大招实体[16], Booms[1], false);
+        AddHero(HeroName.BeiYa,      "贝亚", "射手", BetterShells[15], 大招实体[12], null, false);
+        AddHero(HeroName.TaLa,       "塔拉", "战士", BetterShells[5], 大招实体[3], null, false);
+        AddHero(HeroName.MaiKeSi,    "麦克斯", "辅助", BetterShells[4], 大招实体[2], null, true);
+        AddHero(HeroName.SiPaiKe,    "斯派克", "射手", BetterShells[16], 大招实体[13], null, false);
+        AddHero(HeroName.HeiYa,      "黑鸦", "致伤突袭者", BetterShells[7], 大招实体[5], null, false);
+        AddHero(HeroName.LiAng,      "里昂", "潜行突袭者", BetterShells[9], null, null, false);
+        AddHero(HeroName.PaMu,       "帕姆", "辅助", BetterShells[6], 大招实体[4], Booms[3], false);
+        AddHero(HeroName.RuiKe,      "瑞科", "射手", BetterShells[2], 大招实体[0], null, false);
         if (!ISNet)
         {
             ModenName = testMOdel.ToString();
@@ -250,7 +268,7 @@ public class HYLDStaticValue :MonoBehaviour
                 RoomEnemyTeamGemTotalValue = totalRedTemp;
                 RoomSelfTeamGemTotalValue = totalBlueTemp;
 
-                if (RoomEnemyTeamGemTotalValue >= 10 || RoomSelfTeamGemTotalValue >= 10)
+                if (RoomEnemyTeamGemTotalValue >= GemWinCount || RoomSelfTeamGemTotalValue >= GemWinCount)
                 {
 
                     ToolBox.GetComponent<Toolbox>().BlueGem = totalBlueTemp;
@@ -280,7 +298,7 @@ public class HYLDStaticValue :MonoBehaviour
         */
     }
 
-    public static readonly int[] bulletHurts =new int[5]{100,235,300,400,500};
+    // 已删除 bulletHurts：全项目零消费点的死数组（P3'-2 清理）。
 }
 public enum PlayerType
 {
@@ -293,10 +311,18 @@ public enum PlayerType
 public class PlayerInformation
 {
     public int teamID { get; private set; }
-    public bool 是否有防护罩 = true;
+    // P3'-3c 删除：是否有防护罩 / isCanCure / isCanCure1 / isPoisoning。
+    //
+    // 它们都是「只在客户端生效、服务端不知道」的机制状态：
+    //   · 是否有防护罩 —— 服务端不实现护盾；原实现是客户端本地 3 秒计时后自行关闭，
+    //     属客户端自决玩法状态。默认值还是 true，删掉前它在联机下会一直为 true，
+    //     但读取方（shell.cs / Boom.cs 的碰撞回调）在联机下都不可达，所以无实际影响。
+    //   · isCanCure / isCanCure1 —— 回血门槛。isCanCure 全项目**没有任何地方置 true**，
+    //     即回血条件恒不成立，本身就是死配置。
+    //   · isPoisoning —— 毒 tick 的状态位，唯一写入点在不可达的 shell.cs 碰撞回调。
+    //
+    // 对应机制一并从 PlayerLogic 删除，理由见其类注释。
     public string playerName;
-    public bool isCanCure = false;
-    public bool isCanCure1 = false;
     public bool isNotDie = false;
     public GameObject body;
     public Vector3 playerPositon;
@@ -318,6 +344,26 @@ public class PlayerInformation
         }
     }
     public int playerBloodValue ;
+
+    /// <summary>
+    /// 本玩家的**有效**最大生命值。
+    ///
+    /// <para>
+    /// 这是「每玩家状态」，不是配置：初始值取自共享数值表，联机下会被服务端下发的权威值覆盖
+    /// （见 <c>BattleData.HitEvent</c>），道具等运行期修正也加在这里。
+    /// 历史实现把这三个来源都塞进 <c>hero.BloodValue</c>（共享配置对象），
+    /// 导致「改一个玩家的血量会改到所有同英雄玩家」——P3'-2 已拆开。
+    /// </para>
+    /// </summary>
+    public int playerBloodMax ;
+
+    /// <summary>
+    /// 本玩家的**有效**子弹伤害（配置值 + 道具等运行期修正）。
+    ///
+    /// <para>只影响客户端表现（弹体上的伤害数字/特效强度）——真正的伤害判定在服务端。</para>
+    /// </summary>
+    public int bulletDamage ;
+
     public int playerManaValue=90;
     public int gemTotal = 0;
     
@@ -342,8 +388,11 @@ public class PlayerInformation
     {
         this.playerName = playerName;
         this.playerPositon = playerPositon;
-        this.playerBloodValue = hero.BloodValue;
         this.hero = hero;
+        // 有效值的初值来自共享配置；之后由权威覆盖 / 道具修正，都不再回写配置。
+        this.playerBloodValue = hero.BloodValue;
+        this.playerBloodMax = hero.BloodValue;
+        this.bulletDamage = hero.bulletDamage;
         移动速度 = hero.移动速度;
         teamID = playerTeam;
         this.playerType = playerType;
@@ -371,34 +420,7 @@ public enum WeaponType
     Rocket = 2,
     MAX
 }
-public enum HeroName
-{   //         子弹自身技能      大招         妙具         星辉
-    XueLi=0,      //ok            ok
-    KeErTe,     //ok            ok                          ok
-    PeiPei,//   ok
-    PanNi,     //不太行
-    BaLi,       //ok
-    GongNiu,   //ok
-    DaLiEr,    //ok
-    GeEr,      //ok              no
-    BuLuoKe,    //ok
-    BaoPoMaiKe,  //ok
-    ABo,        //ok
-    DiKe,      //ok
-    BeiYa,     //ok
-    TaLa,     //ok
-    MaiKeSi,   //ok
-    SiPaiKe,  //ok
-    HeiYa,     //ok
-    LiAng,     //ok
-    PaMu  ,   //ok
-    RuiKe,    //ok              ok
-  
-    
-    
-  
 
-}
 /*
  *   LuoSha,
     BoKe,
@@ -419,107 +441,3 @@ public enum HeroName
     YaYa,
     ShaDi,
 */
-/// <summary>
-/// 大招子弹参数覆写（绝对值）。
-/// 为 null 时表示该英雄大招不走子弹系统（如移动型大招）或无大招。
-/// </summary>
-public class SuperBulletParams
-{
-    public float shootDistance;
-    public float shootWidth;
-    public int   bulletCount;
-    public int   bulletDamage;   // -1 表示沿用普通攻击伤害
-    public float LaunchAngle;    // -1 表示沿用普通攻击角度
-    public float speed;
-    public int   bulletCountByEachTime; // -1 表示沿用普通攻击值
-    public float EachTimebulletsShootSpace; // -1 表示沿用普通攻击值
-    public bool  IsParadola;
-    public float high;           // -1 表示沿用普通攻击值
-    public GameObject Boom;      // null 表示沿用普通攻击值
-
-    public SuperBulletParams(float shootDistance, float shootWidth, int bulletCount,
-        int bulletDamage = -1, float LaunchAngle = -1, float speed = -1,
-        int bulletCountByEachTime = -1, float EachTimebulletsShootSpace = -1,
-        bool IsParadola = false, float high = -1, GameObject Boom = null)
-    {
-        this.shootDistance = shootDistance;
-        this.shootWidth = shootWidth;
-        this.bulletCount = bulletCount;
-        this.bulletDamage = bulletDamage;
-        this.LaunchAngle = LaunchAngle;
-        this.speed = speed;
-        this.bulletCountByEachTime = bulletCountByEachTime;
-        this.EachTimebulletsShootSpace = EachTimebulletsShootSpace;
-        this.IsParadola = IsParadola;
-        this.high = high;
-        this.Boom = Boom;
-    }
-}
-
-public class Hero
-{
-    //英雄基本属性
-    public string Name;
-    public HeroName heroName;
-    public string HeroPositioning;
-    public int BloodValue;
-    public float 移动速度;
-    public float 最小离敌人距离;
-    public float 攻击距离;
-    //英雄枪属性（普通攻击）
-    public GameObject shell;
-    public float shootDistance;
-    public float shootWidth;
-    public int bulletCount;
-    public int bulletDamage;
-    public float LaunchAngle;
-    public float speed;
-    public int bulletCountByEachTime;
-    public float EachTimebulletsShootSpace;
-    public bool IsParadola;//是否抛物线
-    public GameObject Boom;
-    public float high;
-    public float 每次发射可以发射间隔手感问题;
-    public int 装弹速度;
-
-    //英雄大招属性
-    public GameObject 大招实体;
-    /// <summary>true = 大招使用移动型大招实体（如麦克斯），不走子弹系统</summary>
-    public bool isSuperMovingType;
-    /// <summary>大招子弹参数覆写。null 表示无大招或大招不走子弹</summary>
-    public SuperBulletParams superBullet;
-
-    //英雄普通攻击蓝耗参数
-    /// <summary>普通攻击蓝耗（默认30，贝亚=90）</summary>
-    public int normalAttackManaCost = 30;
-    /// <summary>普通攻击后蓝量回复（默认0，麦克斯=3）</summary>
-    public int normalAttackManaRecover = 0;
-
-    public Hero(string _Name,string _HeroPositioning,int _BloodValue, float 移速,float 进攻距离,float 攻击距离喽, float 每次发射间隔, int _装弹速度,GameObject _shell,float _shootDistance, float _shootWidth, int _bulletCount, int _bulletDamage, float _LaunchAngle, float _speed, int _bulletCountByEachTime, float _EachTimebulletsShootSpace = 0.1f, GameObject _大招实体 = null, GameObject _Boom=null, bool _IsParadola=false,float _high=0)
-    {
-        Name = _Name;
-        HeroPositioning = _HeroPositioning;
-        BloodValue = _BloodValue;
-        shell = _shell;
-
-
-        shootDistance = _shootDistance;
-        shootWidth = _shootWidth;
-        bulletCount = _bulletCount;
-        bulletDamage = _bulletDamage;
-        LaunchAngle = _LaunchAngle;
-        speed = _speed;
-        bulletCountByEachTime = _bulletCountByEachTime;
-        EachTimebulletsShootSpace = _EachTimebulletsShootSpace;
-
-        high=_high;
-        Boom = _Boom;
-        IsParadola = _IsParadola;
-        移动速度=移速;
-        最小离敌人距离 = 进攻距离;
-        攻击距离 = 攻击距离喽;
-        每次发射可以发射间隔手感问题 = 每次发射间隔;
-        装弹速度 = _装弹速度;
-        大招实体 = _大招实体;
-    }
-}

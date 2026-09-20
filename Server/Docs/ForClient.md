@@ -129,7 +129,8 @@ Program.cs -> Server/Server.cs -> Server/Client.cs -> Controller/ControllerMange
 ### 6.3 状态归属
 
 - 在线、好友、房间、战斗主要是服务端内存态（`Server/*`）
-- 数据库（`DAO/*`）偏持久化，不是实时状态源
+- 账号与好友关系存在**进程内内存库** `DAO/UserStore.cs`（无数据库依赖；进程重启即清空）
+- 客户端登录：账号不存在时服务端会**自动建号**并登录成功；账号存在但密码错误则失败
 
 ---
 

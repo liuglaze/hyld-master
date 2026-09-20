@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R1 / T38 验收：可靠传输（M03）的契约验证。
+
+      为什么需要它：
+      同流保序、去重、NAK 重传、溢出断连、不可靠不重传、分片重组有界 —— 这些性质
+      在编译期完全看不出来，而在运行期表现为「偶发丢事件 / 偶发卡住 / 内存慢慢涨」，
+      排查成本极高。这里用一个**可控链路**（能精确丢包/乱序/重复/延迟）把每条性质钉住。
+
+      运行：dotnet Tools/PMTransportTest/bin/Release/net8.0/PMTransportTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMTransportTest</AssemblyName>
+    <RootNamespace>PMTransportTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <!-- 直接编真实源码：测的就是这份实现本身 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

@@ -27,6 +27,8 @@ namespace Server
         public static void RemoveAllRequest()
         {
             _requestDic.Clear();
+            // 待确认表也一并清空：连接/面板重建后旧请求的回包不会再到达。
+            PmRpcClient.ClearAll();
         }
         public static void RemoveRequest(ActionCode action)
         {
@@ -38,6 +40,11 @@ namespace Server
         /// <param name="pack"></param>
         public static void HandleRequest(MainPack pack)
         {
+            // 先做 request_id 配对，必须落在下面所有早退分支之前。
+            // 服务端对「已处理但不回包」的请求（例如 Chat）会补一个 ActionNone 的空 ack，
+            // 而 ActionNone 会被本方法直接忽略；若把清账放在那之后，这类请求会一直重试。
+            PmRpcClient.OnResponseReceived(pack);
+
             //8.根据RequestCode处加入到消息队列
 
             if (pack.Requestcode == RequestCode.PingPong)

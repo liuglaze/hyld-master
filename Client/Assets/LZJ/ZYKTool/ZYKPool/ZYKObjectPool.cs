@@ -1,15 +1,15 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 /// <summary>
-/// ¶ÔÏó³Ø
-/// Ö°ÄÜ£º½«Ô¤ÖÆÌåÈ«²¿·ÅÔÚ
+/// å¯¹è±¡æ± 
+/// èŒèƒ½ï¼šå°†é¢„åˆ¶ä½“å…¨éƒ¨æ”¾åœ¨
 /// </summary>
 namespace ZYKTool.Pool
 {
     public class ZYKObjectPool
     {
-        #region ×Ö¶Î
+        #region å­—æ®µ
         private Transform m_parent;
         private GameObject m_prefab;
         private Queue<GameObject> Pool = new Queue<GameObject>();
@@ -17,7 +17,7 @@ namespace ZYKTool.Pool
         #endregion
 
 
-        #region ÊôĞÔ 
+        #region å±æ€§ 
         public string Name
         {
             get
@@ -33,7 +33,7 @@ namespace ZYKTool.Pool
         #endregion
 
 
-        #region ·½·¨
+        #region æ–¹æ³•
         public GameObject PutOut()
         {
 

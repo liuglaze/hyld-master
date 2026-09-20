@@ -1,9 +1,10 @@
-/****************************************************
+﻿/****************************************************
     BattleData.Authority.cs  --  partial class: 权威帧入口 / 位置校正 / 动画更新
     从 BattleManger.cs 拆分，零逻辑变更
 *****************************************************/
 
 using System.Collections.Generic;
+using PMNet.Shared;
 using UnityEngine;
 using SocketProto;
 
@@ -603,16 +604,23 @@ namespace Manger
                         if (elapsedFrames > 0 && playerIndex >= 0 && playerIndex < HYLDStaticValue.Players.Count)
                         {
                             Hero hero = HYLDStaticValue.Players[playerIndex].hero;
-                            if (attack.AttackType == AttackType.Super
-                                && (hero == null || hero.superBullet == null || hero.superBullet.speed < 0))
+                            if (hero == null)
                             {
-                                Logging.HYLDDebug.FrameTrace($"[SuperBullet][SkipVisual] attackId={attack.AttackId} reason=missing_super_speed");
+                                Logging.HYLDDebug.FrameTrace($"[SuperBullet][SkipVisual] attackId={attack.AttackId} reason=hero_missing");
                                 continue;
                             }
 
-                            float bulletSpeed = attack.AttackType == AttackType.Super
-                                ? hero.superBullet.speed
-                                : hero.speed;
+                            bool visualIsSuper = attack.AttackType == AttackType.Super;
+                            if (visualIsSuper && !hero.HasSuperBullet)
+                            {
+                                Logging.HYLDDebug.FrameTrace($"[SuperBullet][SkipVisual] attackId={attack.AttackId} reason=missing_super_config");
+                                continue;
+                            }
+
+                            // 弹速统一由共享表解析：ResolveAttack 已把大招的「-1 = 沿用普通攻击」语义展开，
+                            // 因此这里不再需要判断 superBullet.speed < 0。
+                            float bulletSpeed = BattleNumericConfig
+                                .ResolveAttack((int)hero.heroName, visualIsSuper).BulletSpeed;
                             float advance = elapsedFrames * bulletSpeed * Server.NetConfigValue.frameTime;
                             bulletSpawnPos += dir.normalized * advance;
                             Logging.HYLDDebug.FrameTrace($"[LagComp][Visual] attackId={attack.AttackId} elapsed={elapsedFrames} advance={advance:F2} spawnPos=({bulletSpawnPos.x:F2},{bulletSpawnPos.z:F2})");

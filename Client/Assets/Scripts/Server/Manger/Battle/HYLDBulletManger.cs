@@ -5,6 +5,7 @@
 *****************************************************/
 
 using System.Collections;
+using PMNet.Shared;
 using System.Collections.Generic;
 using UnityEngine;
 using System;
@@ -126,7 +127,9 @@ namespace Manger
 
         private void SpawnVisualBulletDirect(int playerID, Vector3 spawnPosition, Vector3 fireTowards, FireState fireState)
         {
-            HYLDStaticValue.Players[playerID].isCanCure = false;
+            // P3'-3c：这里原本写 `Players[playerID].isCanCure = false`（回血门槛的一部分）。
+            // 该字段已随「客户端不再改写权威字段」删除 —— 而且它全项目没有任何地方置 true，
+            // 本来就恒为 false，这行写入没有任何效果。
             attackTimers[playerID] = 0;
             HYLDStaticValue.Players[playerID].bodyAnimator.SetTrigger("Fire");
 
@@ -140,7 +143,7 @@ namespace Manger
                 return;
             }
 
-            VisualAttackSpec spec = BuildVisualAttackSpec(hero, fireState);
+            VisualAttackSpec spec = BuildVisualAttackSpec(playerID, hero, fireState);
             if (spec == null || spec.BulletPrefab == null)
             {
                 Logging.HYLDDebug.Trace($"[VisualBullet][Skip] playerID={playerID} fireState={fireState} reason=invalid-spec");
@@ -150,43 +153,42 @@ namespace Manger
             StartCoroutine(SpawnVisualProjectiles(playerID, spawnPosition, fireTowardsTemp, spec));
         }
 
-        private VisualAttackSpec BuildVisualAttackSpec(Hero hero, FireState fireState)
+        /// <param name="playerID">玩家在 <c>HYLDStaticValue.Players</c> 中的索引（伤害需读每玩家有效值）。</param>
+        private VisualAttackSpec BuildVisualAttackSpec(int playerID, Hero hero, FireState fireState)
         {
-            VisualAttackSpec spec = new VisualAttackSpec();
-            spec.BulletPrefab = hero.shell;
-            spec.ShootDistance = hero.shootDistance;
-            spec.ShootWidth = hero.shootWidth;
-            spec.BulletCount = hero.bulletCount;
-            spec.BulletDamage = hero.bulletDamage;
-            spec.LaunchAngle = hero.LaunchAngle;
-            spec.Speed = hero.speed;
-            spec.BulletCountByEachTime = hero.bulletCountByEachTime;
-            spec.EachTimeBulletsShootSpace = hero.EachTimebulletsShootSpace;
-            spec.IsParadola = hero.IsParadola;
-            spec.High = hero.high;
-            spec.IsSuper = false;
-
-            if (fireState == FireState.ShotgunSuper)
+            bool isSuper = fireState == FireState.ShotgunSuper;
+            if (isSuper && (!hero.HasSuperBullet || hero.大招实体 == null))
             {
-                if (hero.superBullet == null || hero.大招实体 == null)
-                {
-                    Logging.HYLDDebug.Trace("[VisualBullet][Skip] fireState=ShotgunSuper reason=missing-super-config");
-                    return null;
-                }
-
-                spec.IsSuper = true;
-                spec.BulletPrefab = hero.大招实体;
-                spec.ShootDistance = hero.superBullet.shootDistance;
-                spec.ShootWidth = hero.superBullet.shootWidth;
-                spec.BulletCount = hero.superBullet.bulletCount;
-                if (hero.superBullet.bulletDamage >= 0) spec.BulletDamage = hero.superBullet.bulletDamage;
-                if (hero.superBullet.LaunchAngle >= 0) spec.LaunchAngle = hero.superBullet.LaunchAngle;
-                if (hero.superBullet.speed >= 0) spec.Speed = hero.superBullet.speed;
-                if (hero.superBullet.bulletCountByEachTime >= 0) spec.BulletCountByEachTime = hero.superBullet.bulletCountByEachTime;
-                if (hero.superBullet.EachTimebulletsShootSpace >= 0) spec.EachTimeBulletsShootSpace = hero.superBullet.EachTimebulletsShootSpace;
-                spec.IsParadola = hero.superBullet.IsParadola;
-                if (hero.superBullet.high >= 0) spec.High = hero.superBullet.high;
+                Logging.HYLDDebug.Trace("[VisualBullet][Skip] fireState=ShotgunSuper reason=missing-super-config");
+                return null;
             }
+
+            // 数值一律由共享表解析（ResolveAttack 已展开大招的「-1 = 沿用普通攻击」语义），
+            // 原来那 6 行 `if (x >= 0)` 手工继承判断因此不再需要 —— 它也曾经是两端各写一套的隐患。
+            ResolvedAttack num = BattleNumericConfig.ResolveAttack((int)hero.heroName, isSuper);
+
+            // 伤害用**每玩家有效值**（可能被道具改过），其余是配置值。
+            // playerID 本来就是这个数组的下标（见 SpawnVisualBullet 的注释）。
+            int effectiveDamage = num.BulletDamage;
+            if (playerID >= 0 && playerID < HYLDStaticValue.Players.Count
+                && HYLDStaticValue.Players[playerID].bulletDamage > 0)
+            {
+                effectiveDamage = HYLDStaticValue.Players[playerID].bulletDamage;
+            }
+
+            VisualAttackSpec spec = new VisualAttackSpec();
+            spec.BulletPrefab = isSuper ? hero.大招实体 : hero.shell;
+            spec.ShootDistance = num.ShootDistance;
+            spec.ShootWidth = num.ShootWidth;
+            spec.BulletCount = num.BulletCountTotal;
+            spec.BulletDamage = effectiveDamage;
+            spec.LaunchAngle = num.LaunchAngle;
+            spec.Speed = num.BulletSpeed;
+            spec.BulletCountByEachTime = num.BulletCountPerShot;
+            spec.EachTimeBulletsShootSpace = num.EachShotInterval;
+            spec.IsParadola = num.IsParabola;
+            spec.High = num.High;
+            spec.IsSuper = isSuper;
 
             if (spec.BulletCountByEachTime <= 0)
             {

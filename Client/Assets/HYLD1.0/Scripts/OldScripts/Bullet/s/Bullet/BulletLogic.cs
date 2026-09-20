@@ -14,42 +14,14 @@ using UnityEngine.UI;
 using UnityEngine;
 public class BulletLogic : MonoBehaviour
 {
-    public void setBulletInformation(Hero hero)
-    {
-        shootDistance = hero.shootDistance;
-        shootWidth = hero.shootWidth;
-        bulletCount = hero.bulletCount;
-        bulletDamage = hero.bulletDamage;
-        LaunchAngle = hero.LaunchAngle;
-        speed = hero.speed;
-        bulletCountByEachTime = hero.bulletCountByEachTime;
-        EachTimebulletsShootSpace = hero.EachTimebulletsShootSpace;
-        bulletPrefab = hero.shell;
-        BoomPrefab = hero.Boom;
-        high = hero.high;
-        IsParadola = hero.IsParadola;
-    }
-
-    /// <summary>
-    /// 用大招参数覆写当前子弹信息。-1 值表示保留 setBulletInformation 写入的普通攻击值。
-    /// 必须在 setBulletInformation 之后调用。
-    /// </summary>
-    public void applySuperParams(SuperBulletParams sp)
-    {
-        if (sp == null) return;
-        shootDistance = sp.shootDistance;
-        shootWidth = sp.shootWidth;
-        bulletCount = sp.bulletCount;
-        if (sp.bulletDamage >= 0)           bulletDamage = sp.bulletDamage;
-        if (sp.LaunchAngle >= 0)            LaunchAngle = sp.LaunchAngle;
-        if (sp.speed >= 0)                  speed = sp.speed;
-        if (sp.bulletCountByEachTime >= 0)  bulletCountByEachTime = sp.bulletCountByEachTime;
-        if (sp.EachTimebulletsShootSpace >= 0) EachTimebulletsShootSpace = sp.EachTimebulletsShootSpace;
-        IsParadola = sp.IsParadola;
-        if (sp.high >= 0)                   high = sp.high;
-        if (sp.Boom != null)                BoomPrefab = sp.Boom;
-    }
-
+    // 已删除两个方法：setBulletInformation(Hero) 与 applySuperParams(SuperBulletParams)。
+    //
+    // 删除依据（P3'-'2）：全项目零调用方（含 prefab/scene 的方法名字符串引用也为 0），
+    // 属于单机时期遗留；且 applySuperParams 的参数类型 SuperBulletParams 已随
+    // 「数值统一到共享表」一并移除，保留它会挡住编译。
+    //
+    // 本类仍然保留：它被 Bullet.prefab 引用着，删类会让 prefab 变成 missing script。
+    // 其字段由 shell.cs 的运行时赋值路径使用。
 
     // Start is called before the first frame update
     public float shootDistance;//射程

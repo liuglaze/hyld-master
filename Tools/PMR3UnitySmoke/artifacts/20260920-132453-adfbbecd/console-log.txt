@@ -1,0 +1,182 @@
+=== R3-B6：真实 Unity DS 进程烟测（真实 PMDsLobbyHost + 真实 HyldDS.exe + 真实 UDP 两客户端）===
+
+    ... [7ms] artifacts=D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132453-adfbbecd
+  模式：holdSeconds=40 dropControlAfterReady=False（默认 0 = 原快速模式）
+  预检 hold 上限核对：hold=40000ms，预算余量上限=60000ms，DS smoke 期限=120000ms
+── 阶段 0：构建产物预检（不复用旧 DS 冒充更新）
+    OK   S1 真实 DS 托管程序集存在：D:\UGit\hyld-master\HyldDS\HyldDS_Data\Managed\Assembly-CSharp.dll
+    ... [26ms] Assembly-CSharp.dll mtime=2026-09-20 13:02:38 size=1028608 sha256=13ab0a772332e158ef662f4ce36c4541d16a4cc453aef8b37ed0bb4b16e24a65
+    OK   S2 程序集可读（大小 1028608 字节）
+    OK   S3 程序集体积合理（>100KB，非空壳）
+    OK   S4 程序集含关键符号 PMDsSessionHost
+    OK   S5 程序集含关键符号 PMUdpSessionEndpoint
+    OK   S6 程序集含关键符号 PMR3Player
+    OK   S7 程序集含关键符号 PMDsLobbyAgent
+    OK   S7b 程序集含控制面保活修复符号（RuntimeLivenessTimeoutMs + LastTrustedReceiveMs）
+    OK   S8 白名单可执行文件存在：D:\UGit\hyld-master\HyldDS\HyldDS.exe
+── 阶段 1：真实 PMDsLobbyHost 启动（control = 系统临时端口）
+    OK   S9 PMR3 生成表已封板（hash=0x7B986DB4）
+    OK   S10 固定测试碰撞摘要 = 契约 §7.4 冻结值（实际 1379090945，期望 1379090945）
+    OK   S11 本局 UDP 端口段落在随机高位区间（43640-43659）
+    OK   S12 端口段不含 7777/7778/7800
+    OK   S13 真实 PMDsLobbyHost 启动成功（ok）
+    OK   S14 控制端口为真实监听端口（1600）
+    OK   S15 控制端口不是任何现役/旧服务端口（1600）
+── 阶段 2：新链开局 → 真实 HyldDS.exe 进程启动
+    OK   S16 新链开局请求被接受并入队（已入队）（实际 0，期望 0）
+    ... [85ms] 满足：真实启动器收到一次启动请求（真实进程已 Start）（累计 85ms）
+    OK   S17 真实 PMDsSystemProcessLauncher 被调用且真实进程已启动（唯一边界：参数尾部追加）
+    OK   S18 启动 exe 就是白名单里的真实 HyldDS.exe（实际 D:\UGit\hyld-master\HyldDS\HyldDS.exe，期望 D:\UGit\hyld-master\HyldDS\HyldDS.exe）
+    OK   S19 工作目录 = 真实 DS 目录（Unity 数据目录可解析）
+    OK   S20 真实 OS 进程已启动：pid=74972
+    OK   S21 该 pid 不是本测试进程自身
+    OK   S22 LobbyHost 记账的 ProcessId 与真实进程一致（实际 74972，期望 74972）
+    OK   S23 启动瞬间进程仍在运行（不是立刻退出的冒烟）
+    OK   S24 薄包装已追加 -server-smoke（显式 smoke 验收，非伪造接口）
+    OK   S25 薄包装已追加绝对 -logFile（真实 Unity 宿主日志落到 artifacts）（实际 D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132453-adfbbecd\hyldds-1-r3b6-smoke-9367fcba-ds-1.log，期望 D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132453-adfbbecd\hyldds-1-r3b6-smoke-9367fcba-ds-1.log）
+    OK   S26 -logFile 是 artifacts 下的绝对路径（D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132453-adfbbecd\hyldds-1-r3b6-smoke-9367fcba-ds-1.log）
+    OK   S27 -matchid 由真实 LobbyHost 产出且与本局一致（实际 r3b6-smoke-9367fcba，期望 r3b6-smoke-9367fcba）
+    OK   S28 -control 指向真实监听端口（由 LobbyHost 产出）（实际 127.0.0.1:1600，期望 127.0.0.1:1600）
+    OK   S29 启动参数含 -server/-batchmode/-nographics
+    OK   S30 -port 来自 Allocate 后的真实端口且落在随机高位段（43640）
+    OK   S31 本局 UDP 端口不是现役/旧服务端口，也不与控制端口相同
+    OK   S32 真实 LobbyHost 已原子发布引导文件（路径来自启动参数）
+    OK   S33 启动器无错误细节（ok）
+    OK   S34 启动参数记录里不含票据/密钥字样（只给引导文件路径）
+── 阶段 3：真实控制 TCP Ready → 真实 PMDS1 offer
+    ... [391ms] 满足：Lobby 在真实 Ready 之后发布两份 offer（累计 391ms）
+    OK   S35 可按 matchId 取到真实协调器（诊断面）
+    OK   S36 真实 DS 上报 Ready 后，Lobby 发布 2 份 offer（真实 TCP 控制面）
+    OK   S37 发布 offer 后协调器进入 Running（实际 4，期望 4）
+    OK   S38 控制连接已由 MAC 校验后的首帧绑定
+    OK   S39 Lobby listener 真的分帧并派发过控制帧（真实 TCP）（实际 1，要求 > 0）
+    OK   S40 全链路没有任何控制帧 MAC 失败（实际 0，期望 0）
+    OK   S41 没有畸形控制帧（实际 0，期望 0）
+    OK   S42 没有任何开局被拒绝（实际 0，期望 0）
+    OK   S43 没有 offer 投递失败（真实 codec 往返全部成功）（实际 0，期望 0）
+    OK   S44 真实 Unity DS 日志文件已产生（-logFile 生效）
+    OK   S45 DS 日志证明它走的是 R3-B 新链宿主（不是旧诊断路由）
+    OK   S46 DS 日志证明固定测试碰撞场景已建立并校验（SceneReady 前置）
+    OK   S47 DS 日志的 collisionDigest 与本机冻结值一致（0x52334201）
+    OK   S48 DS 日志报告真实绑定端口 = 分配端口（43640）
+    OK   S49 offer A 的 MatchId 来自会话（实际 r3b6-smoke-9367fcba，期望 r3b6-smoke-9367fcba）
+    OK   S50 offer A 的 Port 等于真实分配端口（实际 43640，期望 43640）
+    OK   S51 offer A 的 Host 是 loopback（首版口径）（实际 127.0.0.1，期望 127.0.0.1）
+    OK   S52 offer A 的协议摘要 = PMR3 生成表摘要（实际 2073587124，期望 2073587124）
+    OK   S53 offer A 的碰撞摘要 = 契约冻结值（实际 1379090945，期望 1379090945）
+    OK   S54 offer A 的身份 uid 来自名册（实际 301，期望 301）
+    OK   S55 offer B 的身份 uid 来自名册（实际 302，期望 302）
+    OK   S56 两份 offer 都携带真实票据字节
+    OK   S57 编码文本以 PMDS1: 开头（MainPack.Str 的冻结载体）
+    OK   S58 运行期独占 bind 本局 UDP 端口失败 ⇒ 该端口确实被真实 DS 进程持有（SocketException: 通常每个套接字地址(协议/网络地址/端口)只允许使用一次。）
+── 阶段 4：两个纯 C#（非 UnityUI）客户端经真实 UDP 入局 + 探针/回声/收敛
+    ... [397ms] 探针闸门已关闭（holdSeconds=40 dropControl=False）
+    ... [474ms] 满足：两个客户端在真实 UDP 上完成握手/验票/激活（累计 474ms）
+    OK   S59 两个客户端在真实 UDP 上完成握手/验票/激活
+    OK   S60 客户端 A 1 条已激活连接（实际 1，期望 1）
+    OK   S61 客户端 B 1 条已激活连接（实际 1，期望 1）
+    OK   S62 客户端 A 没有握手被拒（实际 0，期望 0）
+    OK   S63 客户端 B 没有握手被拒（实际 0，期望 0）
+    OK   S64 客户端 A 没有激活前数据报被丢（实际 0，期望 0）
+    OK   S65 客户端 A 没有摘要/nonce 不匹配的 ServerHello（实际 0，期望 0）
+    OK   S66 客户端 A 真的收到过 UDP 数据报（实际 9，要求 > 0）
+    OK   S67 客户端 A 真的发出过 UDP 数据报（实际 3，要求 > 0）
+    ... [475ms] 满足：两个客户端各看到两个玩家副本（累计 475ms）
+    OK   S68 两个客户端各看到 2 个副本创建回调（A=2 B=2）
+    OK   S69 客户端 A 世界对象数 = 2（实际 2，期望 2）
+    OK   S70 客户端 B 世界对象数 = 2（实际 2，期望 2）
+    OK   S71 客户端 A 的本端副本角色 = AutonomousProxy（Create 初值已带 uid）
+    OK   S72 客户端 A 看到的对手副本角色 = SimulatedProxy
+    OK   S73 客户端 A 本端副本 uid 初值正确
+── 阶段 4b：真实长局 hold 40s（暂缓 owner 探针，持续泵控制/UDP）
+    ... [476ms] hold 起点 = 「两客户端各见两副本」之后（不是进程启动时刻）：2026-09-20 13:24:54.055，目标 40000ms
+    ... [5512ms] hold 进度 5037ms/40000ms（DS→Lobby 心跳累计 1，Lobby→DS 应答累计 1，DS 存活采样 82）
+    ... [10504ms] hold 进度 10029ms/40000ms（DS→Lobby 心跳累计 2，Lobby→DS 应答累计 2，DS 存活采样 162）
+    ... [15491ms] hold 进度 15016ms/40000ms（DS→Lobby 心跳累计 3，Lobby→DS 应答累计 3，DS 存活采样 242）
+    ... [20476ms] hold 进度 20001ms/40000ms（DS→Lobby 心跳累计 4，Lobby→DS 应答累计 4，DS 存活采样 322）
+    ... [25534ms] hold 进度 25059ms/40000ms（DS→Lobby 心跳累计 5，Lobby→DS 应答累计 5，DS 存活采样 403）
+    ... [30532ms] hold 进度 30057ms/40000ms（DS→Lobby 心跳累计 6，Lobby→DS 应答累计 6，DS 存活采样 483）
+    ... [35522ms] hold 进度 35046ms/40000ms（DS→Lobby 心跳累计 7，Lobby→DS 应答累计 7，DS 存活采样 563）
+    ... [40489ms] hold 进度 40014ms/40000ms（DS→Lobby 心跳累计 8，Lobby→DS 应答累计 8，DS 存活采样 643）
+    OK   S73a hold 期间真实 DS 进程始终存活（每帧采样均 IsRunning 且无 Exited 事件）
+    OK   S73b hold 期间没有观测到任何真实 OS 进程退出事件（ExitObservations=0）
+    OK   S73c 实际延后 >= 目标（实际 40014ms，目标 40000ms；从「两客户端各见两副本」之后起算，已 > 30s，不是只从进程启动计时；中途破坏点=无）
+    OK   S73d hold 期间协调器始终 Running（最终 state=Running）
+    OK   S73e hold 期间没有任何结果被提交/受理（ResultAccepted=0，网关结果=0）⇒ 没有提前走完闭环
+    OK   S73f hold 期间两客户端与控制连接始终 ready（各 1 条已激活连接 + 控制连接已绑定 + 无端点失败）
+    OK   S73g hold 期间没有任何 owner 探针被发出（ProbeNonceSent=0/0；否则真实 DS 的 smoke 会立刻结束）
+    OK   S73h hold 期间真实 DS→Lobby 控制心跳多次到达（本次 8 次，5s 间隔）（实际 8，要求 > 4）
+    OK   S73h2 hold 期间 Lobby→DS 心跳应答多次发出（本次 8 次）（实际 8，要求 > 4）
+    OK   S73i 协调器没有发生心跳超时（HeartbeatTimeouts=0）（实际 0，期望 0）
+    OK   S73j 真实 DS 自报收到 Lobby 可信下行（日志 hbRx 最大值=8）⇒ DS 运行期 liveness(15s) 被持续续命，未自判失败退出（实际 8，要求 > 1）
+    OK   S73k 真实 DS 日志有 9 条心跳 tick（DS 确实处于运行期，而不仅仅启动了）（实际 9，要求 > 1）
+    ... [40491ms] hold 实际窗口 2026-09-20 13:24:54.055 → 2026-09-20 13:25:34.069（40014ms）；DS dll mtime=2026-09-20 13:02:38 size=1028608 sha256=13ab0a772332e158ef662f4ce36c4541d16a4cc453aef8b37ed0bb4b16e24a65
+    ... [40492ms] 等待中：探针 → 服务端 ProbeCount → ClientEcho → 属性收敛（剩余约 29999ms）
+    ... [40617ms] 满足：探针 → 服务端 ProbeCount → ClientEcho → 属性收敛（累计 40617ms）
+    OK   S74 每个 owner 一次探针 → 属性 ProbeCount=1 收敛 + 收到一次 ClientEcho
+    OK   S75 客户端 A 只发过一次探针（实际 1，期望 1）
+    OK   S76 客户端 B 只发过一次探针（实际 1，期望 1）
+    OK   S77 客户端 A 本端副本的本地探针计数 = 1（实际 1，期望 1）
+    OK   S78 客户端 B 本端副本的本地探针计数 = 1（实际 1，期望 1）
+    OK   S79 客户端 A 收到恰好一次 ClientEcho（实际 1，期望 1）
+    OK   S80 客户端 B 收到恰好一次 ClientEcho（实际 1，期望 1）
+    OK   S81 客户端 A 的 Echo nonce 原样回流（实际 1，期望 1）
+    OK   S82 客户端 B 的 Echo nonce 原样回流（实际 1，期望 1）
+    OK   S83 客户端 A 也看到 B 的 ProbeCount 收敛到 1（实际 1，期望 1）
+    OK   S84 客户端 B 也看到 A 的 ProbeCount 收敛到 1（实际 1，期望 1）
+    OK   S85 客户端 A 的桥发出过上行 RPC（生成桩，真实 UDP）（实际 1，要求 > 0）
+    OK   S86 客户端 B 的桥发出过上行 RPC（生成桩，真实 UDP）（实际 1，要求 > 0）
+    OK   S87 客户端 A 应用过复制更新记录（实际 32，要求 > 0）
+    OK   S88 客户端 A 端点没有上报失败（实际 0，期望 0）
+    OK   S89 客户端 B 端点没有上报失败（实际 0，期望 0）
+    OK   S90 真实 DS 日志证明它创建了 uid=A 的权威副本
+    OK   S91 真实 DS 日志证明它创建了 uid=B 的权威副本
+    ... [40618ms] 满足：真实 DS 判定 smoke 并提交结果（累计 40618ms）
+    OK   S92 真实 DS 的 -server-smoke 路径成立：名册 2 人全部完成探针并提交 smoke 结果
+── 阶段 5：smoke 结果 → ResultAck → 认证显式 Exited(0) → 实际 OS 进程退出 → 端口回收
+    ... [40618ms] 满足：Lobby 受理真实结果（累计 40618ms）
+    OK   S93 Lobby 受理了真实 DS 的 smoke 结果（ResultAccepted=1）
+    OK   S94 结果只被结算一次（幂等）（实际 1，期望 1）
+    OK   S95 网关只收到一次结果通知（不伪造 BattleReview）（实际 1，期望 1）
+    OK   S96 结果通知携带正确 matchId（实际 r3b6-smoke-9367fcba，期望 r3b6-smoke-9367fcba）
+    OK   S97 smoke 结果的 winnerTeamId = 0（不是伪造正常胜负）（实际 0，期望 0）
+    OK   S98 结果摘要自带 smoke 字面量（经真实控制协议原样到达 Lobby）
+    ... [40726ms] 满足：认证显式 Exited(0) ⇒ 终态 Exited（累计 40726ms）
+    OK   S99 终态 = Exited（只有「结果已受理 + 经 MAC 认证的显式 Exited(0)」才是正常完成）
+    OK   S100 对端收尾已被观测（PeerExitObserved）
+    OK   S101 结果确认往返没有 MAC 失败（实际 0，期望 0）
+    ... [40726ms] 满足：真实 OS 进程退出（Process.Exited 事件，由 OS 触发）（累计 40726ms）
+    OK   S102 观测到真实 OS 进程退出事件（.NET Process.Exited；而不是只看到对象被释放）
+    OK   S103 取到真实 OS 退出码（0）
+    OK   S104 真实 OS 退出码 = 0（Unity 优雅退出，非强杀；实际 0，协调器强杀请求=1 次，先后=OS 退出早于终态（自然退出））
+    ... [40726ms] 退出诊断：osExitCode=0 ExitObservations=1 协调器KillRequests=1 DeferredCleanupTicks=0 exitedTerminalAt=1789881934306 osExitObservedAt=1789881934275
+    OK   S104b Lobby 侧的终态理由是「对端经认证显式 Exited(0)」：结果已本地受理，且对端经认证显式 Exited(0)（收到 Exited 消息）
+    OK   S104c 真实 DS 日志自报是优雅退出请求（R3-B 新链请求退出，exitCode=0）⇒ 非 0 的 OS 退出码不是 DS 自己要求的
+    ... [40727ms] 满足：确认进程退出后回收端口与 uid（累计 40727ms）
+    OK   S105 确认进程实际退出后完成收尾（SessionReleased）
+    OK   S106 共享端口池已归还（InUseCount=0）（实际 0，期望 0）
+    OK   S107 跨会话 uid 占用账本已清空（实际 0，期望 0）
+    OK   S108 两名玩家的 uid 均已释放
+    OK   S109 协调器资源占用已释放
+    OK   S110 引导文件随收尾删除（只传路径的交付面无残留）
+    OK   S111 对端收尾观测在终态后仍保持为真
+    OK   S112 确认退出后才恢复两名玩家的 PlayerOnline
+    OK   S113 退出后独占 bind 本局 UDP 端口成功 ⇒ OS 真的回收了玩家端口（ok）
+    ... [40727ms] 满足：真实 DS 日志出现 ResultAck 确认行（累计 40727ms）
+    OK   S114 真实 DS 日志证明它收到了匹配的 ResultAck（ResultAck 真到了对端）
+    ... [40727ms] 满足：真实 DS 日志出现收尾痕迹（累计 40727ms）
+    OK   S115 真实 DS 日志留下收尾痕迹（优雅关闭/OnApplicationQuit）
+── 阶段 6：证据归档（DS 日志/stdout/stderr/启动记录/摘要）
+    OK   S116 构建产物预检完整（sha256=13ab0a772332e158ef662f4ce36c4541d16a4cc453aef8b37ed0bb4b16e24a65）
+    OK   S117 全程只启动过一次真实进程（没有复用旧 DS 冒充更新）
+    OK   S118 启动 pid 已记录（pid=74972）（实际 74972，要求 > 0）
+    OK   S119 本工具使用的两个端口都不是现役/旧服务端口（udp=43640 control=1600）
+    ... [40729ms] DS 日志：D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132453-adfbbecd\hyldds-1-r3b6-smoke-9367fcba-ds-1.log（8910 字节）
+    ... [40729ms] DS stdout 累计 0 字节 / stderr 累计 0 字节
+    ... [40729ms] 本局 UDP 端口 43640：运行期独占 bind 失败（被 DS 持有）→ 退出后 bind 成功（已回收）
+    OK   S120 Lobby 泵循环没有出现异常（PumpExceptions=0）（实际 0，期望 0）
+    OK   S121 没有任何控制帧投递失败（ControlFramesUndeliverable=0）（实际 0，期望 0）
+    摘要已写入 D:\UGit\hyld-master\Tools\PMR3UnitySmoke\artifacts\20260920-132453-adfbbecd\summary.txt
+
+  总耗时 40732ms（上限 120000ms）
+  全部通过：136 项检查，0 项失败

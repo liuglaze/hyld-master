@@ -133,9 +133,9 @@ public class TextLogic : MonoBehaviour
 			
 			timerisPoisoning = 0;
 			PoisoningTime++;
-			playerBlood -= 85;
-			playerHurt(85);
-			if (PoisoningTime >= 5)
+			playerBlood -= HYLDStaticValue.PoisonDamagePerTick;
+			playerHurt(HYLDStaticValue.PoisonDamagePerTick);
+			if (PoisoningTime >= HYLDStaticValue.PoisonTickCount)
 			{
 				PoisoningTime = 0;
 				isPoisoning = false;

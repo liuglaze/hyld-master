@@ -1,4 +1,5 @@
 ﻿using SocketProto;
+using PMNet.Shared;
 using System;
 using System.Collections.Generic;
 using System.Text;
@@ -318,18 +319,18 @@ namespace Server
 							int currentSuperEnergy = GetSuperEnergy(battlePlayerId);
 							if (incomingAttack.AttackType == AttackType.Super)
 							{
-								if (!HeroConfig.TryGetSuper(hero, out _))
+								if (!BattleNumericConfig.TryGetSuper((int)hero, out _))
 								{
 									dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
 									RecordAttackAck(battlePlayerId, incomingAttack.AttackId, false, currentMana, currentSuperEnergy, "unsupported_super");
 									Logging.Debug.Log($"[SuperEnergy] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} reason=unsupported_super hero={hero}");
 									continue;
 								}
-								if (currentSuperEnergy < HeroConfig.SuperEnergyMax)
+								if (currentSuperEnergy < BattleNumericConfig.SuperEnergyMax)
 								{
 									dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
 									RecordAttackAck(battlePlayerId, incomingAttack.AttackId, false, currentMana, currentSuperEnergy, "super_energy");
-									Logging.Debug.Log($"[SuperEnergy] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} energy={currentSuperEnergy} max={HeroConfig.SuperEnergyMax}");
+									Logging.Debug.Log($"[SuperEnergy] REJECT bp={battlePlayerId} attackId={incomingAttack.AttackId} energy={currentSuperEnergy} max={BattleNumericConfig.SuperEnergyMax}");
 									continue;
 								}
 								currentSuperEnergy = 0;
@@ -337,7 +338,7 @@ namespace Server
 							}
 							else
 							{
-								int manaCost = HeroConfig.GetAttackManaCost(hero);
+								int manaCost = BattleNumericConfig.Get((int)hero).NormalAttackManaCost;
 								if (currentMana < manaCost)
 								{
 									dic_lastProcessedAttackId[battlePlayerId] = incomingAttack.AttackId;
@@ -797,51 +798,49 @@ namespace Server
 			return backlog;
 		}
 
+		/// <summary>
+		/// 位置积分：P3'-3 起公式本体在 <see cref="PMBattleSim.TryAdvancePosition"/>，
+		/// 与客户端预测调的是**同一份实现**（改造前两端各写一份，漂移一处就会持续对不上）。
+		/// 这里只负责“算队伍镜像符号”这个**策略**（服务端锚最小编号队，客户端锚自己 —— 两套坐标系不同，见核心文件头注释）。
+		/// </summary>
 		private ServerVector3 SimulateAuthoritativeMove(int battlePlayerId, ServerVector3 startPos, float moveX, float moveY, int frameCount)
 		{
-			if (frameCount <= 0)
-			{
-				return startPos;
-			}
-
-			float len = (float)Math.Sqrt(moveX * moveX + moveY * moveY);
-			if (len <= 1e-6f)
-			{
-				return startPos;
-			}
-
-			float mx = moveX / len;
-			float mz = moveY / len;
 			float teamSign = 1f;
 			if (playerTeamIds.TryGetValue(battlePlayerId, out int tid) && tid != baseTeamId)
 			{
 				teamSign = -1f;
 			}
 
-			ServerVector3 result = startPos;
-			float distance = MoveSpeed * FrameTimeSec * frameCount;
-			result.X += -mx * teamSign * distance;
-			result.Z += mz * teamSign * distance;
-			return result;
+			float outX, outZ;
+			if (!PMBattleSim.TryAdvancePosition(startPos.X, startPos.Z, moveX, moveY, teamSign,
+					GetMoveSpeedFor(battlePlayerId), FrameTimeSec, frameCount, out outX, out outZ))
+			{
+				// frameCount <= 0 或零输入：位置原样（包括 Y 与 Z）
+				return startPos;
+			}
+
+			return new ServerVector3(outX, startPos.Y, outZ);
 		}
 
+		/// <summary>
+		/// 权威速度（供 MoveAck 回带）。公式在 <see cref="PMBattleSim.TryGetVelocity"/>。
+		/// </summary>
 		private ServerVector3 CalculateAuthoritativeVelocity(int battlePlayerId, float moveX, float moveY)
 		{
-			float len = (float)Math.Sqrt(moveX * moveX + moveY * moveY);
-			if (len <= 1e-6f)
+			float teamSign = 1f;
+			if (playerTeamIds.TryGetValue(battlePlayerId, out int tid) && tid != baseTeamId)
+			{
+				teamSign = -1f;
+			}
+
+			float velX, velZ;
+			if (!PMBattleSim.TryGetVelocity(moveX, moveY, teamSign, GetMoveSpeedFor(battlePlayerId),
+					out velX, out velZ))
 			{
 				return new ServerVector3(0f, 0f, 0f);
 			}
 
-			float mx = moveX / len;
-			float mz = moveY / len;
-			float teamSign = 1f;
-			if (playerTeamIds.TryGetValue(battlePlayerId, out int tid) && tid != baseTeamId)
-			{
-				teamSign = -1f;
-			}
-
-			return new ServerVector3(-mx * teamSign * MoveSpeed, 0f, mz * teamSign * MoveSpeed);
+			return new ServerVector3(velX, 0f, velZ);
 		}
 
 		// ==================== 战斗结束 ====================

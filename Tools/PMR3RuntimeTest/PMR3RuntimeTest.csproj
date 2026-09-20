@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R3-B 门禁（T40/§7.4 的 Unity 组验收：声明对象 + 运行时接线 + 纯 C# 控制代理）。
+
+      为什么需要它：
+        「PMR3 声明产物是否与生成器同步」「Attach 是否真的把世界工厂/OnRep/RemoteSender 接起来」
+        「SpawnPlayer 是不是唯一 owner」「ServerProbe 是否经生成桩走真实字节链并回流 ProbeCount」
+        「非 owner 的探针是否被拒」「Lobby 控制代理的半包/MAC/结果重发/失败退出是否正确」
+        —— 这些编译期全看不出来，运行时又都长得像「偶尔不同步 / 偶尔丢一条」。
+
+      它测什么（都是**真实实现**，不引 Unity、不引生成器）：
+        - 真实 PMNet 核心（Client/Assets/Scripts/PMNet/**）；
+        - 真实 R3-B 声明对象的生成产物（Client/Assets/Scripts/PMR3/Generated/**）；
+        - 真实纯 C# 控制代理（Client/Assets/Scripts/Server/Boot/PMDsLobbyAgent.cs）；
+        - 投递走真实 PMTransport 的字节链（分片/序号/ACK 都真实参与），
+          链路用**手工 link**（与 PMNetSessionTest 同一手法），不直接调用业务实现冒充网络投递；
+        - 控制通道用**真实 loopback TCP** 的 TcpListener 当替身 Lobby（帧/MAC/半包都真实）。
+
+      默认不引用 UnityEngine：PMR3Runtime / PMR3Player / PMDsLobbyAgent 都是纯 C#。
+
+      运行：dotnet Tools/PMR3RuntimeTest/bin/Release/net8.0/PMR3RuntimeTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR3RuntimeTest</AssemblyName>
+    <RootNamespace>PMR3RuntimeTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实 PMNet 核心（含 Control/Session/Transport/World/Replication/Generated）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- R3-B 声明对象 + 生成产物（**故意只列这几个文件**：PMR3 在 PMNet 目录之外，
+         这样既不会把 R3 的注册表混进 E2E 的注册表，也不会把 Unity 适配误编进来）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="PMR3\Generated" />
+
+    <!-- 纯 C# 的 DS 侧控制代理（无 UnityEngine 依赖，可被 net8.0 直编）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsLobbyAgent.cs" LinkBase="Boot" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只保证生成器先被构建出来（本工程不引用它的程序集，是当进程调用做声明同步校验）。 -->
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+</Project>

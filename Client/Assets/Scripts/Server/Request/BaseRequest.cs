@@ -97,8 +97,21 @@ namespace Server
         }
         public virtual void SendRequest(MainPack pack)
         {
-            //5.发送消息
+            // 分配请求 ID 并登记待确认（计划 P1 / B3）。
+            // 0 保留表示「非请求」，因此这里必须拿到非 0 值。
+            pack.RequestId = PmRpcClient.NextRequestId();
+            PmRpcClient.Track(this, pack);
+
             HYLDManger.Instance.Send(pack);
+        }
+
+        /// <summary>
+        /// 请求超时回调（超时且不再重发时触发）。
+        /// 默认只记日志；需要给出 UI 反馈的面板可以重写。
+        /// </summary>
+        public virtual void OnRequestTimeout(ActionCode code, int requestId)
+        {
+            Logging.HYLDDebug.LogError($"[RPC][超时] panel={GetType().Name} action={code} requestId={requestId}");
         }
 
     }

@@ -26,6 +26,17 @@ namespace PMNet
         /// <summary>是否存在"可能在运行时改变真假"的条件属性。没有则不需要逐帧扫描条件。</summary>
         public bool HasConditional;
 
+        /// <summary>
+        /// 是否存在 `PushBased=false`（轮询式）属性。
+        ///
+        /// 与 <see cref="HasConditional"/> 一样是"该对象是否需要每轮被扫描"的判据之一，而且
+        /// **必须由 `NeedsWork` 消费**：`PushBased=false` 的语义就是"业务直接写字段、不标脏，
+        /// 由复制层每轮取当前值与基线比较决定发不发"。若调度判据里没有这一条，
+        /// 这类属性的无脏位修改将永不参与比较 ⇒ 静默不同步，且只在业务没走
+        /// `PMNet_Set` / `MarkPropertyDirty` 时才复现。
+        /// </summary>
+        public bool HasPoll;
+
         /// <summary>`Custom` 条件的运行期开关，下标 = 槽位。初值恒 true（未覆盖 ≈ 总是复制）。</summary>
         public bool[] CustomActive;
 

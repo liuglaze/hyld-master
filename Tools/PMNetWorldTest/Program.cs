@@ -32,6 +32,7 @@ namespace PMNetWorldTest
             Section("G. 原子性与边界：初始状态回滚、批量不部分采纳", TestAtomicity);
             Section("H. 登记表有界（RV3）：大量 spawn/destroy、回滚与容量", TestObjectRegistryBounded);
             Section("I. 声明式 Create 初值（RV5）：描述符初值、条件过滤、失败不发布", TestDeclarativeInitialState);
+            Section("J. World NetId 预留（R5-B2a）：能力令牌、容量、跨 world、清理", TestNetIdReservation);
 
             Console.WriteLine();
             if (_failures.Count == 0)
@@ -1887,6 +1888,394 @@ namespace PMNetWorldTest
             }
 
             PMNetRegistry.Reset();
+        }
+
+        // ================================================================
+        // J. World NetId 预留（R5-B2a）
+        // ================================================================
+
+        private const uint ClassReservedNode = 103u;
+
+        /// <summary>
+        /// R5-B2a 夹具：手写初值的可预留对象。
+        ///
+        /// 用它验证"初始 snapshot 先写好再上线"：`Snapshot` 经 Create 记录里的手写初值传输，
+        /// 接收侧必须**在 `OnReplicatedCreate` 之前**已经拿到它（D-R0-16）。
+        /// </summary>
+        private class ReservedNode : PMNetObject
+        {
+            public int Snapshot;
+            public int SnapshotAtCreate = int.MinValue;
+            public int CreateCalls;
+
+            protected internal override void OnSerializeInitialState(PMNetWriter writer)
+            {
+                writer.WriteVarint((ulong)Snapshot);
+            }
+
+            protected internal override void OnDeserializeInitialState(PMNetReader reader)
+            {
+                Snapshot = checked((int)reader.ReadVarint());
+            }
+
+            protected internal override void OnReplicatedCreate()
+            {
+                CreateCalls++;
+                SnapshotAtCreate = Snapshot;
+            }
+        }
+
+        private static void TestNetIdReservation()
+        {
+            // J1 预留不产生任何网络痕迹，但占住编号空间
+            {
+                PMNetWorld server = NewServerWorld(8);
+                TestConnection a = new TestConnection(1, true, "A");
+                server.AddConnection(a);
+
+                PMNetSpawnReservation r;
+                Check(server.TryReserveNetId(out r), "J1 预留成功");
+                Check(r != null && r.NetId.IsValid, "J1b 令牌带有效身份");
+                Check(server.ReservedNetIdCount == 1, "J1c 预留计数 = 1");
+                Check(server.ObjectCount == 0 && server.TotalObjectCount == 0, "J1d 预留不登记网络对象");
+                Check(server.AllObjectSlotCount == 0, "J1e 预留不占登记表槽位");
+                Check(server.GetObjectAt(0) == null, "J1f 预留不可通过登记表遍历到");
+
+                PMNetObject found;
+                Check(!server.TryFind(r.NetId, out found), "J1g 预留的身份查不到对象");
+                Check(server.PendingEventCount(a) == 0, "J1h 预留不发任何 Create");
+                Check(server.BuildLifecycleBatch(a) == null, "J1i 预留期间构造不出批次（无幽灵 Create）");
+                Check(server.Stats.CreatesSent == 0, "J1j 未发出创建记录");
+                Check(server.Allocator.LastAllocated == r.NetId.Value,
+                      "J1k 预留用的是同一个 _allocator（编号已被占用，不可再分配给他人）");
+            }
+
+            // J2 客户端 / 无会话侧拒绝签发预留
+            {
+                PMNetWorld client = NewClientWorld();
+                PMNetSpawnReservation c;
+                Check(!client.TryReserveNetId(out c), "J2 客户端侧不得预留 NetId");
+                Check(c == null, "J2b 被拒时 out 令牌为 null");
+                Check(client.ReservedNetIdCount == 0, "J2c 未产生预留");
+
+                PMNetWorld noSession = new PMNetWorld(null);
+                PMNetSpawnReservation n;
+                Check(!noSession.TryReserveNetId(out n), "J2d 无会话（非服务端）也不得预留");
+            }
+
+            // J3 取消：只删预留、不返还编号、令牌失效
+            {
+                PMNetWorld server = NewServerWorld();
+                PMNetSpawnReservation r1;
+                Check(server.TryReserveNetId(out r1), "J3 预留成功");
+                uint first = r1.NetId.Value;
+
+                Check(server.CancelReservedNetId(r1), "J3b 取消成功");
+                Check(server.ReservedNetIdCount == 0, "J3c 预留计数归零");
+                Check(server.Allocator.LastAllocated == first, "J3d 取消不返还编号（LastAllocated 不回退）");
+                Check(!server.CancelReservedNetId(r1), "J3e 重复取消返回 false");
+
+                PMNetSpawnReservation r2;
+                Check(server.TryReserveNetId(out r2), "J3f 取消后可以再预留");
+                Check(r2.NetId.Value > first, "J3g 取消后的下一个号不复用（严格大于）");
+
+                TestObject stale = new TestObject();
+                Check(!server.SpawnReserved(stale, r1, ClassTest), "J3h 已取消的令牌不能消费");
+                Check(stale.State == PMNetObjectState.Unregistered && stale.NetId.Value == 0u,
+                      "J3i 消费失败不留半初始化对象");
+                Check(server.ObjectCount == 0, "J3j 未登记任何对象");
+
+                TestObject ok = new TestObject();
+                Check(server.SpawnReserved(ok, r2, ClassTest), "J3k 未取消的令牌仍可用");
+                Check(ok.NetId.Value == r2.NetId.Value, "J3l 对象拿到预留身份");
+            }
+
+            // J4 跨 world：两个 world 可以有相同 rawId，凭据必须是令牌实例
+            {
+                PMNetWorld worldA = NewServerWorld();
+                PMNetWorld worldB = NewServerWorld();
+
+                PMNetSpawnReservation ra, rb;
+                Check(worldA.TryReserveNetId(out ra), "J4 A 预留成功");
+                Check(worldB.TryReserveNetId(out rb), "J4b B 预留成功");
+                Check(ra.NetId.Value == rb.NetId.Value,
+                      "J4c 两个 world 拿到相同 rawId（这就是不能用裸号当凭据的原因）");
+
+                TestObject obj = new TestObject();
+                Check(!worldB.SpawnReserved(obj, ra, ClassTest), "J4d 拿 A 的令牌在 B 里消费被拒");
+                Check(obj.State == PMNetObjectState.Unregistered && obj.NetId.Value == 0u, "J4e 被拒后对象未被登记");
+                Check(worldB.ReservedNetIdCount == 1, "J4f B 自己的预留未被误删");
+                Check(worldB.ObjectCount == 0, "J4g B 未登记对象");
+                Check(!worldA.CancelReservedNetId(rb), "J4h A 也不能取消 B 的令牌");
+                Check(worldA.ReservedNetIdCount == 1 && worldB.ReservedNetIdCount == 1,
+                      "J4i 双向预留互不影响");
+
+                Check(worldA.SpawnReserved(new TestObject(), ra, ClassTest), "J4j A 自己的令牌可以消费");
+                Check(worldB.SpawnReserved(new TestObject(), rb, ClassTest), "J4k B 自己的令牌可以消费");
+            }
+
+            // J5 伪造 / 过期令牌全部拒绝，且不吃掉真实预留
+            {
+                PMNetWorld server = NewServerWorld();
+                PMNetSpawnReservation real;
+                Check(server.TryReserveNetId(out real), "J5 预留成功");
+
+                // 伪造 1：同 world、同 NetId，但不是本 world 预留表里那一个实例（inner 构造在本工程内可见）
+                PMNetSpawnReservation forged = new PMNetSpawnReservation(server, real.NetId, 1u);
+                TestObject f1 = new TestObject();
+                Check(!server.SpawnReserved(f1, forged, ClassTest), "J5b 伪造令牌（未进预留表）被拒");
+                Check(f1.NetId.Value == 0u && f1.State == PMNetObjectState.Unregistered, "J5c 伪造令牌不产生对象");
+                Check(server.ReservedNetIdCount == 1, "J5d 真实预留未被伪造令牌吃掉");
+
+                // 伪造 2：epoch 不符（过期会话签发的令牌）
+                PMNetSpawnReservation stale = new PMNetSpawnReservation(server, real.NetId, 999u);
+                Check(!server.SpawnReserved(new TestObject(), stale, ClassTest), "J5e epoch 不符的令牌被拒");
+                Check(!server.CancelReservedNetId(stale), "J5f epoch 不符的令牌不能取消本世界的预留");
+                Check(server.ReservedNetIdCount == 1, "J5g 预留仍在（epoch 变更不复活也不误删）");
+
+                // 伪造 3：无效身份
+                PMNetSpawnReservation invalid = new PMNetSpawnReservation(server, PMNetId.Invalid, 1u);
+                Check(!server.SpawnReserved(new TestObject(), invalid, ClassTest), "J5h 无效身份的令牌被拒");
+                Check(!server.CancelReservedNetId(invalid), "J5i 无效身份的令牌不能取消");
+
+                // null 令牌
+                Check(!server.SpawnReserved(new TestObject(), null, ClassTest), "J5j null 令牌被拒");
+                Check(!server.CancelReservedNetId(null), "J5k 取消 null 令牌返回 false");
+
+                Check(server.SpawnReserved(new TestObject(), real, ClassTest),
+                      "J5l 全部拒绝都没有丢掉真实预留：最终仍可消费");
+            }
+
+            // J6 isStatic：静态位按预留参数记录，且完整身份（含静态位）匹配
+            {
+                PMNetWorld server = NewServerWorld();
+                PMNetSpawnReservation dyn, st;
+                Check(server.TryReserveNetId(out dyn, false), "J6 动态预留成功");
+                Check(server.TryReserveNetId(out st, true), "J6b 静态预留成功");
+                Check(dyn.NetId.IsStatic == false && st.NetId.IsStatic == true, "J6c 静态位按预留参数记录");
+                Check(st.NetId.Value > dyn.NetId.Value, "J6d 静态与动态共用同一单调编号空间");
+                Check(!dyn.NetId.Equals(st.NetId), "J6e 两个预留身份不同（含静态位）");
+
+                TestConnection a = new TestConnection(1, true, "A");
+                server.AddConnection(a);
+
+                // 伪造"同号但静态位不同"的令牌：完整身份比较必须挡住
+                PMNetSpawnReservation wrongStatic =
+                    new PMNetSpawnReservation(server, new PMNetId(st.NetId.Value, false), 1u);
+                TestObject bad = new TestObject();
+                Check(!server.SpawnReserved(bad, wrongStatic, ClassTest),
+                      "J6f 伪造同号不同静态位的令牌被拒（完整身份匹配）");
+                Check(bad.NetId.Value == 0u, "J6g 未登记");
+                Check(server.ReservedNetIdCount == 2, "J6h 两个真实预留都还在");
+
+                ReservedNode staticObj = new ReservedNode();
+                staticObj.Snapshot = 7;
+                Check(server.SpawnReserved(staticObj, st, ClassReservedNode), "J6i 静态预留可以消费");
+                Check(staticObj.NetId.IsStatic && staticObj.NetId.Value == st.NetId.Value,
+                      "J6j 对象拿到预留的完整静态身份");
+
+                byte[] bytes = server.BuildLifecycleBatch(a);
+                List<PMNetLifecycleRecord> recs = DecodeLifecycle(bytes);
+                Check(recs.Count == 1 && recs[0].NetId.IsStatic && recs[0].NetId.Value == st.NetId.Value,
+                      "J6k Create 记录携带同一个静态身份（线格式与普通 Spawn 同源）");
+
+                // 预留消费后编号不进入复用池：后续分配继续单调
+                TestObject later = new TestObject();
+                Check(server.Spawn(later, ClassTest), "J6l 后续普通 Spawn 成功");
+                Check(later.NetId.Value > staticObj.NetId.Value && later.NetId.Value > dyn.NetId.Value,
+                      "J6m 新分配严格大于已消费的预留号（不复用）");
+                Check(later.NetId.IsStatic == false, "J6n 后续普通对象仍是动态身份");
+            }
+
+            // J7 初值原子性：snapshot 先写好再上线，回调前就绪；Create 复用既有入队语义
+            {
+                PMNetWorld server = NewServerWorld();
+                TestConnection a = new TestConnection(1, true, "A");
+                server.AddConnection(a);
+
+                PMNetSpawnReservation r;
+                Check(server.TryReserveNetId(out r), "J7 预留成功");
+
+                ReservedNode obj = new ReservedNode();
+                obj.Snapshot = 4242;          // 初始 snapshot 已编码且写好，才上线
+                Check(server.SpawnReserved(obj, r, ClassReservedNode), "J7b 消费预留上线成功");
+                Check(server.ReservedNetIdCount == 0, "J7c 令牌已被一次性消费");
+                Check(server.ObjectCount == 1 && server.TotalObjectCount == 1, "J7d 对象已登记（与普通 Spawn 同源）");
+                Check(server.PendingEventCount(a) == 1, "J7e 排入 1 条 Create");
+
+                byte[] bytes = server.BuildLifecycleBatch(a);
+                Check(bytes != null, "J7f 批次构造成功");
+
+                PMNetWorld client = NewClientWorld();
+                client.RegisterClass(ClassReservedNode, delegate { return new ReservedNode(); });
+                client.OnLifecycleMessage(bytes, 0, bytes.Length);
+
+                PMNetObject found;
+                ReservedNode copy = null;
+                if (client.TryFind(obj.NetId, out found)) { copy = found as ReservedNode; }
+
+                Check(copy != null && copy.NetId.Value == r.NetId.Value, "J7g 客户端按预留身份找到对象");
+                Check(copy != null && copy.CreateCalls == 1, "J7h 创建回调触发一次");
+                Check(copy != null && copy.SnapshotAtCreate == 4242 && copy.Snapshot == 4242,
+                      "J7i 初值在 OnReplicatedCreate 之前就绪（回调里看到 "
+                      + (copy == null ? "<null>" : copy.SnapshotAtCreate.ToString()) + "）");
+
+                // J8 重复消费同一个令牌
+                TestObject dup = new TestObject();
+                Check(!server.SpawnReserved(dup, r, ClassTest), "J8 同一令牌重复消费被拒");
+                Check(!server.CancelReservedNetId(r), "J8b 已消费令牌不能再取消");
+                Check(server.ObjectCount == 1 && dup.NetId.Value == 0u, "J8c 没有产生第二个对象");
+                Check(server.Stats.ObjectsSpawned == 1, "J8d 生成统计只加一次");
+            }
+
+            // J9 失败不丢令牌：null 对象 / 错误状态
+            {
+                PMNetWorld server = NewServerWorld();
+                PMNetSpawnReservation r;
+                Check(server.TryReserveNetId(out r), "J9 预留成功");
+
+                Check(!server.SpawnReserved(null, r, ClassTest), "J9b null 对象被拒");
+                Check(server.ReservedNetIdCount == 1, "J9c 令牌未被消费");
+
+                TestObject used = new TestObject();
+                Check(server.Spawn(used, ClassTest), "J9d 先普通 Spawn 一个已 Active 的对象");
+                Check(!server.SpawnReserved(used, r, ClassTest), "J9e 状态不是 Unregistered 被拒");
+                Check(server.ReservedNetIdCount == 1, "J9f 令牌仍未被消费");
+                Check(server.ObjectCount == 1, "J9g 未产生第二个登记");
+
+                TestObject good = new TestObject();
+                Check(server.SpawnReserved(good, r, ClassTest), "J9h 修正后同一令牌可以成功");
+                Check(server.ReservedNetIdCount == 0 && good.NetId.Value == r.NetId.Value,
+                      "J9i 成功后令牌消费、对象拿到预留身份");
+            }
+
+            // J10 容量：存活 + 预留共享 _maxObjects（普通 Spawn 也必须计预留）
+            {
+                PMNetWorld server = NewServerWorld(2);
+                PMNetSpawnReservation r1, r2, r3;
+                Check(server.TryReserveNetId(out r1), "J10 上限 2：第 1 个预留成功");
+                Check(server.TryReserveNetId(out r2), "J10b 第 2 个预留成功");
+                Check(!server.TryReserveNetId(out r3) && r3 == null, "J10c 存活 + 预留达上限 ⇒ 第 3 个预留被拒");
+                Check(server.ReservedNetIdCount == 2, "J10d 预留数 = 2");
+
+                TestObject extra = new TestObject();
+                Check(!server.Spawn(extra, ClassTest), "J10e 普通 Spawn 计预留：容量已被 2 个预留占满 ⇒ 拒绝");
+                Check(extra.NetId.Value == 0u && extra.State == PMNetObjectState.Unregistered,
+                      "J10f 被拒的 Spawn 不留下身份");
+
+                uint before = server.Allocator.LastAllocated;
+                Check(!server.Spawn(extra, ClassTest) && server.Allocator.LastAllocated == before,
+                      "J10g 再次被拒也不消耗编号");
+
+                TestObject first = new TestObject();
+                Check(server.SpawnReserved(first, r1, ClassTest), "J10h 用预留上线（占用不变，不额外占名额）");
+                Check(server.ObjectCount == 1 && server.ReservedNetIdCount == 1, "J10i 存活 1 + 预留 1 = 上限");
+                Check(!server.Spawn(new TestObject(), ClassTest), "J10j 仍然满容量，普通 Spawn 被拒");
+                Check(server.SpawnReserved(new TestObject(), r2, ClassTest), "J10k 最后一个预留仍可上线");
+                Check(server.ObjectCount == 2 && server.ReservedNetIdCount == 0, "J10l 存活 2 + 预留 0 = 上限");
+                Check(!server.TryReserveNetId(out r3), "J10m 满容量不能再预留");
+
+                server.DestroyObject(first);
+                Check(server.TryReserveNetId(out r3), "J10n 销毁后腾出容量，可再预留");
+                Check(server.Stats.RejectedOverCapacity == 5,
+                      "J10o 容量拒绝逐次计数（实际 " + server.Stats.RejectedOverCapacity + "）");
+            }
+
+            // J11 Reset / Dispose 清理使令牌失效（epoch 不变也不复活）
+            {
+                PMNetWorld server = NewServerWorld();
+                PMNetSpawnReservation r;
+                Check(server.TryReserveNetId(out r), "J11 预留成功");
+
+                server.Reset();
+                Check(server.ReservedNetIdCount == 0, "J11b Reset 清掉预留");
+                Check(!server.SpawnReserved(new TestObject(), r, ClassTest), "J11c Reset 后旧令牌失效（不复活）");
+                Check(!server.CancelReservedNetId(r), "J11d Reset 后旧令牌也不能取消");
+
+                PMNetSpawnReservation r2;
+                Check(server.TryReserveNetId(out r2), "J11e Reset 后可以重新预留");
+                Check(r2.NetId.Value > r.NetId.Value, "J11f Reset 不复位分配器：新预留号仍单调（不复用）");
+                Check(server.SpawnReserved(new TestObject(), r2, ClassTest), "J11g 新令牌可用");
+
+                PMNetSpawnReservation r3;
+                Check(server.TryReserveNetId(out r3), "J11h Dispose 前再预留一个");
+                server.Dispose();
+                Check(server.ReservedNetIdCount == 0, "J11i Dispose 清掉预留");
+                Check(!server.SpawnReserved(new TestObject(), r3, ClassTest), "J11j Dispose 后令牌失效");
+
+                PMNetSpawnReservation r4;
+                Check(!server.TryReserveNetId(out r4) && r4 == null, "J11k Dispose 后不再签发新预留");
+                server.Dispose();
+                Check(server.ReservedNetIdCount == 0, "J11l Dispose 幂等（重复调用安全）");
+                Check(server.Spawn(new TestObject(), ClassTest),
+                      "J11m 既有 Spawn 契约不变（Dispose 不是 Spawn 的新前置条件）");
+            }
+
+            // J12 预留不参与既有"新连接补齐"（不产生幽灵 Create）
+            {
+                PMNetWorld server = NewServerWorld();
+                PMNetSpawnReservation r;
+                Check(server.TryReserveNetId(out r), "J12 预留成功");
+
+                TestConnection a = new TestConnection(1, true, "A");
+                server.AddConnection(a);
+                Check(server.PendingEventCount(a) == 0, "J12b 预留不因新连接补齐而被补发 Create");
+
+                TestObject live = new TestObject();
+                Check(server.Spawn(live, ClassTest), "J12c 存活对象仍按既有语义登记");
+                Check(server.PendingEventCount(a) == 1, "J12d 存活对象仍然补发（既有语义不变）");
+
+                byte[] bytes = server.BuildLifecycleBatch(a);
+                PMNetWorld client = NewClientWorld();
+                client.OnLifecycleMessage(bytes, 0, bytes.Length);
+                Check(client.ObjectCount == 1, "J12e 客户端只看到存活对象，预留不产生幽灵");
+
+                Check(server.SpawnReserved(new TestObject(), r, ClassTest), "J12f 预留仍可用");
+                Check(server.PendingEventCount(a) == 1, "J12g 上线后才排入 Create");
+            }
+
+            // J13 消费预留后对象走完正常生命周期，统计与普通路径同源
+            {
+                PMNetWorld server = NewServerWorld();
+                TestConnection a = new TestConnection(1, true, "A");
+                server.AddConnection(a);
+
+                PMNetSpawnReservation r;
+                Check(server.TryReserveNetId(out r), "J13 预留成功");
+
+                TestObject o = new TestObject();
+                Check(server.SpawnReserved(o, r, ClassTest), "J13b 上线成功");
+                Check(server.BuildLifecycleBatch(a) != null, "J13c 创建已发出");
+                Check(server.DestroyObject(o), "J13d 预留创建的对象可以正常销毁");
+                Check(server.ObjectCount == 0 && server.TotalObjectCount == 0, "J13e 计数归零");
+                Check(server.Stats.ObjectsSpawned == 1 && server.Stats.ObjectsDestroyed == 1,
+                      "J13f 统计与普通 Spawn/Destroy 同源");
+                Check(server.PendingEventCount(a) == 1, "J13g 排入销毁记录（不是创建）");
+            }
+
+            // J14 普通 Spawn 回归：无预留时逐项与改造前同值
+            {
+                PMNetWorld server = NewServerWorld(2);
+                TestObject a = new TestObject();
+                TestObject b = new TestObject();
+                TestObject c = new TestObject();
+
+                Check(server.Spawn(a, ClassTest) && server.Spawn(b, ClassTest), "J14 无预留时容量判据与改造前一致");
+                Check(!server.Spawn(c, ClassTest), "J14b 满容量被拒");
+
+                uint last = server.Allocator.LastAllocated;
+                TestObject d = new TestObject();
+                Check(!server.Spawn(d, ClassTest) && server.Allocator.LastAllocated == last && d.NetId.Value == 0u,
+                      "J14c 被拒的 Spawn 不消耗编号、不留下身份");
+                Check(server.Stats.RejectedOverCapacity == 2, "J14d 超限计数 = 2");
+                Check(server.TotalObjectCount == 2 && server.AllObjectSlotCount == 2,
+                      "J14e 登记表与存活计数一致");
+
+                server.DestroyObject(a);
+                Check(server.Spawn(c, ClassTest), "J14f 销毁后腾出容量");
+                Check(c.NetId.Value > b.NetId.Value, "J14g 编号仍然单调不复用");
+                Check(server.ReservedNetIdCount == 0, "J14h 全程零预留（不影响既有语义）");
+            }
         }
     }
 }

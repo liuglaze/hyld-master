@@ -7,13 +7,19 @@ using PMNet.Codegen;
 namespace PMNetGen
 {
     // =========================================================================================
-    //  R2 声明校验（契约 §5 的 12 条规则 + §6 的类型集）
+    //  R2 声明校验（契约 §5 的 13 条规则 + §6 的类型集 + 自动属性形态规则 14）
     //
     //  设计约束：
     //    1. **所有**规则都在这一层，扫描器不做规则判定（见 DeclScanner.cs 头注释）；
     //    2. 错误一律带 `[规则 N]` 前缀——门禁（Tools/PMDeclCheck）靠这个前缀统计
     //       "每条规则是否真的被触发过"，避免"跑绿了但一条规则都没生效"；
     //    3. 报告要能定位到源码：消息里带类/成员名与源文件行号。
+    //
+    //  规则 14（自动属性形态）不是 R2 契约 §5 的条款，而是自动属性复制契约
+    //  （Docs/plans/net-property-authoring-contract.md §1）新增的：它会把
+    //  "自定义访问器 / 只读 / indexer / virtual-override-abstract / ref-return /
+    //   显式接口实现 / 标记在不支持的成员种类上"变成**生成前的硬错误**，
+    //  而不是让它们到编织期（甚至运行期）才暴露，更不能让它们静默漏扫。
     //
     //  关于"生成期反射"：本文件用反射枚举 PMNet 运行时里**已存在的** PMNetObject 派生类型，
     //  目的是让规则 1 能正确接受 `: PMNetPawnObject` 这类运行时基类。运行期禁反射
@@ -252,14 +258,20 @@ namespace PMNetGen
     public static class PMDeclValidation
     {
         /// <summary>
-        /// 契约 §5 的规则条数。
+        /// 契约 §5 的规则条数 + 自动属性形态规则（规则 14）。
         ///
         /// 规则 13 是 R2 返工时**补上**的：原契约只要求"Server RPC 必须声明校验"（规则 8），
         /// 但那只管"有没有声明"。实测发现「声明了 ForceValidate 档位、却没写同伴方法」
         /// 会让发射器走投无路 —— 要么调用不存在的方法，要么退化成
         /// 「声称有校验、实际没有」。后者是本项目最不能接受的失败形态，因此单独立规则。
+        ///
+        /// 规则 14 是自动属性复制开工时**补上**的：用户批准自然 C# 自动属性赋值后，
+        /// 业务可以写 `[PMReplicated] public int Hp { get; private set; }`。
+        /// 但"属性"这个语法形式能写出的形态远多于可编织的一种，而编织器（另一组并行工作）
+        /// 只处理"普通实例 auto-property"。若不在这里拦下，不支持形态会以
+        /// 「声明通过 → 生成物看似正常 → 编织期才报错（或更糟：静默不生效）」的路径漏出去。
         /// </summary>
-        public const int RuleCount = 13;
+        public const int RuleCount = 14;
 
         /// <summary>规则标题（索引 = 规则号 - 1），供门禁打印"每条规则的实际命中情况"。</summary>
         public static readonly string[] RuleTitles =
@@ -270,20 +282,21 @@ namespace PMNetGen
             "[PMReplicated] 成员与 RPC 参数的类型必须落在支持的类型集内",
             "[PMRepNotify] 的 ForMember 必须对应一个已声明的 [PMReplicated] 成员",
             "[PMRepNotify] 目标方法必须无参、返回 void",
-            "[PMRpc] 方法必须返回 void、不得 static（且必须位于 [PMNetworkObject] 类内）",
+            "[PMRpc] 方法必须是可编织的普通实例方法：返回 void、不得 static/virtual/abstract/extern/async/泛型/无体、不得同名重载，形参不得 ref/out/in/params/default",
             "[PMServerRpc] 必须声明校验（Validator != None 或存在 _ForceValidate 同伴）",
             "WithValidation = true 与 Validator = ForceValidate 不得同时出现",
             "同一类内 PropertyId / RpcId 不得重复（含跨程序集）",
             "声明的条件必须是 D-R0-14 的 8 项之一",
             "同一个类的 MaskOffset 区间不得重叠，且总数 == ChangeMaskBitCount",
             "声明的校验档位必须有可调用的同伴方法（ForceValidate ⇒ _ForceValidate；Validate ⇒ _Validate）",
+            "[PMReplicated] 属性必须是普通实例自动属性（get;set;）：不得自定义访问器 / 只读 / indexer / virtual-override-abstract / ref-return / 显式接口实现，也不得把标记放在不支持的成员种类上",
         };
 
         /// <summary>PMNet 运行时里全部 PMNetObject 派生类型的名字（用于规则 1 的继承链判定）。</summary>
         private static readonly HashSet<string> KnownNetBaseNames = BuildKnownNetBaseNames();
 
         /// <summary>
-        /// 执行全部 12 条规则与 §6 类型集检查。
+        /// 执行全部 13 条规则、自动属性形态规则 14 与 §6 类型集检查。
         /// 结果直接写进 <paramref name="model"/> 的 Errors / Warnings，不做返回值。
         /// </summary>
         public static void Validate(PMDeclModel model, PMDeclRawFacts facts)
@@ -322,8 +335,40 @@ namespace PMNetGen
             Rule11_ConditionSet(model, facts);
             Rule12_MaskLayout(model);
             Rule13_ValidatorCompanion(model, facts, declared);
+            Rule14_ReplicatedPropertyShape(model, facts);
+
+            ScanIntegrityGate(model, facts);
 
             EmitWarnings(model, facts, declared);
+        }
+
+        // ------------------------------------------------------------------ 扫描完整性
+
+        /// <summary>
+        /// 扫描完整性门（不是契约 §5 的规则，而是「不许用不完整的声明集覆盖现有产物」的安全网）。
+        ///
+        /// 为什么需要它：读取失败 / 语法错误都会让扫描结果**看起来正常但少东西**。
+        /// `--decl-gen` 写出的是**整套**产物（包括注册表），一旦用这种残缺结果生成，
+        /// 就会拿一张假空/少类的注册表覆盖现有产物 ---- 那是比“报错停下”严重得多的失败形态。
+        /// 这两个条件以前只是告警（读不到就跳过、语法错误只计数），
+        /// 而告警不会阻断生成，因此这里升级为错误（`Program.RunDecl` 在 Errors 非空时直接拒给生成）。
+        /// </summary>
+        private static void ScanIntegrityGate(PMDeclModel model, PMDeclRawFacts facts)
+        {
+            for (int i = 0; i < facts.ReadFailures.Count; i++)
+            {
+                model.Errors.Add("[扫描完整性] 读取源文件失败：" + facts.ReadFailures[i]
+                    + " —— 声明集不完整，拒绝生成/校验（禁止用残缺结果覆盖现有产物）。");
+            }
+
+            if (facts.SyntaxErrorCount > 0)
+            {
+                string detail = facts.SyntaxErrorFiles.Count > 0
+                    ? "；首例：" + facts.SyntaxErrorFiles[0]
+                    : string.Empty;
+                model.Errors.Add("[扫描完整性] 扫描期检测到 " + facts.SyntaxErrorCount + " 处 C# 语法错误" + detail
+                    + " —— 语法错误会让声明集不完整，拒绝生成/校验（禁止产出假空注册表覆盖现有产物）。");
+            }
         }
 
         // ------------------------------------------------------------------ 规则 1
@@ -337,6 +382,16 @@ namespace PMNetGen
             {
                 Err(model, 1, "[PMNetworkObject] 只能标注在 class 上：" + facts.NonClassNetworkObjectHosts[i]
                     + "（struct / interface / record 无法继承 PMNetObject，也不支持生成 partial 成员）");
+            }
+
+            // 嵌套类型上的 [PMNetworkObject]：扫描器只处理顶层类型，这个标记不会生效。
+            // 不报就是 “写了声明、但完全不参与复制” 的静默漏扫。
+            for (int i = 0; i < facts.NestedNetworkObjectTypes.Count; i++)
+            {
+                Err(model, 1, "[PMNetworkObject] 不得标注在**嵌套类型**上（扫描器只处理顶层类型，"
+                    + "生成物是「顶层 partial class <TypeName>」，无法与嵌套类型合并）："
+                    + facts.NestedNetworkObjectTypes[i]
+                    + " —— 该声明不会生效，请把它提到命名空间层级");
             }
 
             for (int i = 0; i < model.Classes.Count; i++)
@@ -651,6 +706,9 @@ namespace PMNetGen
             PMDeclRawFacts facts,
             Dictionary<string, PMDeclClass> declared)
         {
+            // 7a：IR 级检查（static / 返回值）。
+            //     IR 里的 IsStatic 与下面的语法事实同源，因此 static 只在这里报一次，
+            //     语法级循环不再重复报（避免同一问题两条错误）。
             for (int i = 0; i < model.Classes.Count; i++)
             {
                 PMDeclClass cls = model.Classes[i];
@@ -671,6 +729,82 @@ namespace PMNetGen
                 }
             }
 
+            // 7b：编织器（Tools/PMNetWeaver）明确拒绝的方法形态。
+            //
+            // 这些形态在**编译后的编织阶段**必然失败（net-rpc-weaving-contract.md §3），
+            // 但那时生成物已经写出去、业务也已经照着它编译过了 ---- 失败点离声明点太远。
+            // 因此在声明层直接报错，让“不支持”变成生成前的硬错误。
+            for (int i = 0; i < facts.Rpcs.Count; i++)
+            {
+                PMDeclRpcFact fact = facts.Rpcs[i];
+
+                PMDeclClass cls;
+                if (!declared.TryGetValue(fact.ClassQualifiedName, out cls))
+                {
+                    continue; // 非网络类上的声明由 7c 报
+                }
+
+                string head = cls.QualifiedName + "." + fact.MethodName;
+                string where = Where(cls, fact.Line);
+
+                if (fact.HasOverload)
+                {
+                    Err(model, 7, "RPC 方法不得有同名重载（编织器按方法名定位，不猜重载/重写链）："
+                        + head + where);
+                }
+
+                if (fact.MultipleRpcAttributes)
+                {
+                    Err(model, 7, "同一个方法不得带多个 RPC 标记（会生成多个同名 helper ⇒ 直接编译失败）："
+                        + head + where);
+                }
+
+                if (fact.IsVirtual)
+                {
+                    Err(model, 7, "RPC 方法不得是 virtual（编织器不处理虚方法/网络继承，不猜重写继承链）："
+                        + head + where);
+                }
+
+                if (fact.IsAbstract)
+                {
+                    Err(model, 7, "RPC 方法不得是 abstract（必须直接写业务体，没有可拆的实现）："
+                        + head + where);
+                }
+
+                if (fact.IsExtern)
+                {
+                    Err(model, 7, "RPC 方法不得是 extern/native（必须有托管业务体才能拆）："
+                        + head + where);
+                }
+
+                if (fact.IsAsync)
+                {
+                    Err(model, 7, "RPC 方法不得是 async（状态机会改写方法体，编织器明确拒绝）："
+                        + head + where);
+                }
+
+                if (fact.HasTypeParameters)
+                {
+                    Err(model, 7, "RPC 方法不得是泛型方法：" + head + where);
+                }
+
+                if (!fact.HasBody && !fact.IsAbstract && !fact.IsExtern)
+                {
+                    // abstract / extern 本来就没有托管业务体，已由上面两条报出；
+                    // 这里只报“本当有体却没写”（`void M();`）的情形，避免同一问题两条错误。
+                    Err(model, 7, "RPC 方法必须有方法体（块体或表达式体）：" + head
+                        + " —— 契约要求直接在普通方法里写业务体" + where);
+                }
+
+                for (int k = 0; k < fact.UnsupportedParamModifiers.Count; k++)
+                {
+                    Err(model, 7, "RPC 形参不支持 " + fact.UnsupportedParamModifiers[k]
+                        + "（ref/out/in 按引用、params 变长、default 默认值都无法表达线上参数布局）："
+                        + head + where);
+                }
+            }
+
+            // 7c：声明在非 [PMNetworkObject] 类上的 RPC（完全忽略 = 静默缺陷）
             for (int i = 0; i < facts.OrphanRpcDeclarations.Count; i++)
             {
                 Err(model, 7, "RPC 声明所在类不是 [PMNetworkObject]，该声明会被完全忽略："
@@ -934,6 +1068,91 @@ namespace PMNetGen
             return null;
         }
 
+        // ------------------------------------------------------------------ 规则 14
+
+        /// <summary>
+        /// 规则 14：`[PMReplicated]` 的属性必须是**普通实例自动属性**（get;set;，
+        /// 允许访问性不同与初始化器），且标记不得放在不支持的成员种类上。
+        ///
+        /// 为什么必须在声明期硬失败：
+        /// <list type="bullet">
+        ///   <item>不支持的属性形态（自定义 getter/setter、只读、indexer、virtual/override/
+        ///         abstract、ref-return、显式接口实现）在编织期**必然失败或产生静默错语义**：
+        ///         例如只读属性没有 setter 就没有可改写点，自定义 setter 改写后会丢掉业务副作用；</item>
+        ///   <item>标记放到 event / delegate 这类成员上时，声明根本进不了 IR，
+        ///         后期没有任何一层会看到它 —— 那就是「写了标记、但完全不参与复制」的静默缺陷。</item>
+        /// </list>
+        ///
+        /// 字段（旧模式）不参与本规则：字段没有“自定义访问器”一说，它的
+        /// static / const / readonly 已由规则 3 报出，类型由规则 4 报出。
+        /// </summary>
+        private static void Rule14_ReplicatedPropertyShape(PMDeclModel model, PMDeclRawFacts facts)
+        {
+            // 14a：IR 里的每个复制成员都必须有对应的声明形态事实。
+            //
+            // 这是“扫描器与 IR 分叉”的反向核对：IR 里有、facts 里没有，意味着
+            // 扫描器把某个成员收进了 IR 却没记下它的形态（发射器与校验器会因此盲判）。
+            // 只在**真的扫过源码**时才要求（ParsedFileCount > 0）：门禁与其它工具会
+            // 手工构造模型（没有源码，也就没有形态事实）。
+            if (facts.ParsedFileCount > 0)
+            {
+                for (int i = 0; i < model.Classes.Count; i++)
+                {
+                    PMDeclClass cls = model.Classes[i];
+                    for (int k = 0; k < cls.Properties.Count; k++)
+                    {
+                        PMDeclProperty p = cls.Properties[k];
+                        if (!facts.PropertyFacts.ContainsKey(cls.QualifiedName + "." + p.MemberName))
+                        {
+                            Err(model, 14, "[PMReplicated] 成员缺少声明形态事实（扫描器与 IR 分叉）："
+                                + cls.QualifiedName + "." + p.MemberName
+                                + " —— 形态不可证 ⇒ 无法保证生成物与声明一致" + Where(cls, p.Line));
+                        }
+                    }
+                }
+            }
+
+            // 14b：不支持形态的**属性**（含 indexer，它不进 IR，因此遍历 facts 而不是遍历 IR）。
+            //      static 已在规则 3 报出，这里跳过以免同一问题两条错误。
+            List<string> keys = new List<string>(facts.PropertyFacts.Keys);
+            keys.Sort(StringComparer.Ordinal);
+            for (int i = 0; i < keys.Count; i++)
+            {
+                PMDeclPropertyFact fact = facts.PropertyFacts[keys[i]];
+                if (fact.IsField || fact.IsStatic)
+                {
+                    continue;
+                }
+
+                List<string> reasons = fact.DescribeUnsupportedShapes();
+                for (int r = 0; r < reasons.Count; r++)
+                {
+                    Err(model, 14, "[PMReplicated] 属性 " + fact.ClassQualifiedName + "." + fact.MemberName
+                        + " 不是受支持的普通实例自动属性（get;set;）：" + reasons[r]
+                        + "（契约 Docs/plans/net-property-authoring-contract.md §1）"
+                        + "（行 " + fact.Line + "）");
+                }
+            }
+
+            // 14c：标记放在不支持的成员种类上（event / delegate / 等）。
+            //      这些成员根本不会被收进 IR —— 不在这里报，就永远没人报。
+            for (int i = 0; i < facts.ReplicatedOnUnsupportedMembers.Count; i++)
+            {
+                Err(model, 14, "[PMReplicated] 声明位置不支持：" + facts.ReplicatedOnUnsupportedMembers[i]
+                    + "（契约 Docs/plans/net-property-authoring-contract.md §1：只支持普通实例字段与"
+                    + "普通实例 auto-property）");
+            }
+
+            // 14d：**嵌套类型**成员上的 [PMReplicated] / [PMQuantized]。
+            //      与 14c 同理：扫描器只处理顶层类型，这类成员根本不会被收进 IR。
+            for (int i = 0; i < facts.NestedReplicatedMembers.Count; i++)
+            {
+                Err(model, 14, "[PMReplicated] 声明在**嵌套类型**里（扫描器只处理顶层类型，该声明不会生效）："
+                    + facts.NestedReplicatedMembers[i]
+                    + " —— 请把声明所在的类提到命名空间层级");
+            }
+        }
+
         // ------------------------------------------------------------------ 规则 12
 
         private static void Rule12_MaskLayout(PMDeclModel model)
@@ -1006,10 +1225,13 @@ namespace PMNetGen
             PMDeclRawFacts facts,
             Dictionary<string, PMDeclClass> declared)
         {
-            for (int i = 0; i < facts.ReplicatedWithoutSetter.Count; i++)
+            // 注：旧版这里对「[PMReplicated] 属性没有 set 访问器」发告警。
+            // 自动属性复制开工后它升级为**硬错误**（规则 14：只读属性没有可改写的 setter），
+            // 因此不再重复告警 —— 告警不阻断，而这一条必须阻断。
+            for (int i = 0; i < facts.QuantizedWithoutReplicated.Count; i++)
             {
-                Warn(model, "[PMReplicated] 属性没有 set 访问器，生成的写入器会编译不过："
-                    + facts.ReplicatedWithoutSetter[i]);
+                Warn(model, "[PMQuantized] 没有配套的 [PMReplicated]，量化器不会生效（量化只对已复制成员有意义）："
+                    + facts.QuantizedWithoutReplicated[i]);
             }
 
             for (int i = 0; i < model.Classes.Count; i++)
@@ -1052,8 +1274,9 @@ namespace PMNetGen
 
             if (facts.SyntaxErrorCount > 0)
             {
-                Warn(model, "扫描期检测到 " + facts.SyntaxErrorCount + " 处 C# 语法错误。"
-                    + "声明扫描只做语法级匹配，结果可能不完整；请先让源码能编译");
+                // 语法错误已在 ScanIntegrityGate 升级为**错误**（拒绝生成），
+                // 这里不再重复告警：告警不会阻断生成，而这条必须阻断。
+                Warn(model, "扫描期检测到 " + facts.SyntaxErrorCount + " 处 C# 语法错误（已由扫描完整性门拒绝生成）");
             }
 
             if (facts.ParsedFileCount == 0)

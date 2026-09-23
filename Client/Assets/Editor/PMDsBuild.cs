@@ -198,9 +198,11 @@ public static class PMDsBuild
     /// <summary>
     /// 写一个启动脚本，把参数形态固定下来（谁拉起 DS 都应照此组装命令行）。
     ///
-    /// R3-B 补充（契约 §7.3 / §7.4）：脚本现在同时描述两种启动形态，并**不写死任何绝对路径** ——
-    /// 可执行文件与日志都用 `%~dp0`（脚本自身所在目录）推导，Lobby/控制地址可用环境变量覆盖。
-    /// 引导文件必须由调用方（Lobby）传绝对路径：它是本局密钥的载体，不走命令行内的拼接。
+    /// 旧链退役后只保留**一种**启动形态：`-bootstrap` 必需。旧裸 `-port` 诊断形态已删除，
+    /// 因此脚本在不带 bootstrap 时会明确以非 0 退出，而不是继续诱导「裸端口就能开局」。
+    /// 脚本**不写死任何绝对路径** —— 可执行文件与日志都用 `%~dp0`（脚本自身所在目录）推导，
+    /// Lobby/控制地址可用环境变量覆盖。引导文件必须由调用方（Lobby）传绝对路径：
+    /// 它是本局密钥的载体，不走命令行内的拼接。
     /// </summary>
     private static void WriteLauncher(string outputDir, bool usedHeadless)
     {
@@ -218,14 +220,15 @@ public static class PMDsBuild
                 "REM",
                 "REM 身份判定：-server 为必需项；其余参数由 Lobby 拉起时下发。",
                 "REM",
-                "REM == 旧形态（不带 -bootstrap，走 P3' 诊断路由）==",
-                "REM    run_ds.bat [dsid] [matchid] [port]",
+                "REM DS **必须**由 Lobby 用 -bootstrap 编排拉起（旧裸 UDP 诊断路由已删除）：",
+                "REM   Lobby 先生成本局引导文件（密钥/票据只在文件里，不进命令行），再拉起本进程；",
+                "REM   不带 -bootstrap 直接运行本脚本会被拒绝（非 0 退出），不存在裸 -port 启动形态。",
                 "REM",
-                "REM == R3-B 新链形态（带 -bootstrap；旧诊断路由不会启动）==",
-                "REM    run_ds.bat [dsid] [matchid] [port] <bootstrapAbsPath> [controlHost:port] [smoke]",
+                "REM 用法：",
+                "REM    run_ds.bat <bootstrapAbsPath> [dsid] [matchid] [port] [controlHost:port] [smoke]",
                 "REM",
                 "REM 参数说明：",
-                "REM    -bootstrap <绝对路径>   本局引导文件（由 Lobby 临时写后原子 rename 发布）。",
+                "REM    -bootstrap <绝对路径>   **必需**。本局引导文件（由 Lobby 临时写后原子 rename 发布）。",
                 "REM                            只传路径：控制密钥与玩家票据**不会**出现在命令行上。",
                 "REM    -control   <host:port>  Lobby 控制 listener。首版只允许 loopback（缺省 127.0.0.1:7800）。",
                 "REM    -server-smoke           显式自动验收：全部名册玩家完成探针后提交 smoke 结果。",
@@ -233,16 +236,16 @@ public static class PMDsBuild
                 "REM",
                 "REM 注意：",
                 "REM    * 所有路径都相对本脚本所在目录（%~dp0）推导，模板里不写死任何绝对路径；",
-                "REM    * -port 必须每局不同（旧客户端把战斗 UDP 端口硬编码为 7777）；",
-                "REM    * 同一端口上不能同时跑旧诊断路由与新链（报文字节格式不同）；",
+                "REM    * -port 必须每局不同，且由 Lobby 独占分配；DS 不监听其它端口；",
                 "REM    * 日志可用 HYLD_DS_LOGDIR 覆盖，Lobby/控制地址可用 HYLD_DS_LOBBY / HYLD_DS_CONTROL 覆盖。",
                 "",
-                "set DSID=%~1",
-                "set MATCHID=%~2",
-                "set PORT=%~3",
-                "set BOOTSTRAP=%~4",
+                "set BOOTSTRAP=%~1",
+                "set DSID=%~2",
+                "set MATCHID=%~3",
+                "set PORT=%~4",
                 "set CONTROL=%~5",
                 "set SMOKEARG=",
+                "if \"%BOOTSTRAP%\"==\"\" goto noboot",
                 "if \"%DSID%\"==\"\" set DSID=ds-local",
                 "if \"%MATCHID%\"==\"\" set MATCHID=match-local",
                 "if \"%PORT%\"==\"\" set PORT=7801",
@@ -255,19 +258,6 @@ public static class PMDsBuild
                 "if \"%LOGDIR%\"==\"\" set LOGDIR=%~dp0logs",
                 "if not exist \"%LOGDIR%\" mkdir \"%LOGDIR%\"",
                 "",
-                "if not \"%BOOTSTRAP%\"==\"\" goto newchain",
-                "",
-                "REM ---- 旧形态 ----",
-                "\"%~dp0" + ExecutableName + "\" -batchmode -nographics -server ^",
-                "  -dsid %DSID% -matchid %MATCHID% ^",
-                "  -listen 0.0.0.0 -port %PORT% ^",
-                "  -lobby %LOBBY% ^",
-                "  -tickrate 30 ^",
-                "  -logFile \"%LOGDIR%\\ds_%DSID%.log\"",
-                "goto :eof",
-                "",
-                ":newchain",
-                "REM ---- R3-B 新链形态 ----",
                 "\"%~dp0" + ExecutableName + "\" -batchmode -nographics -server ^",
                 "  -dsid %DSID% -matchid %MATCHID% ^",
                 "  -listen 0.0.0.0 -port %PORT% ^",
@@ -275,6 +265,11 @@ public static class PMDsBuild
                 "  -lobby %LOBBY% ^",
                 "  -tickrate 30 %SMOKEARG% ^",
                 "  -logFile \"%LOGDIR%\\ds_%DSID%.log\"",
+                "exit /b %ERRORLEVEL%",
+                "",
+                ":noboot",
+                "echo [run_ds] 缺少 -bootstrap：HyldDS 必须由 Lobby 编排拉起，拒绝裸 -port 启动（旧诊断路由已删除）。 1>&2",
+                "exit /b 1",
                 "",
             };
 

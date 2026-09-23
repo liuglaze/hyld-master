@@ -68,7 +68,7 @@
       Unity 语言面约束，而它一行都用不上。
     -->
     <Compile Include="..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3"
-             Exclude="..\Client\Assets\Scripts\PMR3\PMR4MovementDriver.cs;..\Client\Assets\Scripts\PMR3\PMR4MovementCodec.cs" />
+             Exclude="..\Client\Assets\Scripts\PMR3\PMR4MovementDriver.cs;..\Client\Assets\Scripts\PMR3\PMR4MovementCodec.cs;../Client/Assets/Scripts/PMR3/PMR5ProjectileDriver.cs;../Client/Assets/Scripts/PMR3/PMR6CombatDriver.cs" />
   </ItemGroup>
 
 </Project>

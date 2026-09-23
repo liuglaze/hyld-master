@@ -62,24 +62,6 @@ AUTHORITATIVE = {
 # 许可的写入位置：这些文件本身就是「权威结果消费 / 本地预测」路径
 # ---------------------------------------------------------------------------
 ALLOWED = {
-    'Client/Assets/Scripts/Server/Manger/Battle/BattleData.HitEvent.cs':
-        '权威 HP/蓝量/能量/存活 的唯一消费点（ApplyAuthoritativeHpAndDeath）',
-    'Client/Assets/Scripts/Server/Manger/Battle/BattleData.Authority.cs':
-        '权威位置/动画参数的消费点（含 MoveAck 位置校正）',
-    'Client/Assets/Scripts/Server/Manger/Battle/BattleData.Prediction.cs':
-        'CSP 回滚重放：按权威位置重算预测位置',
-    'Client/Assets/Scripts/Server/Manger/Battle/BattleData.cs':
-        'BattleData 自身的状态重置（ClearPredictionRuntimeState 等）',
-    'Client/Assets/Scripts/Server/Manger/Battle/BattleData.Attack.cs':
-        '本地预测的蓝量/能量扣减（真值由 ApplyAttackAcks 覆写）',
-    'Client/Assets/Scripts/Server/Manger/Battle/HYLDPlayerManger.cs':
-        '本地预测推进：playerPositon + 移速（已走共享仿真核心）',
-    'Client/Assets/Scripts/Server/Manger/Battle/HYLDBulletManger.cs':
-        '视觉子弹编排（读每玩家有效值）',
-    'Client/Assets/Scripts/Server/Manger/Battle/BattleManger.cs':
-        '战斗宿主：初始化玩家状态',
-    'Client/Assets/Scripts/Server/Manger/Battle/BattleData.Rtt.cs':
-        'RTT 平滑（不涉及权威玩法字段）',
     'Client/Assets/HYLD1.0/Scripts/OldScripts/PlayerLogic.cs':
         'HP 的只读镜像 + 血上限跟随；P3-3c 后此处已无任何加减',
     'Client/Assets/HYLD1.0/Scripts/OldScripts/HYLDStaticValue.cs':

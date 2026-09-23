@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R6-A1 验收（T6A1 / T6A2 / T6A3）：planner + session 的真实核心运行测试。
+
+      为什么需要它：
+        「20 英雄 normal/super 的弹数/扇形/速度/寿命对不对」「同 ID 幂等会不会双扣蓝」
+        「水位能不能拦住被回收的旧 ID」「满表/过期/乱序/倒退时钟有没有副作用」
+        「方向槽是不是每个 key 只占一次」「友军/自伤/重复结算能不能写出伤害」
+        「首杀是不是只锁一次」「断线赢家是不是被硬编码成 1」
+        —— 这些性质编译期完全看不出来，运行期又都长得像「偶尔多一次伤害 / 偶尔少一次 / 偶尔幽灵弹」。
+        这里把它们钉成可执行断言，并且**期望值来自独立手算表**（调查报告 §1.2/§1.3 的英雄数值 +
+        显式算术），不拿实现自身当预期。
+
+      做法：
+        · 直接编**真实源码**（PMCombat 两份实现 + 主 Agent 冻结的 contracts + Shared 数值/公式 +
+          PMProjectile 核心与 codec + PMNet/PMMover 原语），不 mock 记账逻辑；
+        · 负向用例是真的边界值（容量 512/513、TTL 5000/5001、幂等、倒退时钟、
+          方向容差 1 度内外、同批重复目标、终局后写入），不是「错误字符串包含」这类字符串门。
+
+      边界（诚实口径）：
+        · 不引 UnityEngine / R3：真网络（R6-B）与 Unity 宿主（T6C/T46/T47）属于后续阶段与
+          PENDING_USER 实机验收，本工程不冒充它们已通过；
+        · 本测试只覆盖纯核心，不产生任何 R5 真实投射物，也不代表「已能联机开枪」。
+
+      运行：dotnet Tools/PMCombatCoreTest/bin/Release/net8.0/PMCombatCoreTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMCombatCoreTest</AssemblyName>
+    <RootNamespace>PMCombatCoreTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实实现 + 冻结契约（与 PMCombatCoreCheck 编的是同一份文件面） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\PMCombatContracts.cs" LinkBase="PMCombat" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\PMCombatWeaponPlanner.cs" LinkBase="PMCombat" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\PMCombatSession.cs" LinkBase="PMCombat" />
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\BattleNumericConfig.cs" LinkBase="Shared" />
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\PMBattleSim.cs" LinkBase="Shared" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCodec.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileHistory.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileValidator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCoordinator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetReader.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetWriter.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMWireType.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-B1 门禁（T5B1 的编译面）：投射物独立线协议 codec 必须能在 Unity 2019.4 的能力上限内编译，
+      即 netstandard2.0 API + C# 7.3，且**零 UnityEngine 依赖**。
+
+      为什么需要它：
+        Unity 2019.4 的托管编译上限就是 C# 7.3 / .NET Standard 2.0。纯 codec 里最容易悄悄越界的写法是：
+          · Math.Clamp / HashCode.Combine（.NET Standard 2.1 才有）
+          · ??=、switch 表达式、using var、target-typed new（C# 8+）
+          · string.Create / Span / BitConverter.SingleToInt32Bits（.NET Standard 2.1 才有）
+        这些在本机 IDE 里都不报错，只有在这里编译才会暴露。
+
+      依赖面**逐文件**给定，不用通配符：
+        · PMProjectile/PMProjectileCodec.cs      —— 本组实现（唯一写入目标）；
+        · PMProjectile/PMProjectileContracts.cs  —— 主 Agent 冻结的共享契约（只读）；
+        · PMNet/PMNetReader.cs / PMNetWriter.cs  —— protobuf 原语（本 codec 的线格式基础，不引 Google.Protobuf）；
+        · PMNet/PMNetIdentity.cs / PMWireType.cs —— PMFrameId / PMFrameDomain / PMWireType；
+        · PMMover/PMMoverState.cs                —— 只取 PMVector3（该文件自包含）。
+      刻意**不**用 `PMProjectile/**/*.cs` 通配：那会把并行 A1/A2/A3 组
+      （PMProjectileLifecycle / PMProjectilePending / PMProjectileValidator / PMProjectileHistory）
+      正在实现的文件一起编进来，制造跨组编译耦合 —— 正是 B1「不引用 Coordinator」这条边界要避免的。
+
+      本工程是**库**，没有 Program.cs：它的验收形式就是「编译 exit 0」（生产 codec 的零 Unity 依赖证明）。
+
+      构建：dotnet build Tools/PMProjectileCodecCheck/PMProjectileCodecCheck.csproj -c Release
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMProjectileCodecCheck</AssemblyName>
+    <RootNamespace>PMProjectileCodecCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 冻结共享契约（主 Agent 落盘，只读依赖） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <!-- 本组实现（R5-B1） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCodec.cs" LinkBase="PMProjectile" />
+    <!-- 线格式原语 + 身份/帧号 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetReader.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetWriter.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMWireType.cs" LinkBase="PMNet" />
+    <!-- PMVector3（契约与实现都只用到这一份 Mover 文件，且该文件自包含） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+  </ItemGroup>
+
+</Project>

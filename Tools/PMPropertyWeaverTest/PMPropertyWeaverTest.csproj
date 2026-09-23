@@ -1,0 +1,53 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      auto-property 复制属性编织门禁（T-P2）。
+
+      为什么是本工程自己「造夹具 + 调 CLI + 加载执行」：
+        - 夹具里**没有任何手写生成物**：属性 helper / 槽位常量 / 收包 Reader / 版本门 / 实例 gate /
+          注册入口 / OnRep 分发表全部由**现有生成器 PMNetGen**（`decl-gen`，不得改生成器）产出；
+          夹具只保留「声明 + 业务普通赋值 + 驱动 + RPC 声明 + 混合类」；
+        - 夹具必须被**真实 C# 7.3 编译器**编成 netstandard2.0 DLL（Debug 与 Release 都要、
+          且都要带 portable PDB），才能证明「带 PDB 的编织」这条路径；
+        - 编织必须走**冻结的 CLI 契约**（weave / check / require-rpcs），因此把 PMNetWeaver
+          当独立进程调用，而不是只调它的内部函数；
+        - 夹具程序集被 AssemblyLoadContext 加载后，由夹具内部的驱动跑完整行为链
+          （普通赋值自动标脏、客户端不标脏、Reader 只走 RawSet、数组整体替换、初始化器、
+          原 setter 的 [MethodImpl] 标志与 RawSet 继承、监视器锁行为，以及
+          PMNetWorld + PMReplicationChannel 的真实字节往返 / ACK / OwnerOnly / OnRep）。
+          反射只用来**调用**生成物的私有 Reader / 分发表入口、读取实现标志，
+          绝不反射写字段冒充普通赋值。
+
+      运行：dotnet Tools/PMPropertyWeaverTest/bin/Release/net8.0/PMPropertyWeaverTest.dll [repo 参数可选]
+      退出码：0 = 全部通过；1 = 否则。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMPropertyWeaverTest</AssemblyName>
+    <RootNamespace>PMPropertyWeaverTest</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Fixture.cs 是**夹具源码**，不是本工程的源码：
+      它要跟 PMNet 运行时、生成物一起被编进**另一个**临时程序集（netstandard2.0）。
+      若让 SDK 把它编进本工程，本工程会立刻因缺少 PMNet 类型而编译失败。
+    -->
+    <Compile Remove="Fixture.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只保证工具被构建出来（本工程把它们的 DLL 当命令行进程调用，不引用其程序集）。 -->
+    <ProjectReference Include="..\PMNetWeaver\PMNetWeaver.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+</Project>

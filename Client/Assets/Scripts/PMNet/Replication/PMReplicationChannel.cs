@@ -11,8 +11,10 @@ namespace PMNet
     /// 本层只负责**权威状态的传递**：每连接基线、变更掩码比较、8 项复制条件、
     /// OnRep 分发、初始状态全量、有界队列。**不做**：距离裁剪/相关性调度、
     /// 频率/休眠、FastArray、预测回滚（分别属于 M06 后半 / M07/M08）。
+    /// `PushBased=false` 属性的"轮询"就是**每轮无条件采样一次、再由基线比较抑制**，
+    /// 不引入频率分档、休眠唤醒或相关性过滤（那些仍属 M06 后半，本轮不实现）。
     ///
-    /// ## 五条被本实现钉死的契约
+    /// ## 六条被本实现钉死的契约
     ///
     /// 1. **每连接基线 + ACK 只能前进**（R0 §5）：`AckedVersion` 单调，
     ///    旧 ACK 既不回退版本，也不清除比它更新的脏位。
@@ -22,6 +24,16 @@ namespace PMNet
     /// 4. **条件跃迁全掩码**（D-R0-15）：条件由"不满足 → 满足"时强制把该属性补发一次，
     ///    否则新获得可见性的连接永远拿不到当前值。
     /// 5. **初始状态全量**（D-R0-12/16）：基线缺失（首次进入范围 / 新连接）⇒ 该属性全量发送。
+    /// 6. **可见且 `PushBased=false` 的属性每轮采样**：调度判据不能只看未知基线/强制补发/脏位/
+    ///    条件跃迁 —— 否则业务"直接写字段、不标脏"的修改永不参与比较（`PushBased=false` 形同虚设）。
+    ///    是否真的发出去仍由基线字节比较决定。且轮询对象常驻候选后，每连接对象预算必须**轮转**分配，
+    ///    不能让对象表前缀把预算吃光。
+    /// 7. **调度的每个触发源都要按"本连接可见性"过滤，"失去可见性"必须当场落下**：对某条连接
+    ///    永远不可见的槽位（OwnerOnly 之于非拥有者、Never）永远拿不到基线 ⇒ 不算工作；同一纪律
+    ///    必须覆盖**对象级**的脏位与 `ForceInclude`（它们不区分连接，一个挂在不可见槽位上的
+    ///    标记会让该对象终身每轮占用这条连接的预算）；而"可见 → 不可见"必须在本轮判出时就写入
+    ///    状态，不能只留给 `ScanAndAppend` —— 预算顺延的轮次不进扫描，只留在本轮临时数组里的
+    ///    跃迁会被下一轮覆盖，重新可见时就不补发了。
     ///
     /// ## 决策点为什么是 virtual
     ///
@@ -35,6 +47,19 @@ namespace PMNet
     /// RV2 返工时按同一思路补了两个：`DispatchOnRepPerProperty`（回调时机）与
     /// `IsolateOnRepExceptions`（回调异常隔离）—— 这两条的正确性同样只在运行期可见，
     /// 而且"边写边回调"与"回调异常穿透"都曾经是真实存在过的形态。
+    ///
+    /// 补轮询调度时又按同一思路补了五个：`ShouldPollProperty`（轮询候选）、
+    /// `IsVisibilityTransition`（**两个方向**的可见性跃迁都要进扫描）、
+    /// `ShouldWorkOnUnknownBaseline`（不可见槽位的未知基线不算工作）、
+    /// `UseFairBudgetRotation`（预算轮转，避免前缀饥饿）与 `IsSlotFullyConfirmed`
+    /// （先判可见性、再采样，不可见槽位不执行 Writer）。它们的正确性同样只在运行期可见，
+    /// 而"忽略 `PushBased=false` / 失去可见性没被记录 / 不可见槽位吃掉预算 / 前缀饥饿 /
+    /// 不可见槽位仍被采样"都曾经是（或等价于）真实存在过的形态。
+    ///
+    /// 独立对抗审查这一轮又补了两个，覆盖同一处修复的两个**剩余缺口**：
+    /// `ShouldFilterForceAndDirtyByVisibility`（对象级的脏位与强制补发也要按可见性过滤 ——
+    /// "未知基线"过滤了，脏位/`ForceInclude` 却没过滤）与 `ShouldCommitVisibilityLossUpfront`
+    /// （失去可见性必须当场写入状态，否则预算顺延的轮次会把它丢掉）。
     ///
     /// ## 线程模型
     ///
@@ -54,6 +79,16 @@ namespace PMNet
 
             /// <summary>NetId → 每(连接 × 对象)状态。</summary>
             public readonly Dictionary<uint, PMRepConnectionState> Objects = new Dictionary<uint, PMRepConnectionState>(16);
+
+            /// <summary>
+            /// 本轮对象预算的轮转起点（Round-robin 游标，见 <see cref="UseFairBudgetRotation"/>）。
+            ///
+            /// 只是"先给谁分配预算"的顺序，不改变"每个对象每轮都会被考察一次"这一事实；
+            /// 因此超预算仍然只是**顺延**（脏位 / ForceInclude / 条件状态都留在原地，下一轮重新检出），
+            /// 但不会让对象表前缀（尤其是常驻轮询的对象）把预算吃光。
+            /// 下标基于 <see cref="_objects"/>；该表会在登记/注销间变化，读取前必须规约。
+            /// </summary>
+            public int Cursor;
         }
 
         private readonly PMRepOptions _options;
@@ -360,10 +395,31 @@ namespace PMNet
 
             _recordScratch.Clear();
 
-            int scheduled = 0;
-            for (int i = 0; i < _objects.Count; i++)
+            int objectCount = _objects.Count;
+            if (objectCount == 0)
             {
-                PMNetObject obj = _objects[i];
+                return 0;
+            }
+
+            // 轮转起点（Round-robin）：补齐轮询候选之后，每轮"有工作"的对象会明显变多 ——
+            // 每个含"可见且 PushBased=false"属性的对象都**常驻**候选。若每轮都从对象表表头
+            // 分配预算，前缀对象会把预算吃光，后面的对象即使有真实修改也永远排不上
+            // （顺延本身不丢数据，但无限顺延等价于丢弃）。起点只决定分配顺序，不改变覆盖面。
+            bool fair = UseFairBudgetRotation();
+            int start = fair ? NormalizeObjectCursor(bucket.Cursor, objectCount) : 0;
+
+            int scheduled = 0;
+            int lastScheduled = -1;
+
+            for (int k = 0; k < objectCount; k++)
+            {
+                int index = start + k;
+                if (index >= objectCount)
+                {
+                    index -= objectCount;
+                }
+
+                PMNetObject obj = _objects[index];
                 if (obj == null)
                 {
                     continue;
@@ -398,7 +454,14 @@ namespace PMNet
                 }
 
                 scheduled++;
+                lastScheduled = index;
                 ScanAndAppend(entry, state, obj, _recordScratch);
+            }
+
+            if (fair && lastScheduled >= 0)
+            {
+                // 下一轮从"本轮最后处理的那个对象"之后开始 ⇒ 任何对象都会在有限轮次内轮到。
+                bucket.Cursor = (lastScheduled + 1 >= objectCount) ? 0 : (lastScheduled + 1);
             }
 
             if (_recordScratch.Count == 0)
@@ -540,47 +603,163 @@ namespace PMNet
             _payloadRecords.Clear();
         }
 
+        /// <summary>
+        /// 本轮该对象对这条连接是否需要"进入比较"。五种触发源，任一条成立即扫描：
+        ///
+        /// <list type="number">
+        ///   <item>存在**可见**且基线缺失的槽位（D-R0-12/16 初始状态全量）；</item>
+        ///   <item>有强制补发标记（条件跃迁 / Dynamic 改写，D-R0-15）；</item>
+        ///   <item>对象脏位非空（Push 式的"可能变了"）；</item>
+        ///   <item>存在**可见且 `PushBased=false`** 的槽位（轮询式：本对象每轮都要采样一次）；</item>
+        ///   <item>条件的可见性发生了变化（**两个方向**都算，见 <see cref="IsVisibilityTransition"/>）。</item>
+        /// </list>
+        ///
+        /// 第 4 条是补上的缺陷修复：旧实现的触发源只有 1/2/3/5，于是 `PushBased=false` 声明
+        /// 形同虚设 —— 业务不调用 `MarkPropertyDirty` 的赋值永不参与比较。
+        ///
+        /// 第 1 条刻意**按槽位判可见性**，而不是只看 `UnknownBaselineCount > 0`：
+        /// 对某条连接永远不可见的槽位（OwnerOnly 之于非拥有者、Never 等）永远拿不到基线，
+        /// 若把它算作"有工作"，该对象会终身每轮占用这条连接的调度预算。
+        ///
+        /// 第 2/3 条（`ForceInclude` / 脏位）与第 1 条是**同一条纪律**：二者同样是对象级的
+        /// （不区分连接），同样必须按本连接的可见性过滤（见
+        /// <see cref="ShouldFilterForceAndDirtyByVisibility"/>）。
+        ///
+        /// 第 5 条（可见性跃迁）里"失去可见性"那一半必须在本方法里就落到 `ConditionActive` 上：
+        /// 本轮可能因为预算顺延而**不进入** `ScanAndAppend`（那里的记录会随 `_condScratch`
+        /// 一起被丢弃）。见 <see cref="ShouldCommitVisibilityLossUpfront"/>。
+        /// </summary>
         private bool NeedsWork(PMRepObjectEntry entry, PMRepConnectionState state, PMNetObject obj, out bool anyTransition)
         {
             anyTransition = false;
 
-            if (entry.HasConditional)
+            int slotCount = entry.SlotCount;
+            bool pollCandidate = false;
+            bool visibleForce = false;
+            bool visibleDirty = false;
+
+            if (entry.HasConditional || entry.HasPoll)
             {
-                EnsureScratch(entry.SlotCount);
+                EnsureScratch(slotCount);
 
                 bool isOwner;
                 bool isSimulated;
                 ResolveFlags(obj, state.Connection, out isOwner, out isSimulated);
 
-                for (int slot = 0; slot < entry.SlotCount; slot++)
+                for (int slot = 0; slot < slotCount; slot++)
                 {
-                    PMCond raw = entry.Descriptor.Properties[slot].Condition;
+                    PMPropertyDescriptor prop = entry.Descriptor.Properties[slot];
                     bool met = entry.EvaluateSlot(slot, isOwner, isSimulated);
                     _condScratch[slot] = met;
 
-                    if (met && !state.ConditionActive[slot] && PMRepConditions.RequiresEvaluation(raw))
+                    if (PMRepConditions.RequiresEvaluation(prop.Condition)
+                        && IsVisibilityTransition(slot, met, state.ConditionActive[slot]))
                     {
+                        // 可见性**两个方向**都必须进入本轮扫描：
+                        //   - 不满足 → 满足：由 ScanAndAppend 置 ForceInclude，把当前值补发一次（D-R0-15）；
+                        //   - 满足 → 不满足：必须把"已失去可见性"落到 ConditionActive=false，否则条件再
+                        //     变回满足时"不满足 → 满足"无从判定（ConditionActive 从未为 false），
+                        //     重新可见的连接拿不到当前值 —— 即使它没有脏位、值也没变。
                         anyTransition = true;
+
+                        if (!met && ShouldCommitVisibilityLossUpfront())
+                        {
+                            // "已失去可见性"必须**当场**落下，不能只等 ScanAndAppend。
+                            // 理由：预算顺延的轮次（DeferredByBudget 分支）直接 continue，根本不进扫描；
+                            // 若只在扫描里记录，这次丢失就只活在本轮的 _condScratch 里、下一轮被覆盖，
+                            // 条件在顺延期间变回满足时判不出跃迁 ⇒ **不补发**（值相同、无脏位时最明显）。
+                            state.ConditionActive[slot] = false;
+                        }
+                    }
+
+                    if (!met)
+                    {
+                        continue;
+                    }
+
+                    if (state.ForceInclude[slot])
+                    {
+                        visibleForce = true;
+                    }
+
+                    if (obj.Dirty.IsDirty(slot))
+                    {
+                        visibleDirty = true;
+                    }
+
+                    if (!prop.PushBased && ShouldPollProperty(slot))
+                    {
+                        // 轮询候选：可见且非 Push ⇒ 本对象每轮都要被采样（是否发出仍看基线比较）。
+                        pollCandidate = true;
                     }
                 }
             }
 
-            if (state.UnknownBaselineCount > 0)
+            if (state.UnknownBaselineCount > 0 && HasVisibleUnknownBaseline(entry, state))
             {
                 return true;
             }
 
-            if (state.ForceIncludeCount > 0)
+            // 强制补发 / 脏位与"未知基线"同一条纪律：**按可见性过滤**。
+            // 二者都是对象级的（`ForceInclude[slot]` 由 SetCustomConditionActive /
+            // SetDynamicCondition 一次写给所有连接；`Dirty` 位更是整对象共享），于是一个"对这条
+            // 连接永远不可见"的槽位（OwnerOnly 之于非拥有者 / Never）上挂着的标记，会让该对象
+            // **终身每轮**占用这条连接的调度预算 —— 表现为前缀常驻扫描、后面的对象持续顺延
+            // （顺延无限次等价于丢弃）。典型触发：owner-only 字段服务端频繁变脏；或 `Dynamic`
+            // 条件被改写成 `Never` 后 SetDynamicCondition 留在所有连接上的 ForceInclude 永远清不掉
+            // （ScanAndAppend 对 !met 的槽位直接 continue，走不到 ClearRequireSend）。
+            // 过滤只影响"是否进入本轮扫描"：**不动**任何标记本身（脏位对象级共享，按某条连接
+            // 在这里清掉会破坏"所有可见连接都已追平才清脏"的不变式）；槽位重新可见时由条件跃迁
+            // 补发、或由基线比较带上，不丢值。
+            // 对"没有任何条件属性"的对象，所有槽位恒可见 ⇒ 两条判断退化成原形态（零额外开销）。
+            bool filterByVisibility = entry.HasConditional && ShouldFilterForceAndDirtyByVisibility();
+
+            if (state.ForceIncludeCount > 0 && (!filterByVisibility || visibleForce))
             {
                 return true;
             }
 
-            if (obj.Dirty.HasAny)
+            if (obj.Dirty.HasAny
+                && (!filterByVisibility || visibleDirty || !obj.Dirty.HasAnyBelow(slotCount)))
+            {
+                // 第三项 `!HasAnyBelow(slotCount)` 是 `MarkAllPropertiesDirty()` / 休眠唤醒留下的
+                // "非属性伪位"（下标 >= SlotCount，那里根本没有属性）：它们仍然算工作，
+                // 好让对象进入一次扫描把它们清掉（RV4 的口径：不能终身停在待比较集合）。
+                return true;
+            }
+
+            if (pollCandidate)
             {
                 return true;
             }
 
             return anyTransition;
+        }
+
+        /// <summary>
+        /// 是否存在"基线缺失、且因此真的需要发送"的槽位。
+        ///
+        /// 可见性取本轮刚填好的 `_condScratch`（无条件类恒可见）。不可见槽位的缺失基线
+        /// **不算工作**：它永远不会被补齐，算成工作就等于让该对象终身占用每连接预算
+        /// （见 <see cref="ShouldWorkOnUnknownBaseline"/>）。
+        /// </summary>
+        private bool HasVisibleUnknownBaseline(PMRepObjectEntry entry, PMRepConnectionState state)
+        {
+            for (int slot = 0; slot < entry.SlotCount; slot++)
+            {
+                if (state.Baseline[slot] != null)
+                {
+                    continue;
+                }
+
+                bool visible = entry.HasConditional ? _condScratch[slot] : true;
+                if (ShouldWorkOnUnknownBaseline(visible))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private void ScanAndAppend(PMRepObjectEntry entry, PMRepConnectionState state, PMNetObject obj, List<PMRepUpdateRecord> records)
@@ -631,6 +810,13 @@ namespace PMNet
                     _stats.ProtocolErrors++;
                     WarnInternal("属性槽位 " + slot + "（" + prop.MemberName + "）序列化出 0 字节，声明有误，已跳过");
                     continue;
+                }
+
+                if (!prop.PushBased && ShouldPollProperty(slot))
+                {
+                    // "这一轮真的采过这个轮询槽位"的计数：把"采样了但值没变"与"压根没调度"
+                    // 在统计上分开（见 PMRepStats.PollSampledSlots）。
+                    _stats.PollSampledSlots++;
                 }
 
                 byte[] baseline = state.Baseline[slot];
@@ -758,6 +944,97 @@ namespace PMNet
         /// 而且只在条件真的发生过跃迁时才复现，属于最难查的一类。
         /// </summary>
         protected virtual bool ShouldForceIncludeOnTransition(int slot)
+        {
+            return true;
+        }
+
+        /// <summary>
+        /// 决策点：某个"本轮对该连接可见、且声明为 `PushBased=false`"的槽位是否需要被采样（轮询）。
+        ///
+        /// 默认 true。`PushBased=false` 的契约就是"业务直接写字段、不标脏，由复制层每轮取当前值
+        /// 与基线比较"；把它排除在调度判据之外，会让这类属性永不参与比较（静默不同步）。
+        /// 采样之后是否真的发出去仍由基线字节比较决定（D-R0-13）。
+        ///
+        /// 做成 `protected virtual` 是为了让门禁能注入"忽略 `PushBased=false`"这一**旧实现**形态
+        /// （负向验证）—— 否则"轮询真的生效了"这件事无法被证明。
+        /// </summary>
+        protected virtual bool ShouldPollProperty(int slot)
+        {
+            return true;
+        }
+
+        /// <summary>
+        /// 决策点：条件求值结果相对"上一次被记录的状态"是否算一次可见性跃迁。
+        ///
+        /// 默认 `met != wasActive`（**两个方向**都要进扫描）。只认 `met &amp;&amp; !wasActive`
+        /// （旧实现）会漏掉"满足 → 不满足"这一步：`ConditionActive` 停在 true，条件再变回满足时
+        /// "不满足 → 满足"无从判定，于是**重新可见的连接拿不到当前值**（没有脏位、值也没变时
+        /// 尤其明显）。生产代码不覆写，默认实现即契约。
+        /// </summary>
+        protected virtual bool IsVisibilityTransition(int slot, bool met, bool wasActive)
+        {
+            return met != wasActive;
+        }
+
+        /// <summary>
+        /// 决策点：某个"基线未知"的槽位是否该被当作"本轮有工作"。
+        ///
+        /// 默认只看**可见性**：不可见槽位（OwnerOnly 之于非拥有者 / Never 等）永远拿不到基线，
+        /// 若仍算工作，该对象会终身每轮占用每连接预算 —— 表现为对象表前缀常驻扫描、后面的对象
+        /// 持续顺延（顺延无限次等价于丢弃）。可见槽位基线未知则必须补（D-R0-12/16）。
+        ///
+        /// 参数刻意取"可见性"而不是槽位下标：默认实现里不含可见性规则本身，门禁才能用一个
+        /// "恒 true"的覆写精确还原旧行为（负向验证）。
+        /// </summary>
+        protected virtual bool ShouldWorkOnUnknownBaseline(bool slotVisible)
+        {
+            return slotVisible;
+        }
+
+        /// <summary>
+        /// 决策点：`ForceInclude` 与脏位这两个**对象级**的触发源是否按"本连接可见性"过滤。
+        ///
+        /// 默认 true。为何必须过滤：这两者都不区分连接 —— `state.ForceInclude[slot]` 由
+        /// <see cref="SetCustomConditionActive"/> / <see cref="SetDynamicCondition"/> 一次写给
+        /// 所有连接，`PMNetObject.Dirty` 位更是整对象共享。于是"对这条连接永远不可见"的槽位上
+        /// 挂着的标记（owner-only 字段服务端频繁变脏；`Dynamic` 改写成 `Never` 后留下的
+        /// `ForceInclude`）会让该对象**终身每轮**占用这条连接的调度预算。
+        /// 只过滤"是否算工作"，不清任何标记（见 <see cref="NeedsWork"/> 的注释）。
+        ///
+        /// false = 旧行为（只看 `ForceIncludeCount &gt; 0` / `Dirty.HasAny`，不分可见性），
+        /// 门禁用它做负向验证。
+        /// </summary>
+        protected virtual bool ShouldFilterForceAndDirtyByVisibility()
+        {
+            return true;
+        }
+
+        /// <summary>
+        /// 决策点："满足 → 不满足"（失去可见性）是否在 <see cref="NeedsWork"/> 里**当场**写入
+        /// `ConditionActive`，而不是等真正进入 `ScanAndAppend` 时再写。
+        ///
+        /// 默认 true。为何必须当场写：调度预算耗尽的轮次会**顺延**（直接 continue），根本不进
+        /// `ScanAndAppend`；若只在扫描里记录，这次"失去可见性"就只活在本轮的 `_condScratch` 里，
+        /// 下一轮被覆盖。条件在顺延期间变回满足时"不满足 → 满足"无从判定（`ConditionActive`
+        /// 从未为 false）⇒ **重新可见的连接拿不到这次强制补发**（值相同、无脏位时尤其明显）。
+        /// 这半条记录只有放进调度判据（每轮对每个对象都会执行）才不会被顺延丢掉。
+        ///
+        /// false = 旧行为（只在扫描时记录），门禁用它做负向验证。
+        /// </summary>
+        protected virtual bool ShouldCommitVisibilityLossUpfront()
+        {
+            return true;
+        }
+
+        /// <summary>
+        /// 决策点：每连接对象预算不够时，起点是否轮转（Round-robin 游标）。
+        ///
+        /// 默认 true（游标本轮推进到"最后处理的对象"之后，存在每连接桶里）。补上轮询候选后，
+        /// 每轮"有工作"的对象数会显著变多（含非 Push 可见属性的对象常驻候选）；若每轮都从对象表
+        /// 表头分配预算，前缀对象会把预算吃光，后面的对象即使有真实修改也永远排不上。
+        /// false = 旧行为（每轮从表头开始），门禁用它做负向验证。
+        /// </summary>
+        protected virtual bool UseFairBudgetRotation()
         {
             return true;
         }
@@ -907,7 +1184,18 @@ namespace PMNet
             }
         }
 
-        private bool IsSlotFullyConfirmed(PMRepObjectEntry entry, int slot)
+        /// <summary>
+        /// 决策点：某槽位是否已被**所有可见连接**确认（= 所有该看到它的连接，其已确认基线都等于当前值）。
+        ///
+        /// 顺序即契约：**先判可见性、再取当前值**。反例（旧实现）是"先 SerializeProperty
+        /// 再逐连接判可见性"，于是对一个对本连接完全不可见的槽位也会执行它的 Writer（采样一次）；
+        /// Writer 是业务提供的委托，可能有成本甚至副作用，不可见时不该被调用。
+        /// 默认实现即契约；覆写成"先取当前值"即缺陷注入（门禁负向验证用）。
+        ///
+        /// 与"条件"的相互作用：条件不满足的连接不要求拥有该值，因此不计入"追平"判定，
+        /// 也不需要为它采样；将来条件由不满足变满足时，由 D-R0-15 的跃迁补偿补发。
+        /// </summary>
+        protected virtual bool IsSlotFullyConfirmed(PMRepObjectEntry entry, int slot)
         {
             PMNetObject obj = entry.Object;
             if (obj == null || !obj.NetId.IsValid)
@@ -921,13 +1209,8 @@ namespace PMNet
                 return false;
             }
 
-            byte[] current = SerializeProperty(prop, obj);
-            if (current == null)
-            {
-                return false;
-            }
-
             uint netId = obj.NetId.Value;
+            byte[] current = null;
 
             for (int i = 0; i < _connectionOrder.Count; i++)
             {
@@ -949,7 +1232,17 @@ namespace PMNet
 
                 if (!entry.EvaluateSlot(slot, isOwner, isSimulated))
                 {
+                    // 对该连接不可见 ⇒ 不要求它拥有这个值，也不为此采样（见方法头注释）。
                     continue;
+                }
+
+                if (current == null)
+                {
+                    current = SerializeProperty(prop, obj);
+                    if (current == null)
+                    {
+                        return false;
+                    }
                 }
 
                 byte[] baseline = other.Baseline[slot];
@@ -1497,11 +1790,21 @@ namespace PMNet
             }
 
             bool hasConditional = false;
+            bool hasPoll = false;
             for (int i = 0; i < desc.Properties.Length; i++)
             {
                 if (desc.Properties[i].Condition != PMCond.None)
                 {
                     hasConditional = true;
+                }
+
+                if (!desc.Properties[i].PushBased)
+                {
+                    hasPoll = true;
+                }
+
+                if (hasConditional && hasPoll)
+                {
                     break;
                 }
             }
@@ -1519,6 +1822,7 @@ namespace PMNet
             entry.Descriptor = desc;
             entry.SlotCount = desc.Properties.Length;
             entry.HasConditional = hasConditional;
+            entry.HasPoll = hasPoll;
             entry.Factory = cls.Factory;
             entry.CustomActive = new bool[entry.SlotCount];
             entry.Dynamic = new PMCond[entry.SlotCount];
@@ -1602,6 +1906,29 @@ namespace PMNet
             state = new PMRepConnectionState(bucket.Connection, entry);
             bucket.Objects.Add(netId, state);
             return state;
+        }
+
+        /// <summary>
+        /// 把轮转游标规约到 `[0, objectCount)`。
+        ///
+        /// 对象表会在登记/注销之间变化，游标可能停在已缩小的范围之外（或来自负值），
+        /// 因此读取前必须规约一次；越界直接取模比"顺手重置为 0"更稳（重置会让每轮都从头开始，
+        /// 也就是把轮转悄悄退化成前缀优先）。
+        /// </summary>
+        private static int NormalizeObjectCursor(int cursor, int objectCount)
+        {
+            if (objectCount <= 0)
+            {
+                return 0;
+            }
+
+            int normalized = cursor % objectCount;
+            if (normalized < 0)
+            {
+                normalized += objectCount;
+            }
+
+            return normalized;
         }
 
         private void EnsureScratch(int slotCount)

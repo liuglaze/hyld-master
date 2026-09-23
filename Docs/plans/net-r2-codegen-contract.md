@@ -9,9 +9,11 @@
 
 ## 0. 一句话目标
 
-业务只写**声明**（Attribute 标记的字段与 `_Implementation` 方法），
+业务只写**声明**（Attribute 标记的字段与普通带业务体 RPC 方法），
 外部生成器扫出声明、分配**稳定 ID**、生成**零反射**的静态表；
 运行期靠这张表完成「属性增量复制 + RPC 双向调用」。
+
+**当前作者接口已升级**：普通标记方法就是调用入口，编译后由 `PMNetWeaver` 自动拆出私有业务体；不写 `_Implementation` / `#if` 声明区。以 `net-rpc-weaving-contract.md` 为当前编织契约，旧阶段历史说明不再作为公开API。
 
 ---
 
@@ -131,11 +133,11 @@ private static void PMNet_Read_<成员名>(PMNetObject t, PMNetReader r);
 //    PMPropertyDescriptor.OnRepMethodId 指向本表下标
 private static void PMNet_OnRepDispatch(PMNetObject t, ushort onRepMethodId);
 
-// 5) RPC：每个被标记方法各一个接收侧分发 + 一个业务可见调用桩
-//    接收侧（读参数 → 过校验 → 调用业务 _Implementation）
+// 5) RPC：每个被标记方法各一个接收侧分发 + 一个编织器私有发送helper
+//    接收侧（读参数 → 过校验 → 编织后直接调用私有业务体）
 private static void PMNet_RpcInvoke_<方法名>(PMNetObject t, PMNetReader r);
-//    业务可见调用桩（契约 §4.3）：callspace 判定 → 本地执行 / 发远端
-public void PMNet_<方法名>(<参数表>);
+//    私有发送helper：callspace 判定 → 本地执行 / 发远端
+private void PMNet_<方法名>(<参数表>);
 
 // 6) 静态注册表（本类贡献给 PMNetRegistry 的条目）
 internal static PMNetClassEntry PMNet_BuildEntry();
@@ -163,31 +165,35 @@ namespace PMNet.Generated
 **不得用反射扫描**（D-R0-48 / T40 的断言：「运行不扫反射」）。
 最后调用 `PMNetRegistry.Seal(ProtocolHash)`。
 
-### 4.3 RPC 的业务侧书写约定
+### 4.3 RPC 的业务侧书写约定（自然C# + IL编织）
 
 ```csharp
 [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
 public void Fire(int targetId, float angle)
 {
-    // ★ 这层是**生成器产出的接收侧分发**在调用它；业务不要直接调用本方法，
-    //   业务调用的是 PMNet_ 前缀的生成桩。
-    //   直接调用只会本地执行、不过网 —— 与 UE 的 UFUNCTION 语义一致。
+    // 直接写服务端业务体。调用者正常使用 player.Fire(targetId, angle)。
 }
-
-// 规则 13 要求：声明了 ForceValidate 档位就必须真的存在这个同伴。
 private PMRpcValidation Fire_ForceValidate(int targetId, float angle)
 {
-    if (targetId <= 0) { return PMRpcValidation.Reject; }   // 真实实现里会先调 NET_FORCE_VALIDATE_REASON(...)
-    return PMRpcValidation.Accept;
+    return targetId > 0 ? PMRpcValidation.Accept : PMRpcValidation.Reject;
 }
 ```
 
+生成器只生成描述符、私有发送helper和接收执行器；编织器把原业务体复制到 `PMNet_RpcBody_Fire`，
+普通 `Fire` 改为转发私有 `PMNet_Fire`。发送helper本地分支和接收执行器都被改指私有业务体，
+其它普通调用/方法组仍指网络入口，不递归。运行时不扫反射。
+
+含RPC类的生成物包含version0/Require/实例字段初始化门及BuildEntry门；未经编织（version!=1）不能正常new或注册。
+根Directory.Build.targets在正式PMR3编译前check/gen元数据，并在CoreCompile后、复制obj到bin前weave+check。
+Editor独立asmdef负责生成刷新、编译回调、Play硬门及Player脚本DLL阶段处理；真实回调/IL2CPP仍待实机。
+虚方法/泛型/async/static/abstract/extern/重载/ref-out-in/params/default不在本轮支持集，明确失败，不静默降级。
+
 ### 4.3.1 实参传递：**调用桩闭包捕获**（不是「对象上的实参帧」）
 
-生成器产出的调用桩形态：
+生成器产出的**私有发送helper、编织前**形态如下；编织后其中本地 `Fire` 调用会改为 `PMNet_RpcBody_Fire`，业务不得调用此helper：
 
 ```csharp
-public void PMNet_Fire(int p0, float p1)
+private void PMNet_Fire(int p0, float p1)
 {
     PMFunctionCallspace callspace = PMRpcDispatch.EvaluateCallspace(
         NetMode, Role, PMRpcKind.Server, GetNetConnection() != null, false);
@@ -313,3 +319,17 @@ R2 收口前必须处理的 8 项缺陷（含 **RPC 实参传递方式返工**�
 - 生命周期格式版本2：手写初值钩子写出非空内容时优先；否则世界从静态描述符写入声明式初值，按连接过滤，在创建回调前应用。过滤器由复制channel接线；未接线只发送None条件，Never始终排除。Create不提前确认复制基线。
 - 普通更新先结构验证和暂存解码，再整条提交，最后统一OnRep；畸形记录不ACK。工厂必须返回全新未登记对象。纯字段Reader保证解析失败不改活对象；有副作用的自定义Reader/属性setter不具备全面事务保证，提交异常计数且不ACK。OnRep异常与协议失败分开，整条已提交仍ACK。
 - 当前验收数和状态以主计划文末RV1–RV7为准；§7旧数字保留为历史阶段结果，不代表真实UDP/Unity验证。
+
+
+## 10. 自然C#接口补充（当前）
+- 普通带体RPC标记+普通名调用是唯一作者用法；手写Implementation/#if声明区方案已由用户否决。
+- 编织只是作者接口改造，保留既有callspace、网络ForceValidate/Validate、数组快照、权限和ID/线格式。
+- 扫描期读取/语法错误硬失败，防残缺声明覆盖产物；规则7同时拒绝编织器不支持的方法形态。
+- 方法体克隆/符号校验/漏编织guard/失败回滚与并发锁见net-rpc-weaving-contract.md；不承诺崩溃断电下DLL/PDB两文件绝对原子。
+- 本地分支仍按原PMNet语义不执行网络校验；这与UE项目ForceValidate的本地函数体/CVar细节不完全相同，本轮不扩大修改。
+
+
+## 11. 自动属性复制补充（当前）
+原§4.1/4.3的字段setter仍是手动字段模式；新增推荐auto-property模式以net-property-authoring-contract.md为准。
+普通get/set的PMReplicated自动属性由编织器接普通setter到PropertySet；该helper总存值，changed&&HasAuthority&&PushBased才Mark，RawSet只写backing field。Reader解码局部后直接RawSet，避免收包回环；OnRep时序不变。属性名不改变，field→同名property不改变协议ID/hash。
+规则14严格限定auto-property，不支持自定义访问器/只读/virtual/indexer等；guard触发扩为RPC或auto-property。PushBased具名参数现真实解析并用于轮询调度。数组原地变化不属于setter覆盖范围。

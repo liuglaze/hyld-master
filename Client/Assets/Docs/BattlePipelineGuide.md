@@ -1,3 +1,5 @@
+﻿> **历史文档：旧战斗网络已退役。** 本文旧 BattleInfo/SavedMove/UDP7777/回放链路已从运行源码删除，不得作为当前接口。当前说明见 `Client/Assets/AGENTS.md`、`Client/Assets/Docs/ForServer.md`、`Server/AGENTS.md` 与 `Docs/plans/net-architecture-migration.md`。
+
 # HYLD 客户端战斗全链路文档（演示讲解用）
 
 > 本文档面向项目演示答辩，覆盖客户端战斗系统的每一个脚本、每一个关键函数、关键行。

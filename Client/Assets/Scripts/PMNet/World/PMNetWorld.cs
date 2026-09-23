@@ -81,6 +81,12 @@ namespace PMNet
     /// 3. **销毁走可靠流且不等 ack**（D-R0-04）。本端判定销毁即刻摘出索引，
     ///    销毁记录随后排空；因为 NetId 不复用，迟到包自然失效。
     ///
+    /// 4. **"先占号、后上线"走能力令牌而不是裸号**（R5-B2a）。服务端在业务确认之前
+    ///    用 <see cref="TryReserveNetId"/> 预留真实 NetId，确认后才用 <see cref="SpawnReserved"/>
+    ///    登记对象；预留期间**没有网络对象、不发 Create**。凭据是
+    ///    <see cref="PMNetSpawnReservation"/> 实例（绑定本 world 与 epoch），不是 `uint` ——
+    ///    两个 world 都可以从 1 开始分配，裸号无法区分"谁的 1"。
+    ///
     /// ## 线程模型
     ///
     /// 与 M03 传输层一致：本类**全部方法都只在主线程调用**。入站字节由 `OnLifecycleMessage`
@@ -144,6 +150,18 @@ namespace PMNet
         /// <summary>连接 ID → 连接状态。</summary>
         private readonly Dictionary<int, ConnectionState> _connections;
 
+        /// <summary>
+        /// NetId.Value → **尚未消费**的预留令牌（R5-B2a）。
+        ///
+        /// 以 rawId 为键、**令牌实例本身为值**：消费时要求引用相等。
+        /// 理由是关键安全边界 —— 两个 world 各自从 1 开始分配，**同一个 rawId 在不同
+        /// world 里都合法**；若把 `uint` 当凭据，跨 world 的号就会被误当成"本 world 的预留"放行。
+        /// </summary>
+        private readonly Dictionary<uint, PMNetSpawnReservation> _reservations;
+
+        /// <summary>本世界是否已 Dispose。Dispose 后不再签发新预留（既有 Spawn 契约不变）。</summary>
+        private bool _disposed;
+
         /// <summary>批量写出的暂存记录表（复用，避免每次发包分配）。</summary>
         private readonly List<PMNetLifecycleRecord> _scratchRecords = new List<PMNetLifecycleRecord>(64);
 
@@ -183,6 +201,7 @@ namespace PMNet
             _classFactories = new Dictionary<uint, Func<PMNetObject>>(64);
             _allObjects = new List<PMNetObject>(Math.Min(maxObjects, 4096));
             _connections = new Dictionary<int, ConnectionState>(8);
+            _reservations = new Dictionary<uint, PMNetSpawnReservation>(16);
         }
 
         /// <summary>本会话。</summary>
@@ -196,6 +215,15 @@ namespace PMNet
 
         /// <summary>当前存活对象数（不含已销毁）。</summary>
         public int ObjectCount { get { return _byId.Count; } }
+
+        /// <summary>
+        /// 当前**尚未消费**的 NetId 预留数（R5-B2a）。
+        ///
+        /// 预留不登记网络对象、不发 Create、不占存活对象表，但**占用对象数上限**
+        /// （容量判据 = 存活 + 预留，见 <see cref="Spawn"/> 与 <see cref="TryReserveNetId"/>）：
+        /// 否则"先预留、后确认"的窗口可以被无限开启，把内存和创建队列推成无界（D-R0-18）。
+        /// </summary>
+        public int ReservedNetIdCount { get { return _reservations.Count; } }
 
         /// <summary>
         /// 登记表里的**存活对象数**（与 <see cref="ObjectCount"/> 同值）。
@@ -397,6 +425,9 @@ namespace PMNet
         ///
         /// 返回 false 表示被拒绝（超出上限、对象未处于 Unregistered、或本端不是服务端）。
         /// 拒绝时**不分配 NetId**，避免白白消耗编号空间（编号永不复用，浪费即不可回收）。
+        ///
+        /// 容量判据是 **存活 + 预留**（R5-B2a）：预留已经占住一个名额，因此普通 Spawn 也不能
+        /// 越过它；无预留时与改造前完全同值（`存活 >= 上限`）。
         /// </summary>
         public bool Spawn(PMNetObject obj, uint classId, uint archetypeId = 0u, bool isStatic = false)
         {
@@ -418,14 +449,28 @@ namespace PMNet
                 return false;
             }
 
-            if (_byId.Count >= _maxObjects)
+            if (_byId.Count + _reservations.Count >= _maxObjects)
             {
                 _stats.RejectedOverCapacity++;
-                WarnInternal("对象数已达上限 " + _maxObjects + "，拒绝创建 " + obj.GetType().Name);
+                WarnInternal("对象数（存活 + 预留）已达上限 " + _maxObjects + "，拒绝创建 " + obj.GetType().Name);
                 return false;
             }
 
-            PMNetId id = _allocator.Allocate(isStatic);
+            RegisterAndEnqueue(obj, _allocator.Allocate(isStatic), classId, archetypeId);
+            return true;
+        }
+
+        /// <summary>
+        /// 登记一个已确定身份的**新**对象，并为每条连接排入创建事件。
+        ///
+        /// 这是 `Spawn` 与 `SpawnReserved` 共用的**唯一一份**登记/入队语义（R5-B2a）：
+        /// 预留只是把"取号"提前了，上线之后的登记、状态字段、创建入队必须逐字段同源，
+        /// 否则会出现"预留创建的对象"与"普通创建的对象"在接收侧表现不同的分叉。
+        ///
+        /// 调用前置条件（由调用方检查）：本端为服务端、对象处于 Unregistered、容量足够。
+        /// </summary>
+        private void RegisterAndEnqueue(PMNetObject obj, PMNetId id, uint classId, uint archetypeId)
+        {
             obj.NetId = id;
             obj.ClassId = classId;
             obj.ArchetypeId = archetypeId;
@@ -447,8 +492,6 @@ namespace PMNet
                 evt.Object = obj;
                 kv.Value.Pending.Add(evt);
             }
-
-            return true;
         }
 
         /// <summary>
@@ -519,6 +562,201 @@ namespace PMNet
             obj.State = PMNetObjectState.Destroyed;
             _stats.ObjectsDestroyed++;
             return true;
+        }
+
+        // ---------------------------------------------------------------- NetId 预留（R5-B2a）
+
+        /// <summary>
+        /// 预留一个真实 NetId（服务端权威侧）。
+        ///
+        /// 用途：投射物这类"先上报待确认、确认后才真正存在"的对象，必须在待确认阶段就
+        /// 拿到**将来会真正上线的那一个 NetId**（否则确认后要么重号、要么用伪常量冒充，
+        /// 两者都会在客户端凭快照引用对象时出错）。
+        ///
+        /// 语义边界（逐条对应 net-r5-network-contract.md）：
+        ///   - 编号取自**同一个** <see cref="Allocator"/>，因此与普通对象共用单调空间、**永不复用**；
+        ///   - **不登记网络对象、不发 Create、不占存活对象表**，但**占对象数上限**
+        ///     （存活 + 预留共享 `_maxObjects`）；
+        ///   - 只删预留不返还编号（见 <see cref="CancelReservedNetId"/>）；
+        ///   - 返回的令牌是**唯一凭据**，不能用 rawId 代替（见 <see cref="PMNetSpawnReservation"/>）。
+        /// 拒绝（非服务端 / 已 Dispose / 超出上限）时 `reservation` 为 null 且**不分配编号**。
+        /// </summary>
+        public bool TryReserveNetId(out PMNetSpawnReservation reservation, bool isStatic = false)
+        {
+            reservation = null;
+
+            if (_disposed)
+            {
+                WarnInternal("世界已 Dispose，拒绝签发新的 NetId 预留");
+                return false;
+            }
+
+            if (!IsServer)
+            {
+                WarnInternal("客户端侧不得预留 NetId（身份只能由服务端分配）");
+                return false;
+            }
+
+            if (_byId.Count + _reservations.Count >= _maxObjects)
+            {
+                _stats.RejectedOverCapacity++;
+                WarnInternal("对象数（存活 + 预留）已达上限 " + _maxObjects + "，拒绝预留 NetId");
+                return false;
+            }
+
+            PMNetId id = _allocator.Allocate(isStatic);
+            PMNetSpawnReservation token = new PMNetSpawnReservation(this, id, CurrentEpoch);
+            _reservations.Add(id.Value, token);
+            reservation = token;
+            return true;
+        }
+
+        /// <summary>
+        /// 取消一个未消费的预留（拒绝 / TTL / 断开时调用）。
+        ///
+        /// **不返还编号**：D-R0-02 决定编号永不复用，返还后同一个号会同时存在于
+        /// "已取消的预留"与"后来的分配"两处，接收侧无法判定谁对。代价是每取消一次消耗
+        /// 一个号（uint32 空间），这是有意取舍。
+        ///
+        /// 令牌不是本 world 当前有效预留时返回 false，不做任何变更（幂等安全）。
+        /// </summary>
+        public bool CancelReservedNetId(PMNetSpawnReservation reservation)
+        {
+            if (!IsReservationOwned(reservation))
+            {
+                WarnInternal("取消预留被拒：令牌不是本世界未消费的有效预留（跨 world / 伪造 / 重复 / 已清理）");
+                return false;
+            }
+
+            _reservations.Remove(reservation.NetId.Value);
+            reservation.Invalidate();
+            return true;
+        }
+
+        /// <summary>
+        /// 消费预留并生成对象（服务端权威侧）。
+        ///
+        /// 与 <see cref="Spawn"/> 的唯一区别是**编号来自令牌而不是现场分配**，
+        /// 登记/状态字段/逐连接 Create 入队走的是同一份 <see cref="RegisterAndEnqueue"/>，
+        /// 因此生命周期回调与线格式完全一致（不复制第二套语义）。
+        ///
+        /// 上线是**一次性**的：成功后令牌作废（不能重复 / 伪造 / 跨 world / 过期使用）。
+        /// **失败不消费令牌**：所有拒绝（令牌无效 / null 对象 / 状态不是 Unregistered / 容量）
+        /// 都发生在作废之前，调用方可以修正后重试。
+        ///
+        /// 调用方需保证：对象的初始状态（例如投射物快照）在调用前已经写好，
+        /// 因为 Create 记录里的初值是**发那一刻**现取的（D-R0-16 原子性）。
+        /// </summary>
+        public bool SpawnReserved(PMNetObject obj, PMNetSpawnReservation reservation, uint classId, uint archetypeId = 0u)
+        {
+            if (!IsReservationOwned(reservation))
+            {
+                WarnInternal("SpawnReserved 被拒：令牌不是本世界未消费的有效预留（跨 world / 伪造 / 重复 / 已清理）");
+                return false;
+            }
+
+            if (obj == null)
+            {
+                WarnInternal("SpawnReserved 传入 null 对象（预留未被消费）");
+                return false;
+            }
+
+            if (obj.State != PMNetObjectState.Unregistered)
+            {
+                WarnInternal("SpawnReserved 的对象 " + obj.GetType().Name + " 状态为 " + obj.State
+                             + "，必须是 Unregistered（预留未被消费）");
+                return false;
+            }
+
+            // 防御性检查：预留已占住名额，消费不应增加占用（== 上限仍允许）。
+            // 真的越界说明容量记账已被破坏，宁可拒绝也不能让存活对象超限（D-R0-18）。
+            if (_byId.Count + _reservations.Count > _maxObjects)
+            {
+                _stats.RejectedOverCapacity++;
+                WarnInternal("存活 + 预留已超过上限 " + _maxObjects + "，拒绝消费预留（预留未被消费）");
+                return false;
+            }
+
+            PMNetId id = reservation.NetId;
+            _reservations.Remove(id.Value);
+            reservation.Invalidate();
+
+            RegisterAndEnqueue(obj, id, classId, archetypeId);
+            return true;
+        }
+
+        /// <summary>
+        /// 令牌是否是**本世界当前有效**的预留。四道判定缺一不可：
+        ///   1. 令牌绑定的 world 就是本实例（两个 world 可以有相同的 rawId，不能互相消费）；
+        ///   2. 令牌绑定的 epoch 等于当前会话 epoch（epoch 变更后旧预留不复活）；
+        ///   3. 令牌未被消费/作废（上线后一次性）；
+        ///   4. 本世界预留表里该 rawId 对应的**就是这一个实例**，且完整身份（含 `IsStatic`）一致。
+        /// 第 4 条是整个机制的根：凭据是"实例"，不是"号码"。
+        /// </summary>
+        private bool IsReservationOwned(PMNetSpawnReservation reservation)
+        {
+            if (reservation == null || reservation.IsConsumed)
+            {
+                return false;
+            }
+
+            if (!ReferenceEquals(reservation.World, this) || reservation.Epoch != CurrentEpoch)
+            {
+                return false;
+            }
+
+            if (!reservation.NetId.IsValid)
+            {
+                return false;
+            }
+
+            PMNetSpawnReservation mine;
+            if (!_reservations.TryGetValue(reservation.NetId.Value, out mine))
+            {
+                return false;
+            }
+
+            // 完整身份比较（Value + IsStatic）：只比 rawId 会放过"同号不同静态位"的伪造令牌。
+            return ReferenceEquals(mine, reservation) && mine.NetId.Equals(reservation.NetId);
+        }
+
+        /// <summary>`Dispose` / `Reset` 的"会话整体清理"：作废全部预留，令牌永久失效。</summary>
+        private void InvalidateAllReservations()
+        {
+            if (_reservations.Count == 0)
+            {
+                return;
+            }
+
+            foreach (KeyValuePair<uint, PMNetSpawnReservation> kv in _reservations)
+            {
+                kv.Value.Invalidate();
+            }
+
+            _reservations.Clear();
+        }
+
+        /// <summary>当前会话 epoch（无会话时为 0）。令牌用它捆住"哪个世代"的预留。</summary>
+        private uint CurrentEpoch
+        {
+            get { return _session != null ? _session.Epoch : 0u; }
+        }
+
+        /// <summary>
+        /// 清理并作废本世界。等价于 <see cref="Reset"/> 加上"不再签发新预留"（幂等）。
+        ///
+        /// 注意：**既有 Spawn 的契约没有变** —— 这里刻意不给 Spawn 增加"已 Dispose"前置条件，
+        /// 本方法只让预留这条路失效（预留已在 <see cref="Reset"/> 里被作废，之后也无法再签发）。
+        /// </summary>
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            Reset();
+            _disposed = true;
         }
 
         // ---------------------------------------------------------------- 出站排队
@@ -779,6 +1017,8 @@ namespace PMNet
         /// 清空整个世界。用于对局结束与测试复位。
         /// 注意：**不复位 Id 分配器** —— 分配器属于「会话」，跨会话由 SessionEpoch 隔离，
         /// 而同一个世界内复位分配器会让旧包有机会命中新对象（违反 D-R0-02）。
+        ///
+        /// R5-B2a：同时作废全部未消费的预留令牌（"会话整体清理"），已发出的令牌永久失效。
         /// </summary>
         public void Reset()
         {
@@ -788,6 +1028,7 @@ namespace PMNet
             _deadSlots = 0;
             _connections.Clear();
             _scratchRecords.Clear();
+            InvalidateAllReservations();
         }
 
         // ---------------------------------------------------------------- 登记表的登记与摘除（RV3）
@@ -1090,6 +1331,69 @@ namespace PMNet
             {
                 handler(message);
             }
+        }
+    }
+
+    /// <summary>
+    /// 一个 NetId 预留的能力令牌（R5-B2a，`net-r5-network-contract.md`）。
+    ///
+    /// 为什么不是一个 `uint`：身份在**单会话内**唯一，不在**进程内**唯一。
+    /// 不同 world（不同对局、双端、测试并行的两个世界）各自从 1 开始分配，
+    /// 因此"id = 1"这个说法根本不能表达"哪一个世界的哪一个预留"。
+    /// 令牌把**创建它的 world 实例**、**会话 epoch**与**消费状态**捆在一起，
+    /// 于是"拿 A 世界的令牌去 B 世界消费"、"重复消费"、"自己 new 一个假令牌"都当场失败。
+    ///
+    /// 不变量：
+    ///   - 构造非公开（`internal`）：外部不能凭空造一个可用的预留；
+    ///   - <see cref="NetId"/> 只读，且只在"本 world 预留表里注册的就是本实例"时才可消费；
+    ///   - **上线或取消后一次性作废**：同一令牌永远不会被接受第二次；
+    ///   - 不持有对象引用：令牌只是"一个已占位、尚未上线的号"，本身不造成任何复制或回调。
+    ///
+    /// 线程：与 `PMNetWorld` 一致，只在主线程创建/消费，不加锁（唯一性由 world 侧的
+    /// 预留表和 <see cref="PMNetIdAllocator"/> 的线程检查共同保证）。
+    /// </summary>
+    public sealed class PMNetSpawnReservation
+    {
+        /// <summary>签发它的 world。消费时要求引用相等，这是跨 world 保护的根据。</summary>
+        private readonly PMNetWorld _world;
+
+        /// <summary>预留到的真实身份（含 `IsStatic`），上线后就是该对象收到的 NetId。</summary>
+        private readonly PMNetId _netId;
+
+        /// <summary>签发时的会话 epoch；epoch 变了则旧令牌不复活。</summary>
+        private readonly uint _epoch;
+
+        /// <summary>是否已消费/作废（上线成功、被取消、或 world 被 Dispose/Reset）。</summary>
+        private bool _consumed;
+
+        internal PMNetSpawnReservation(PMNetWorld world, PMNetId netId, uint epoch)
+        {
+            _world = world;
+            _netId = netId;
+            _epoch = epoch;
+        }
+
+        /// <summary>预留到的身份（只读）。与快照/创建记录里出现的 NetId 同值。</summary>
+        public PMNetId NetId { get { return _netId; } }
+
+        /// <summary>签发它的 world（内部：消费时必须确认是本实例）。</summary>
+        internal PMNetWorld World { get { return _world; } }
+
+        /// <summary>签发时的 epoch（内部）。</summary>
+        internal uint Epoch { get { return _epoch; } }
+
+        /// <summary>令牌是否已被消费/作废（内部：用于拒绝重复或过期使用）。</summary>
+        internal bool IsConsumed { get { return _consumed; } }
+
+        /// <summary>把令牌标为永久失效。只能由签发它的 world 在自身锁步（主线程）下调用。</summary>
+        internal void Invalidate()
+        {
+            _consumed = true;
+        }
+
+        public override string ToString()
+        {
+            return "Reservation[" + _netId + (_consumed ? ":consumed" : ":live") + "]";
         }
     }
 }

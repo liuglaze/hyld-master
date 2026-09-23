@@ -10,6 +10,9 @@ using Random = UnityEngine.Random;
 
 public class HYLDPlayerController : MonoBehaviour
 {
+	// 旧链退役（契约 §B）：原取 `LocalPositionJumpTraceThreshold`(0.8f)。
+	// 该值只服务本文件的位置跳变日志门限，不能为取常量而保留旧 BattleData，故内联同值常量。
+	private const float LocalPositionJumpTraceThreshold = 0.8f;
 	public int AILazyDegree = 100;
 	public bool isAI = false;
 	public bool isSelf = false;
@@ -54,7 +57,7 @@ public class HYLDPlayerController : MonoBehaviour
 			// ★ 本地玩家：MoveTowards 匀速追赶逻辑位置
 			Vector3 logicPos = player.playerPositon;
 			float renderDeltaBefore = Vector3.Distance(selfTransform.position, logicPos);
-			if (renderDeltaBefore >= Manger.BattleData.LocalPositionJumpTraceThreshold)
+			if (renderDeltaBefore >= LocalPositionJumpTraceThreshold)
 			{
 				if (!_lastSelfRenderDeltaWasLarge)
 				{

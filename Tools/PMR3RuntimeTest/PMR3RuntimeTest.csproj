@@ -44,6 +44,8 @@
          这样既不会把 R3 的注册表混进 E2E 的注册表，也不会把 Unity 适配误编进来）。 -->
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="PMR3" />
+    <!-- R5-B2a：投射物声明对象（PMR3Runtime.Attach 要注册它的工厂/OnRep 分发表，故必须真编）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR5Projectile.cs" LinkBase="PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="PMR3\Generated" />
 
     <!-- 纯 C# 的 DS 侧控制代理（无 UnityEngine 依赖，可被 net8.0 直编）。 -->

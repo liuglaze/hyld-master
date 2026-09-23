@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R4-C / C1 崩溃修复的**源真相门禁**（net8，纯 C#，零外部依赖）。
+
+      为什么需要它：
+        C1（Client/Assets/Editor/PMBattleContentBuild.cs）这次修的是一起真机 SIGSEGV，修复依赖
+        三条**源场景事实**（floors 模板 inactive 且无 Collider / 其余模板 active / 地面 active 且带
+        MeshCollider）。这些事实只要变化，"默认跳过未激活落点"与"地面 inactive 必须显式失败"的前提
+        就变了。本工程把它们钉成可重复执行的断言，并把 C1 源码里 F1–F7 的结构标记也一起守住
+        （文本级，见 Program.cs §E 的口径声明）。
+
+      它证明什么 / 不证明什么：
+        · 证明：HYLDGame.unity 文本 YAML 里的上述源事实（含组件 classID 与层级路径）、
+          ScenseBuildLogic 的 mapx/mapy 与模板数组、以及 C1 源码里 F1–F7 的标记与**顺序**；
+        · **不证明**任何 Unity 编辑期行为（AddComponent 语义、interests 注销、
+          SerializedProperty 的 arraySize 报错、真实烘焙是否成功）——
+          那些只能由用户下一次在 Unity 里点菜单确认，见 Docs/plans/_r4c_crashfix_report.md。
+        它也**不**校验"Unity 能否正确反序列化这张场景"（本工程不加载引擎，只当文本读）。
+
+      运行：dotnet build Tools/PMBattleContentSceneFactsCheck -c Release
+            dotnet Tools/PMBattleContentSceneFactsCheck/bin/Release/net8.0/PMBattleContentSceneFactsCheck.dll
+      可选参数：scene=「绝对路径」覆盖默认的 Client/Assets/Scenes/HYLDGame.unity
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMBattleContentSceneFactsCheck</AssemblyName>
+    <RootNamespace>PMBattleContentSceneFactsCheck</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+
+</Project>

@@ -57,6 +57,8 @@
     -->
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="Client\PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="Client\PMR3" />
+    <!-- R5-B2a：投射物声明对象（PMR3Runtime.Attach 要注册它的工厂/OnRep 分发表，故必须真编）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR5Projectile.cs" LinkBase="Client\PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="Client\PMR3\Generated" />
 
     <!--
@@ -104,4 +106,16 @@
     -->
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMProjectile/**/*.cs" LinkBase="PMProjectile" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMR3/PMR5ProjectileDriver.cs" LinkBase="PMR3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMCombat/**/*.cs" LinkBase="PMCombat" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMR3/PMR6CombatDriver.cs" LinkBase="PMR3" />
+  </ItemGroup>
 </Project>

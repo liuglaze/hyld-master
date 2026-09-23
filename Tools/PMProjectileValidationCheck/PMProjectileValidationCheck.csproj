@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-A2 / T5A6 语言面门禁：目标历史与命中验证纯核心必须在 Unity 2019.4 的能力上限内编译，
+      即 netstandard2.0 + C# 7.3，且**零 UnityEngine 依赖**。
+
+      为什么需要它：
+        Unity 2019.4 的托管编译上限就是 C# 7.3 / .NET Standard 2.0。本组源码里最容易越界的写法是：
+          · Math.Clamp（.NET Standard 2.1 才有）
+          · Span / ??= / switch 表达式 / using var / target-typed new（C# 8+）
+          · 依赖 UnityEngine 的 Vector3 / Physics（本批明确禁止，几何必须自算）
+        这些在本机 IDE 里都不报错，只有在这里编译才会暴露。
+
+      只编本组两文件 + 共享只读契约 + 必要现有基础，**逐文件**给出：
+        · PMProjectile/PMProjectileContracts.cs —— 共享只读契约（主 Agent 落盘，只读）；
+        · PMProjectile/PMProjectileHistory.cs   —— 本组：目标历史；
+        · PMProjectile/PMProjectileValidator.cs —— 本组：命中验证纯核心；
+        · PMNet/PMNetIdentity.cs —— PMFrameId / PMFrameDomain（帧命名空间隔离）；
+        · PMMover/PMMoverState.cs —— PMVector3（Y-up 米，只依赖 System）。
+      刻意不用 `PMProjectile/**/*.cs` 通配：那会把并行 A1 组（生命周期/假弹接管/三等待）
+      正在实现的文件一起编进来，制造跨组编译耦合 —— 正是本批边界要避免的。
+
+      本工程是**库**，没有 Program.cs：它的验收形式就是「编译 exit 0」。
+
+      构建：dotnet build Tools/PMProjectileValidationCheck -c Release
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMProjectileValidationCheck</AssemblyName>
+    <RootNamespace>PMProjectileValidationCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileHistory.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileValidator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+  </ItemGroup>
+
+</Project>

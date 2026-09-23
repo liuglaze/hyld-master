@@ -2,19 +2,39 @@
   "formatVersion": 1,
   "_comment": "本文件是 PMNet 稳定 ID 的权威来源（D-R0-49）。请勿手工编辑；改 ID 等于改线协议。",
   "classes": {
-    "CLASS:PMNet.R3.PMR3Player": 405815557
+    "CLASS:PMNet.R3.PMR3Player": 405815557,
+    "CLASS:PMNet.R3.PMR5Projectile": 227098277
   },
   "members": {
     "CLASS:PMNet.R3.PMR3Player": {
+      "PROP:PMNet.R3.PMR3Player._combatDead": 4259,
+      "PROP:PMNet.R3.PMR3Player._combatHeroId": 36554,
+      "PROP:PMNet.R3.PMR3Player._combatHp": 31999,
+      "PROP:PMNet.R3.PMR3Player._combatMana": 34826,
+      "PROP:PMNet.R3.PMR3Player._combatMatchEnded": 21371,
+      "PROP:PMNet.R3.PMR3Player._combatMaxHp": 64920,
+      "PROP:PMNet.R3.PMR3Player._combatSuperEnergy": 5878,
+      "PROP:PMNet.R3.PMR3Player._combatTeamId": 24395,
+      "PROP:PMNet.R3.PMR3Player._combatWinnerTeamId": 38154,
       "PROP:PMNet.R3.PMR3Player._movementSnapshotV1": 61580,
       "PROP:PMNet.R3.PMR3Player._probeCount": 12656,
       "PROP:PMNet.R3.PMR3Player._uid": 18801,
+      "RPC:PMNet.R3.PMR3Player.ClientCombatAttackResultV1": 44706,
+      "RPC:PMNet.R3.PMR3Player.ClientCombatMatchResultV1": 39181,
       "RPC:PMNet.R3.PMR3Player.ClientEcho": 63853,
       "RPC:PMNet.R3.PMR3Player.ClientMovementEventsV1": 5180,
       "RPC:PMNet.R3.PMR3Player.ClientMovementResyncV1": 28381,
+      "RPC:PMNet.R3.PMR3Player.ClientProjectileDecisionV1": 38620,
+      "RPC:PMNet.R3.PMR3Player.ServerCombatAttackV1": 42343,
+      "RPC:PMNet.R3.PMR3Player.ServerCombatResultAckV1": 50908,
       "RPC:PMNet.R3.PMR3Player.ServerMovementInputV1": 25428,
       "RPC:PMNet.R3.PMR3Player.ServerMovementResyncV1": 15021,
-      "RPC:PMNet.R3.PMR3Player.ServerProbe": 34232
+      "RPC:PMNet.R3.PMR3Player.ServerProbe": 34232,
+      "RPC:PMNet.R3.PMR3Player.ServerProjectileHitV1": 33011,
+      "RPC:PMNet.R3.PMR3Player.ServerProjectileSpawnV1": 21590
+    },
+    "CLASS:PMNet.R3.PMR5Projectile": {
+      "PROP:PMNet.R3.PMR5Projectile._projectileSnapshotV1": 6683
     }
   }
 }

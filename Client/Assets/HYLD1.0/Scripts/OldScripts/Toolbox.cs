@@ -107,8 +107,10 @@ public class Toolbox : MonoBehaviour
                 }
                 */
                 //SceneManager.LoadScene("HuangYeLuanDouStart");
-                    if (Manger.BattleManger.Instance.IsGameOver) yield return null;
-                    Manger.BattleManger.Instance.BeginGameOver();
+                    // 旧链退役（契约 §B）：原 `BattleManger.Instance.IsGameOver` 轮询 +
+                    // `BeginGameOver()` 的联机结算控制已随旧链删除。旧场景只作素材输入，
+                    // 这里保留每帧让出避免协程空转，不再驱动任何旧管理器。
+                    yield return null;
                     
                 }
             else if (BlueGem== RedGem)
@@ -208,7 +210,7 @@ public class Toolbox : MonoBehaviour
     }
     private void Update()
     {
-        if (Manger.BattleManger.Instance.IsGameOver) return;
+        // 旧链退役（契约 §B）：原这里用 `BattleManger.Instance.IsGameOver` 提前 return；旧链删除后该判据不存在。
         if (HYLDStaticValue.ConfirmWinOrNot)
         {
 
@@ -260,7 +262,7 @@ public class Toolbox : MonoBehaviour
                     if (HYLDStaticValue.RedBP <= 0) HYLDStaticValue.玩家输了吗 = false;
                     else HYLDStaticValue.玩家输了吗 = true;
 
-                    Manger.BattleManger.Instance.BeginGameOver();
+                    // 旧链退役（契约 §B）：不再调 BattleManger.BeginGameOver() 驱动旧联机结算（本地胜负标记保留）。
                 }
             }
         }

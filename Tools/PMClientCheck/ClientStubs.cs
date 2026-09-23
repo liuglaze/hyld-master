@@ -503,10 +503,13 @@ namespace UnityEngine
     /// <summary>
     /// R4-B（B3）运动碰撞适配器的最小 PhysicsScene 替身。
     ///
-    /// 签名与 Unity 2019.4 一致（已在 Tools/PMR4UnityCheck 里用**真实 DLL** 校验过）：
+    /// 签名与 Unity 2019.4 一致（已在 Tools/PMR4UnityCheck / Tools/PMR5UnityCheck 里用**真实 DLL** 校验过）：
     ///   · <c>IsValid()</c> 是**方法**（不是属性）；
     ///   · <c>CapsuleCast</c> 的批量重载返回命中个数（结果写进数组）；
-    ///   · <c>OverlapCapsule</c> 返回重叠个数。
+    ///   · <c>OverlapCapsule</c> 返回重叠个数；
+    ///   · R5-C1（投射物）新增用到的 <c>SphereCast</c> / <c>OverlapSphere</c> 批量重载 ——
+    ///     它们与 CapsuleCast/OverlapCapsule **同为批量重载**（返回个数、结果写进数组），
+    ///     签名逐字对应 Unity 2019.4 的 <c>PhysicsScene</c>（由 PMR5UnityCheck 引真实 DLL 校验）。
     /// 替身不实现任何几何（无 PhysX），只保证“新适配器+宿主”能在本语言面上编译。
     /// </summary>
     public struct PhysicsScene
@@ -548,6 +551,30 @@ namespace UnityEngine
 
         public int OverlapCapsule(Vector3 point0, Vector3 point1, float radius, Collider[] results,
                                   int layerMask, QueryTriggerInteraction queryTriggerInteraction)
+        {
+            return 0;
+        }
+
+        /// <summary>
+        /// R5-C1（投射物 C1）：批量球体扫掠。签名逐字对应 Unity 2019.4
+        /// <c>PhysicsScene.SphereCast(Vector3, float, Vector3, RaycastHit[], float, int, QueryTriggerInteraction)</c>
+        /// （返回命中个数；真实 DLL 已由 Tools/PMR5UnityCheck 校验）。
+        /// 替身不实现几何，恒返回 0（= 未命中）；本门禁只验证**调用面**能否编译。
+        /// </summary>
+        public int SphereCast(Vector3 origin, float radius, Vector3 direction, RaycastHit[] results,
+                              float maxDistance, int layerMask,
+                              QueryTriggerInteraction queryTriggerInteraction)
+        {
+            return 0;
+        }
+
+        /// <summary>
+        /// R5-C1（投射物 C1）：批量球体重叠。签名逐字对应 Unity 2019.4
+        /// <c>PhysicsScene.OverlapSphere(Vector3, float, Collider[], int, QueryTriggerInteraction)</c>
+        /// （返回重叠个数：语义是 "touching or inside"）。替身不实现几何，恒返回 0。
+        /// </summary>
+        public int OverlapSphere(Vector3 position, float radius, Collider[] results,
+                                int layerMask, QueryTriggerInteraction queryTriggerInteraction)
         {
             return 0;
         }
@@ -611,7 +638,25 @@ namespace UnityEngine
 
     public class Sprite : Object { public Rect rect { get { return new Rect(); } } public Texture2D texture { get { return null; } } }
     public class Font : Object { public static Font CreateDynamicFontFromOSFont(string name, int size) { return null; } }
-    public class Material : Object { public Color color { get; set; } public void SetFloat(string n, float v) { } public void SetColor(string n, Color c) { } }
+    /// <summary>
+    /// 材质替身。
+    ///
+    /// R5-C2（表现层 C2）：适配器用 <c>new Material(内建共享材质)</c> **克隆一次**占位材质
+    /// （然后只改克隆体的 color，从不写源材质），因此必须提供 <c>Material(Material)</c> 重载
+    /// —— 该重载在 Unity 2019.4 真实程序集里存在（由 Tools/PMR5UnityCheck 引真实 DLL 校验）。
+    /// 注意：一旦显式声明任何构造函数，隐式无参构造就**不再生成**，因此这里两者都给。
+    /// </summary>
+    public class Material : Object
+    {
+        public Color color { get; set; }
+
+        public Material() { }
+
+        public Material(Material source) { }
+
+        public void SetFloat(string n, float v) { }
+        public void SetColor(string n, Color c) { }
+    }
     public class Texture : Object { }
     public class Texture2D : Texture { public Texture2D(int w, int h) { } public void Apply() { } }
     public class RenderTexture : Texture { }
@@ -980,6 +1025,19 @@ namespace UnityEngine
         public static int touchCount { get { return 0; } }
         public static Touch GetTouch(int i) { return new Touch(); }
         public static Touch[] touches { get { return new Touch[0]; } }
+    }
+
+    /// <summary>
+    /// R6-C：IMGUI 的最小替身（只含 PMUnityCombatHud 真正用到的两个真实重载）。
+    ///
+    /// 真实签名（Unity 2019.4）：<c>public static void Box(Rect position, string text)</c> /
+    /// <c>public static void Label(Rect position, string text)</c>。
+    /// 本门禁只能保证调用形状正确，**不**验证绘制语义（那必须回到 Unity）。
+    /// </summary>
+    public static class GUI
+    {
+        public static void Box(Rect position, string text) { }
+        public static void Label(Rect position, string text) { }
     }
 
     public struct Touch

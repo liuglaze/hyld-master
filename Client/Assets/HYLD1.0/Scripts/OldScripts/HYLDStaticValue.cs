@@ -210,31 +210,11 @@ public class HYLDStaticValue :MonoBehaviour
         {
             ModenName = testMOdel.ToString();
         }
-        //Debug.LogError($"START {ModenName}");
-        if (ModenName == ModelName.HYLDBaoShiZhengBa.ToString())
-        {
-            BattleManger battleManger = gameObject.AddComponent<HYLDBaoShiZhengBaManger>();
-            battleManger.ISNet = ISNet;
-            battleManger._StartGameAni = _StartGameAni;
-            battleManger.BG = BG;
-            battleManger.ScenseBuildLogic = ScenseBuildLogic;
-            battleManger.toolbox = ToolBox.GetComponent<Toolbox>();
-            battleManger.Init();
-        }
-        else if (ModenName == ModelName.HYLDJinKuGongFang.ToString())
-        {
-            BattleManger battleManger = gameObject.AddComponent<BattleManger>();
-            battleManger.ISNet = ISNet;
-            battleManger._StartGameAni = _StartGameAni;
-            battleManger.BG = BG;
-            battleManger.ScenseBuildLogic = ScenseBuildLogic;
-            battleManger.toolbox = ToolBox.GetComponent<Toolbox>();
-            battleManger.Init();
-        }
-        else
-        {
-            Debug.LogError($"cant find {ModenName}");
-        }
+        // 旧链退役（契约 §B）：原在这里按模式 AddComponent<HYLDBaoShiZhengBaManger>() /
+        // AddComponent<BattleManger>() 自动拉起旧战斗宿主。旧战斗链（含单机试玩自动启动）已整体退役，
+        // 这两条启动分支删除：旧场景/预制体上的本类只作**素材与静态数据**输入，
+        // 不再运行第二套战斗权威，也不为旧入口留替身。
+        Logging.HYLDDebug.Log("[HYLDStaticValue] 旧战斗宿主自动启动已退役（mode=" + ModenName + "），不再拉起 BattleManger/HYLDBaoShiZhengBaManger");
         
     }
     //对于爆破手而言、宽度为爆炸半径、速度与抛物高度成反比、距离为爆炸点离玩家距离

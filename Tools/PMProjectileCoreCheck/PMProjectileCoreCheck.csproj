@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-A1 门禁（T5A6 的编译面）：PMProjectile 生命周期/三类 Pending 必须能在
+      Unity 2019.4 的能力上限内编译，即 netstandard2.0 API + C# 7.3。
+
+      为什么需要它：
+        Unity 2019.4 的托管编译上限就是 C# 7.3 / .NET Standard 2.0。
+        纯核心代码里最容易悄悄越界的写法是：
+          · Math.Clamp / HashCode.Combine（.NET Standard 2.1 才有）
+          · ??=、switch 表达式、using var、target-typed new（C# 8+）
+          · 元组（需要 System.ValueTuple 包）
+        这些在别处都不报错，只有在这里编译才会暴露。
+
+      依赖面**逐文件**给定，不用通配符：
+        · PMProjectile/PMProjectileContracts.cs —— 主 Agent 冻结的共享契约（只读）；
+        · PMProjectile/PMProjectileLifecycle.cs / PMProjectilePending.cs —— 本组实现；
+        · PMMover/PMMoverState.cs —— 只取 PMVector3 / PMMoverDefaults（该文件自包含）；
+        · PMNet/PMNetIdentity.cs + PMNetRole.cs —— 契约里 PMFrameId 所在的身份面。
+      刻意**不**用 PMProjectile/** 或 PMPrediction/** 通配：那会把 A2 组（目标历史/几何/
+      L0–L4 验证）正在实现的文件与其它组的中间产物一起编进来，制造跨组编译耦合。
+
+      不引 UnityEngine / 不引 Google.Protobuf：这是本工程能成立的前提（M09 零 Unity 依赖）。
+      本工程是**库**，没有 Program.cs：它的验收形式就是「编译 exit 0」。
+
+      构建：dotnet build Tools/PMProjectileCoreCheck/PMProjectileCoreCheck.csproj
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMProjectileCoreCheck</AssemblyName>
+    <RootNamespace>PMProjectileCoreCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 冻结共享契约（主 Agent 落盘，只读依赖） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <!-- 本组两份实现（R5-A1） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <!-- PMVector3（契约与实现都只用到这一份 Mover 文件，且该文件自包含） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+    <!-- 身份/帧号原语（PMFrameId 出现在冻结契约里） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

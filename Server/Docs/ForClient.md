@@ -1,3 +1,5 @@
+﻿> **历史文档：旧战斗网络已退役。** 本文旧 BattleInfo/SavedMove/UDP7777/回放链路已从运行源码删除，不得作为当前接口。当前说明见 `Client/Assets/AGENTS.md`、`Client/Assets/Docs/ForServer.md`、`Server/AGENTS.md` 与 `Docs/plans/net-architecture-migration.md`。
+
 # forclient：客户端协作文档（Server）
 
 > 目标：让客户端同学 **先快速定位代码，再深入联调细节**。

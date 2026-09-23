@@ -1024,7 +1024,7 @@ namespace PMNetE2E
                 "O1 客户端侧对象调 Server RPC 的 callspace 判定为 Remote（" + cs + "）");
 
             PMNet.Generated.PMNetGeneratedRegistry.ClearPendingRpcs();
-            obj.PMNet_Fire(3, 1.25f);
+            obj.Fire(3, 1.25f);
             Check(PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount == 1,
                 "O2 调用桩把该次调用放进了待发队列（PendingRpcCount="
                 + PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount + "）");
@@ -1042,7 +1042,7 @@ namespace PMNetE2E
 
                 for (int t = 0; t < max; t++)
                 {
-                    obj.PMNet_Fire(t, 0.5f);
+                    obj.Fire(t, 0.5f);
                 }
 
                 Check(PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount == max,
@@ -1052,7 +1052,7 @@ namespace PMNetE2E
                 bool overflowThrew = false;
                 try
                 {
-                    obj.PMNet_Fire(999999, 0.5f);
+                    obj.Fire(999999, 0.5f);
                 }
                 catch (InvalidOperationException)
                 {
@@ -1097,7 +1097,7 @@ namespace PMNetE2E
             E2eReplicated serverSide = new E2eReplicated();
             serverSide.NetMode = PMNetMode.DedicatedServer;
             serverSide.Role = PMNetRole.Authority;
-            serverSide.PMNet_Fire(4, 2.5f);
+            serverSide.Fire(4, 2.5f);
             Check(PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount == 0,
                 "O3 服务端侧调 Server RPC 不入队（本地执行），实际 "
                 + PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount);
@@ -1108,7 +1108,7 @@ namespace PMNetE2E
             // 方向契约 ①：服务端侧**无主**对象（无连接、无 owning player）调 Client RPC
             // ⇒ 本地执行、不外发。这是 UE 分支 #14-① 的合法路径（AI 拥有的对象调 Client RPC），不是缺陷。
             PMNet.Generated.PMNetGeneratedRegistry.ClearPendingRpcs();
-            serverSide.PMNet_Notify(9);
+            serverSide.Notify(9);
             Check(PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount == 0,
                 "O5 服务端侧无主对象调 Client RPC 本地执行、不外发（无收件人），实际入队 "
                 + PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount);
@@ -1122,7 +1122,7 @@ namespace PMNetE2E
             carrier.Conn = carrierConn;
             serverSide.Owner = carrier;
             PMNet.Generated.PMNetGeneratedRegistry.ClearPendingRpcs();
-            serverSide.PMNet_Notify(10);
+            serverSide.Notify(10);
             Check(PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount == 1,
                 "O7 服务端侧有连接的对象调 Client RPC 进待发队列（方向位生效），实际 "
                 + PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount);
@@ -1144,14 +1144,14 @@ namespace PMNetE2E
             E2eReplicated sender = MakeRemoteSideObject(out conn);
 
             // 第一次调用（实参 11 / 1.5），随后把它从队列里取出来"挂住"。
-            sender.PMNet_Fire(11, 1.5f);
+            sender.Fire(11, 1.5f);
             PMNet.Generated.PMNetPendingRpc pending1;
             bool taken = PMNet.Generated.PMNetGeneratedRegistry.TryDequeueRpc(out pending1);
             Check(taken, "P1 第一次调用可从待发队列取出");
             _nRpcQueued += 1;
 
             // 第二次调用（实参 99 / 9.5）—— 在第一次的编码**之前**发生。
-            sender.PMNet_Fire(99, 9.5f);
+            sender.Fire(99, 9.5f);
             _nRpcQueued += 1;
 
             // 现在才执行第一次的编码。
@@ -1326,7 +1326,7 @@ namespace PMNetE2E
 
             PMNet.Generated.PMNetGeneratedRegistry.ClearPendingRpcs();
             float[] buffer = new float[] { 1.5f, 2.5f };
-            sender.PMNet_Push(buffer);
+            sender.Push(buffer);
 
             Check(sender.PushCount == 1 && Math.Abs(sender.LastPushFirst - 1.5f) < 1e-6f,
                 "M2 本地执行先发生、看到调用时的值（" + sender.LastPushFirst + "）");
@@ -1373,7 +1373,7 @@ namespace PMNetE2E
             bool arrayThrew = false;
             try
             {
-                server.PMNet_Push(new float[8192]);
+                server.Push(new float[8192]);
             }
             catch (FormatException)
             {
@@ -1387,7 +1387,7 @@ namespace PMNetE2E
             bool stringThrew = false;
             try
             {
-                server.PMNet_Say(new string('x', PMNetString.MaxBytes + 1));
+                server.Say(new string('x', PMNetString.MaxBytes + 1));
             }
             catch (FormatException)
             {
@@ -1400,7 +1400,7 @@ namespace PMNetE2E
 
             // 对照：恰好等于上限的字符串必须能正常入队，
             // 否则上面两条可能只是"这条路什么都发不出去"。
-            server.PMNet_Say(new string('x', PMNetString.MaxBytes));
+            server.Say(new string('x', PMNetString.MaxBytes));
             Check(PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount == 1,
                 "M13 恰好等于上限的字符串正常入队（实际 "
                 + PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount + "）");
@@ -2301,11 +2301,14 @@ namespace PMNetE2E
                 return;
             }
 
-            // 缺陷形态：读参数后**直接**调实现，档位只体现在描述符里。
+            // 仅故障注入：普通名现在是网络入口，必须真正绕过验证调用私有业务体才构成反例。
             PMNetReader r = new PMNetReader(payload);
             int p0 = r.ReadInt32();
             float p1 = r.ReadFloat();
-            target.Fire(p0, p1);
+            System.Reflection.MethodInfo body = typeof(E2eReplicated).GetMethod("PMNet_RpcBody_Fire",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (body == null) throw new InvalidOperationException("缺陷注入缺少编织业务体，不能空跑");
+            body.Invoke(target, new object[] { p0, p1 });
         }
 
         /// <summary>可注入的复制层：`comparing=false` 时复刻「标脏即发、不做值比较」。</summary>
@@ -2345,7 +2348,7 @@ namespace PMNetE2E
             Probe prodArg = new Probe("F1", "实参闭包（生成物实际形态）",
                 delegate () { return ProbeArgClosure(
                     delegate () { PMNet.Generated.PMNetGeneratedRegistry.ClearPendingRpcs(); },
-                    delegate (int t, float a) { genSender.PMNet_Fire(t, a); },
+                    delegate (int t, float a) { genSender.Fire(t, a); },
                     delegate () {
                         PMNet.Generated.PMNetPendingRpc p;
                         if (!PMNet.Generated.PMNetGeneratedRegistry.TryDequeueRpc(out p)) { return null; }

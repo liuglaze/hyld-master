@@ -1,0 +1,10 @@
+assembly=D:\UGit\hyld-master\HyldDS\HyldDS_Data\Managed\Assembly-CSharp.dll
+mtime=2026-09-21 14:35:18
+size=1206272
+sha256=c4d6696dcadf34aaaa12fece2585d6c34a1f7a67080cb692c17a594c30a35689
+exe=D:\UGit\hyld-master\HyldDS\HyldDS.exe
+exeMtime=2020-08-05 23:03:48
+protocolHash=0xE6130FAA
+collisionDigest=0x52334201
+movementSymbols=PMR4MovementDriver=1 PMR4MovementCodec=1 PMUnityMoverCollisionQuery=1 MovementWorldVersion=1 BuildIsolated=1 PendingServerFrame=1 ZeroDistanceContactsIgnored=1 ServerMovementInputV1=1 ClientMovementEventsV1=1
+movementMode=False

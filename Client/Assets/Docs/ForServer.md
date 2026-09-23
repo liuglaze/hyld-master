@@ -1,237 +1,35 @@
-﻿- ForServer.md
+﻿# 客户端／DS协作说明（仅新PMNet链）
 
-  > 面向服务端/联调同学的客户端协作文档（以当前联机主链路为准）。
+旧 BattleInfo / SavedMove / MoveAck / BattleReview 网络链已删除。以前的旧摇杆换轴、队伍镜像、同帧重复发包与客户端本地扣蓝约定不再适用；历史依据在迁移计划和历史报告中，不是当前接口。
 
-  ## 1. 文档目标
+## 唯一入口与部署
 
-  - 快速回答三件事：
-    1. 客户端现在怎么采集并上报输入（发包频率、输入格式）；
-    2. 客户端如何消费权威帧、做和解、以及判定伤害；
-    3. 空间坐标系与战斗参数的基准是什么。
+- 大厅TCP长连接保留。匹配只下发 `StartEnterBattle(30)` 中的 `PMDS1:` 入局offer。
+- `UIMatchingPanel` 拒绝非PMDS1成功通知；`PMClientSessionHost` 建独立物理场景，不通过旧加载场景握手开战。
+- Lobby默认只新DS，`HYLD_PMNET_DS=0` 也不能回旧链。部署需要显式DS exe/workdir/bootstrap目录和正式manifest；本地开发可用 `Server/run_lobby.bat` 的仓库相对默认值，`--check-only`不启动进程。
+- UnityDS必须带合法 `-bootstrap`；无bootstrap以非0退出。正式/诊断内容按碰撞digest明确区分，不根据文件存在猜模式。
+- Lobby/Client/DS必须同版本。现成HyldDS二进制可能早于源码删除，不可拿旧包验证新链。
 
-  ## 2. 坐标系与空间基准（重要）
+## 坐标、身份与时间
 
-  服务端在做反外挂、范围校验或状态同步时，请参考以下客户端基准：
+- Unity世界坐标：Y-up、米；不再做旧“本地玩家固定+X”的队伍镜像。
+- 正式出生x=±15、z=-5/0/5，地面高度由实际碰撞查询；诊断地图另有独立布局。
+- 对象身份由SessionEpoch/NetId及流代次约束，Owner来自认证会话。输入帧与AuthorityServer帧分域，不用帧差乘16冒充时间转换。
+- Mover Input/Sync/Aux历史负责恢复重模拟；属性复制负责状态收敛，两者不互相替代。SP插值不承担第二套权威。
 
-  - **平面与高度**：使用 X-Z 平面。X 为水平，Z 为屏幕纵向（上下）。Y 轴固定高度层为 Y=1。
-  - **摄像机视角**：摄像机沿 Z 轴俯视，且 Z 轴锁死（跟随玩家的 X/Y 移动，但不跟随 Z）。
-  - **出生点（镜像对称）**：
-    - 我方（左侧）：主城/出生点基准 (15, 1, -5) 或 (15, 1, 5) 等。
-    - 敌方（右侧）：主城/出生点基准 (-15, 1, 5) 或 (-15, 1, -5) 等。
-  - **碰撞判定**：子弹命中判定基于纯距离计算（默认 Distance <= 0.8f 即视为命中）。
+## 攻击、命中、资源
 
-  ## 3. 当前客户端战斗架构（2026-03）
+- F普攻/G已支持直线大招；两端用同一 `PMCombatWeaponPlanner` / `BattleNumericConfig`。Unsupported拒绝且不扣资源，不回退旧子弹逻辑。
+- 可靠 `ServerCombatAttackV1` 先授权activation，再按计划发R5 Spawn；单次扣费、重复幂等，不能客户端指定damage/spec。
+- AP先假弹，权威镜像真实到达才接管；Rejected实际撤销，假弹已结束后迟到镜像不得复活。
+- 客户端报候选；DS按历史帧/回溯、轨迹预算、目标形状/队伍/存活与去重校验后唯一结算。
+- HP/死亡/hero/team公共复制；Mana/SuperEnergy OwnerOnly，客户端只读。Mana90、Energy200，不采用陈旧文档里的500。
+- 首杀终局沿旧服规则；DS先可靠结果通知与客户端ACK（或5s宽限），再向Lobby提交冻结结果。客户端只把验证保存的结果当可信退场依据。
 
-  ### 3.1 输入与上报
+## 协议与验证
 
-  - 输入源：Assets/HYLD1.0/Scripts/OldScripts/TouchLogic.cs
-    - 移动：连续输入 + 滞回阈值（抑制摇杆边缘抖动），归一化为方向向量。
-    - 攻击：松手触发离散输入；攻击摇杆会同时采集 `joystickAxis.x` / `joystickAxis.y` 作为朝向。
-  - 命令聚合：Assets/Scripts/Manger/CommandManger.cs
-    - AddCommad_Move 缓存最新移动值（不再按事件频率堆命令）。
-    - AddCommad_Attack 以离散命令形式缓存（分配唯一 AttackID）。
-  - **动态 Tick 驱动（已变更为累加器 + 动态追帧）**：Assets/Scripts/Server/Manger/Battle/BattleManger.cs
-    - 节拍：已从 InvokeRepeating 改为 Update 累加器驱动。BattleStart 后客户端只打开战斗网络泵；首个有效权威帧消费成功后才开启 `_battleTickActive`，随后 `currentTickInterval = 0.016f / actualSpeedFactor`（动态调节），常规每帧最多 3 次 BattleTick()，明显落后目标帧时最多 8 次
-    - 顺序：DrainAndDispatch → Ping 调度 → 首权威帧门控 → CalcTargetFrame + AdjustTickInterval → 累加器循环（BattleTick: ResetOperation → CommandManger.Execute → SendOperation）
-    - 上行 `uploadOperationId = nextFrame`，严格表示“客户端当前真实推进并上报的本地逻辑帧”。`targetFrame` 仅用于调节 Tick 频率；当客户端落后目标帧时，依靠加快 BattleTick 真实地产出更多连续帧来追赶，而不是篡改上行帧号
-    - 动态目标就绪后，客户端最多预测到 `targetFrame + 1`；当 `predicted_frameID >= targetFrame + 1` 时，本帧不再生成新的 BattleTick。
-    - 每个 BattleTick 生成项目内 `SavedMove`，记录移动输入、本地预测帧号、预测起点、预测终点、预测速度和 `CoveredFrames`；当前 `CoveredFrames=1`。
-    - 客户端维护 `pendingMove`：普通帧先挂起当前 SavedMove，下一帧若存在 pending 且 current 是新帧，则同包按顺序发送 pending + current 两个 `NewMove`，等价于 DualMove，不新增 proto 字段；当前暂不做真正 SavedMove 合并。
-    - 每个上行包最多附带 4 个未确认 important `OldMove`，按 `moveFrame` 升序发送；OldMove 不重复选择当前帧或 pendingMove。
-    - 停步边沿或新增攻击属于关键输入，会立即 flush pending，并沿用同帧 burst-send。
-    - **开局握手语义**：客户端初始化后每 200ms 重发一次 `BattleReady`；收到 `BattleStart` 后停止重发并进入“等待首权威帧”状态。首个有效权威帧到达前客户端不发送 `ClientMove`。若首次 `BattleStart` 丢失，服务端会在后续 `BattleReady` 到达时对该客户端单播补发 `BattleStart`，且不会重复执行 `BeginBattle`
-    - **预测暂停/爆仓语义**：若权威帧超过 1800ms 未刷新，客户端暂停生成新的预测 tick；若客户端 SavedMove 历史达到 `PredictionHistoryWindowSize`，客户端清空旧未确认 SavedMove 并继续从当前位置预测，后续旧 MoveAck/correction 找不到对应 SavedMove 时直接忽略。
-  - **攻击重发与超时**：
-    - 客户端 `EnqueueAttack` 会先按本地英雄普通攻击蓝耗预测扣 `playerManaValue`；蓝量不足则不入队、不发 `ClientAttack`。
-    - 客户端每帧重发所有未确认攻击（pendingAttacks），`ClientFrameId` 在本次 BattleTick 的 `nextFrame` 入队时锁定不变。
-    - 客户端超时清理：帧龄 `(predicted_frameID - ClientFrameId) > 8` 的攻击自动移除。
-    - 服务端通过 `dic_lastProcessedAttackId` 去重 + `MaxAcceptableAttackDelay=8` 拒绝过期攻击，并通过 `BattleServerUpdate.attack_acks` 回传 accepted/rejected、`mana_after` 与 `super_energy_after`。
-    - 服务端普通蓝量权威：开局 90，默认攻击消耗 30，贝亚消耗 90；按英雄装弹速度每格恢复 30。服务端拒绝不会回收客户端已预测的纯视觉子弹。
-  - **关键输入同帧 burst-send**：
-    - 若本地 BattleTick 发生“停步边沿”（non-zero -> zero）或本帧新增攻击，则客户端会在同一逻辑帧内把同一份 `BattleInfo` 连发 3 次。
-    - 3 次发送复用相同 `OperationID`、`ClientAckedFrame`、`ClientMoveFrame`、移动值、OldMove 列表与 `AttackId` 集合，不引入新协议字段。
-    - 服务端保持现有幂等语义：重复 `ClientMoveFrame` 会被 `[ClientMove][STALE_RECEIVED]` 丢弃，重复攻击仍由 `AttackId` 去重。
-
-  ### 3.2 权威帧消费与伤害判定
-
-  - 收包入口：Assets/Scripts/Server/Manger/Battle/BattleManger.cs 的 HandleMessage（主线程，由 DrainAndDispatch 调用）。
-  - 主处理：BattleData.OnLogicUpdate_sync_FrameIdCheck(...)
-    - 先做帧序合法性检查（过旧帧丢弃、空批次推进 sync_frameID）。
-    - 预测模式：远端玩家直接应用权威位置；本地玩家只消费服务端 `BattleInfo.move_ack`。MoveAck 必须命中本地 SavedMove；找不到则忽略。`ack_good_move=true` 只解链，`ack_good_move=false` 使用 `correct_pos_x/y/z` 校正并重放未确认 SavedMove。
-    - 权威帧处理后生成**视觉子弹**（SpawnVisualBullet，仅表现，不判伤害）。
-  - **伤害判定（服务端权威）**：
-    - 服务端 BattleController 每帧做服务端子弹模拟（ServerBullet）。
-    - **V2 延迟补偿**：收到延迟攻击时，从 `positionHistory[clientFrameId]` 取历史位置生成子弹，`SimulateBulletCatchUp`（BattleController.Bullets.cs:233）逐帧追帧模拟（每帧用该帧的历史玩家位置做碰撞检测）。追帧期间命中直接生成 HitEvent；未命中的子弹加入 activeBullets 正常模拟。
-    - `CheckBulletCollision`（BattleController.Bullets.cs:163）为碰撞检测共享方法，`TickServerBullets` 和 `SimulateBulletCatchUp` 复用。
-    - `SpawnServerBullets`（BattleController.Bullets.cs:70）将攻击者历史位置写入 `atk.SpawnPosX/Y/Z`，随帧下行广播。
-    - 命中后生成 HitEvent，随 BattleInfo.hit_events 下行广播给所有客户端。
-    - 客户端 HandleMessage 解析 hit_events，调用 BattleData.ApplyHitEvents(...)，仅触发受击动画（不扣血）。
-    - ApplyHitEvents 在主线程执行：查找 victim → 受击动画（不修改 HP）→ 记录 hitAnimatedPlayers。
-    - 去重机制：_appliedHitEventKeys（HashSet<long>，key=attackId*100000+victimBattleId），防止帧重传重复播放动画。
-  - **权威 HP/IsDead/Mana/大招能量消费**：ApplyHitEvents 之后调用 `ApplyAuthoritativeHpAndDeath`，从 `PlayerStates.Hp` 覆写客户端 `playerBloodValue`，从 `PlayerStates.IsDead` 驱动死亡判定，并从 `PlayerStates.Mana` / `PlayerStates.SuperEnergy` 覆写普通攻击蓝量和大招能量 UI。首帧初始化 `maxHp` 和 `hero.BloodValue`（血条比例）。HP 下降但无 HitEvent 时补播兜底受击动画。
-  - **AttackAck 消费**：客户端收到本玩家 `BattleServerUpdate.attack_acks` 后，用 `mana_after` 覆写 `playerManaValue`，用 `super_energy_after` 覆写 `当前能量`，并从 `pendingAttacks` 移除对应 `AttackId`。accepted 与 rejected 都会清 pending；rejected 不销毁已预测视觉子弹。
-  - **PlayerStates 增量下行**：服务端仍每个 ServerFrame 下发权威帧时钟包，但 `BattleFrame.player_states` 可只携带变化字段。客户端先按 `AuthoritativePlayerState.state_mask` 合并到本地权威状态缓存，再把完整状态视图交给位置、HP、死亡、Mana、大招能量和视觉子弹逻辑。`state_mask` bit0=position，bit1=hp，bit2=is_dead，bit3=mana，bit4=super_energy；客户端不通过 protobuf 默认值判断字段是否存在。
-  - **死亡判定**：以 `PlayerStates.IsDead` 为权威。`ApplyHitEvents` 中 `IsKill` 兜底作为安全网（IsDead 未到达前的备用路径）。
-  - ~~**HP 不同步临时状态**~~ **已解决**：客户端 HP 现在由服务端 `PlayerStates.Hp` 覆写，血条比例显示正确。
-  - 和解完成后，外部仅更新 sync_frameID，不再额外逐帧调用 OnLogicUpdate。
-
-  ### 3.3 可调网络参数（客户端）
-
-  文件：Assets/Scripts/Server/ConstValue.cs
-
-  - frameTime = 0.016f **（当前基准逻辑帧长 16ms，动态追帧下实际 tick 间隔可变）**
-  - PredictionHistoryWindowSize = 40
-  - EnablePredictionReconciliationPipeline = true
-  - MovementMaxPositionError = 0.6f （服务端移动误差阈值，比较服务端权威位置与 `ClientMove.predicted_pos_x/y/z`）
-  - VisualSmoothingWindowSeconds = 0.1f
-  - inputBufferSize = 4 （历史参数，当前仅保留为兼容配置项，不再直接参与 targetFrame 公式）
-  - targetFrameSafetyFrames = 1 （历史兼容参数；当前不再直接参与 targetFrame 公式）
-  - adjustRate = 0.08f、minSpeedFactor = 0.88f、maxSpeedFactor = 1.35f
-  - pingIntervalMs = 200f （Ping 发送间隔）
-  - AuthorityStalePauseMs = 1800f （客户端超过 1800ms 没有新权威帧时暂停预测 tick）
-
-  ## 4. 当前和解策略（authority-state-snapshot 模型）
-
-  - **服务端 MoveAck 驱动本地校正**：远端玩家始终应用服务端权威位置；本地玩家收到 `move_ack.ack_good_move=false` 才拉回到 `correct_pos_x/y/z` 并 replay。
-  - **权威状态快照锚点**：和解回滚目标为 lastAuthorityStateSnapshot（上次权威帧应用后的世界状态）。首个本地预测 tick 前必须已经消费过有效权威帧。
-  - **彻底剥离渲染与逻辑**（子线程崩溃修复）：HandleMessage 通过 DrainAndDispatch 在主线程执行，视觉子弹生成（SpawnVisualBullet）、ApplyHitEvents 和 ApplyAuthoritativeHpAndDeath 均在主线程直接调用，无需 AddAction。
-  - **子弹与和解**：
-    - 视觉子弹在和解时**不会被销毁**，保留在对象池中继续飞行，避免网络波动导致满屏子弹闪烁。
-    - 伤害判定完全由服务端 HitEvent 驱动，不受和解影响。
-  - **移除旧机制**：
-    - inputMatched 已降级为纯监控日志，不影响和解决策。
-    - skipSelf 模式已完全移除，和解时全量应用所有人的权威操作。
-    - isNotDie（死亡状态）属于主线程渲染 Guard 控制，不参与帧同步快照与恢复。
-    - AuthorityBullet 客户端子弹系统已完全删除，伤害判定由服务端 HitEvent 驱动。
-
-  ## 5. 协作检查清单（服务端联调时）
-
-  1. **帧与操作ID语义**
-     - ServerFrame：服务端 `frameid`，下行 `BattleInfo.server_frame` 与 `BattleFrame.server_frame`。
-     - ClientMoveFrame：客户端本地预测 tick，写入 `ClientMove.move_frame`。
-     - ClientAckedFrame：客户端已应用的最新 ServerFrame，写入 `BattleInfo.client_input.acked_server_frame`。
-     - MoveAck：服务端已处理的最新 ClientMoveFrame 与确认/修正结果，下行 `BattleInfo.server_update.move_ack`。
-  2. **发包频率期望**
-     - 客户端 BattleStart 后先等待首个有效权威帧；首权威帧到达前不会发送 `ClientMove`。首权威帧到达后先按固定 `frameTime` 发送移动，RTT 就绪后 tick 频率动态可变。上行移动以 `ClientMove` 单调排序；服务端接收合法 move 后入队，随后在 BattleLoop 固定阶段一次性完整模拟。
-  3. **目标帧余量 vs ClientMoveFrame**
-     - 客户端 `CalcTargetFrame()` 取 `EstimateServerFrameNow()`，只调节本地 tick 速度，不决定服务端移动消费帧。
-     - 首个权威帧未到时，客户端不计算目标帧，也不生成 ClientMoveFrame。RTT 未初始化但已有首权威帧时，客户端按固定 tick 生成真实 ClientMoveFrame。
-     - 客户端不会把服务端 `ServerFrame` 写入 `predicted_frameID`；`ClientMoveFrame` 只由本地 BattleTick 连续推进。
-     - `inputBufferSize` 是历史兼容配置项，服务端不再按 Input Buffer 消费移动。
-  4. **同帧输入一致性**
-     - 重点核对客户端 `BattleInfo.client_input.battle_player_id`，移动在 `client_input.moves`，攻击在 `client_input.attacks`。
-  5. **权威批次完整性 / 当前帧重复下发**
-     - 服务端已从“按客户端 ack 组织最近窗口补帧”切换为“每个权威帧只下发当前帧，但在同一帧内重复发送多次”。客户端应支持 `BattleInfo.server_update.frames` 长期仅含 1 个当前帧元素，并正确处理同一当前帧的重复到达。
-     - `PlayerStates` 已支持按接收客户端的 acknowledged state baseline 增量下发；即使本帧没有状态变化，也仍会下发当前 `server_frame`，避免影响动态追帧对时。
-  6. **结束包边界**
-     - 客户端进入 GameOver 后会丢弃大部分战斗包（保留 BattlePushDowmGameOver）。
-     - `BattleReview` 走 TCP，携带完整帧历史，可能超过 1024 字节；双端 TCP 半包缓冲按包头长度扩容。客户端收到后切回主线程保存回放，避免接收线程异常导致大厅 TCP 断开。
-
-  ## 6. 协议锚点
-
-  - 协议文件：Assets/Scripts/Server/SocketProto.cs
-  - 重点字段：
-    - RequestCode
-    - ActionCode（含新增 Ping=41, Pong=42）
-    - MainPack.timestamp（int64，UDP Ping/Pong 时间戳）
-    - BattleInfo.server_frame
-    - BattleInfo.client_input（battle_player_id / client_tick / acked_server_frame / rtt_ms / moves / attacks）
-    - BattleInfo.server_update（frames / move_ack / hit_events / state_base_frame / attack_acks）
-    - AttackType（Normal / Super），由 `ClientAttack.attack_type` 和 `ServerAttack.attack_type` 使用
-    - AuthoritativePlayerState.state_mask（bit0=position，bit1=hp，bit2=is_dead，bit3=mana，bit4=super_energy）
-    - AuthoritativePlayerState.mana（普通攻击蓝量，UI 最终以服务端为准）
-    - AuthoritativePlayerState.super_energy（大招能量，UI 最终以服务端为准）
-    - AttackAck（battle_player_id / attack_id / accepted / mana_after / reject_reason / super_energy_after）
-    - ClientMove.move_frame
-    - ClientAttack.attack_move_frame
-    - ServerAttack.spawn_pos_x/y/z 与 spawn_server_frame
-  - HitEvent 字段说明：
-    - attack_id：攻击唯一 ID（对应 ClientAttack / ServerAttack 的 attack_id）
-    - attacker_battle_id：攻击者 battleId
-    - victim_battle_id：被攻击者 battleId
-    - damage：本次扣血量
-    - hit_frame_id：服务端判定命中的帧号
-    - hit_pos_x/y/z：命中位置（用于特效）
-    - is_kill：是否击杀
-  - 位置历史缓存接口（服务端）：
-    - positionHistory[frameId][battleId] = ServerVector3
-    - 环形窗口 N=30 帧，超出自动淘汰最旧帧
-    - TryGetPositionSnapshot(frameId, out snapshot)：供 V2 延迟补偿回溯历史位置
-
-  ## 7. 攻击方向编解码对齐（重要）
-
-  **proto 字段语义（摇杆轴与世界轴互换）**：
-  - `ClientAttack.toward_x` / `ServerAttack.toward_x` = `joystickAxis.x`（对应世界 Z 轴分量）
-  - `ClientAttack.toward_y` / `ServerAttack.toward_y` = `joystickAxis.y`（对应世界 X 轴分量）
-
-  **客户端消费**（HYLDPlayerManger / BattleManger）：
-  ```
-  dir = xAndY2UnitVector3(Towardy, Towardx)  // (sin, 0, cos) 基于 atan2
-  dir.x *= -1 * sign   // sign=1 同队, sign=-1 对方队
-  dir.z *= sign
-  ```
-
-  **服务端消费**（BattleController.Bullets.cs:70 SpawnServerBullets）：
-  ```
-  teamSign = (playerTeam != baseTeamId) ? -1 : 1
-  baseX = -Towardy * teamSign   // 取反 + 队伍镜像
-  baseZ = Towardx * teamSign    // 队伍镜像
-  baseDir = Normalize(baseX, 0, baseZ)
-  ```
-
-  **关键点**：服务端必须同时做 X 轴取反（对应客户端 `dir.x *= -1`）和队伍镜像翻转（对应客户端 `sign=-1`），与移动方向的 teamSign 逻辑一致。
-
-  ## 8. 服务端 ClientMove 移动时间轴（CMC-style）
-
-  服务端不再使用移动 Input Buffer。客户端上行移动写入 `BattleInfo.client_input.moves`，服务端按 ClientMoveFrame 单调接受合法 Move，并在 BattleLoop 固定阶段一次性完整模拟 pending client move。
-
-  - **数据结构**：每个玩家维护 `dic_lastReceivedMoveFrame`、`dic_lastAckedMoveFrame`、`dic_pendingClientMoves`、`dic_lastProcessedMoveInput`、`dic_lastProcessedClientMoveFrame` 与最新 `MoveAckResult`。
-  - **接收**（`UpdatePlayerOperation` / `ProcessClientMove`）：
-    - 先收集所有 `OldMove` 并按 `move_frame` 升序处理，再按包内顺序处理所有非 `OldMove`。客户端 DualMove 用两个顺序 `NewMove` 表达，服务端无需新增协议枚举。
-    - 任意 `OldMove/NewMove` 的 `moveFrame <= lastReceivedMoveFrame` 直接丢弃并记录 `[ClientMove][STALE_RECEIVED]`。
-    - 不再按 `moveFrame - lastReceivedMoveFrame` 做 future lead 拒收；合法 move 只要不旧于接收水位，就会入队为 pending client move。
-    - 合法 move 入队后只允许单调更新 `lastReceivedMoveFrame = max(lastReceivedMoveFrame, moveFrame)`；任何旧帧都不能回退该水位。
-  - **消费**（`CollectAndBroadcastCurrentFrame`）：
-    - BattleLoop 固定阶段按 `MoveFrame` 升序处理 pending move。
-    - BattleLoop 固定阶段一次性处理完当前 pending move，不再设置每帧条数上限。
-    - 每条 move 处理前计算 `serverDeltaSinceLastProcessedMove = frameid - lastServerFrameWhenProcessedMove`，表示距离上一次处理该玩家 move，服务器真实经过了多少帧；处理完当前 move 后立即更新 `lastServerFrameWhenProcessedMove = frameid`。
-    - 正常态先按 `baseFrames = min(clientDelta, MaxDeltaFramesPerMove)` 直接模拟；误差用 `rawError = clientDelta - serverDeltaSinceLastProcessedMove` 进入 debt，`debt = max(0, debt + rawError)`，客户端慢下来时允许抵消之前的正误差。
-    - 当 debt 大于 0 后切入 resolving；触发 resolving 的当前 move 立刻走偿还分支，不等下一条 move。
-    - resolving 态用 `serverBoundFrames = min(baseFrames, serverDeltaSinceLastProcessedMove)` 限制当前 move，再用 `MoveDiscrepancyResolutionRate` 和 `paybackCarry` 按整数帧偿还 debt；最终 `framesToApply` 不低于 `MinMoveQuantum=1`，对应 UE 的 `MIN_TICK_TIME`。
-    - 同一个 ServerFrame 内连续处理多条 move 时，第一条可能看到 `serverDeltaSinceLastProcessedMove=1`，后续 move 因上一条已更新处理时间，通常自然看到 0。
-    - 如果高帧 move 先到，例如 100 后收到 104，则使用 104 的输入一次性覆盖模拟 101-104；迟到 101-103 会被丢弃。
-    - `OldMove` 完整模拟不写最终 `MoveAckResult`，避免覆盖当前 `NewMove` 的 ack/correction。
-    - 非 `OldMove` 产生 correction 后停止处理该玩家后续 pending move，避免更高帧 good ack 覆盖 correction；同时把三条 move 水位同步到 `acked_move_frame`，允许客户端从 correction 后重发剩余历史。
-    - 每个 ServerFrame 将当前移动意图打包进权威帧，供客户端动画使用。
-    - `RecordPositionSnapshot(frameid)` 记录当前服务端权威位置历史。
-  - **Ack 语义**：
-    - 服务端使用客户端上行 `ClientAckedFrame` 更新下行权威帧确认统计。
-    - 非 `OldMove` 完整模拟后下行 `MoveAckResult.AckedMoveFrame = moveFrame`，客户端仅在该帧仍存在于本地 SavedMove 时处理；否则忽略旧 MoveAck。
-    - `ack_good_move=true`：客户端只解链，不使用 `correct_pos` 自行改判。
-    - `ack_good_move=false`：客户端校正到 `correct_pos_x/y/z` 和 `correct_vel_x/y/z`，再按 `CoveredFrames` 重放剩余 SavedMove。
-
-  ## 9. UDP Ping/Pong 路由（dynamic-tick-adjustment）
-
-  客户端通过 UDP Ping/Pong 测量 RTT，驱动动态追帧的目标帧号计算。
-
-  - **客户端 Ping**：战斗中每 200ms 发送 `ActionCode.Ping`（`MainPack.timestamp` 填当前毫秒时间戳），通过 `UDPSocketManger` 发送
-  - **服务端 Pong 路由**（`ClientUdp.cs`）：在 UDP 包路由中识别 `ActionCode.Ping`，构造 Pong 包（`ActionCode.Pong`，`timestamp` 原样回传）。**Pong 发送经过 NetSim**：`LZJUDP` 类持有 `SimDropRate/SimDelayMinMs/SimDelayMaxMs` 公共静态字段，由 `BattleController.BeginBattle` 写入、`HandleBattleEnd` 清零。战斗期间 Pong 与战斗帧共享相同的丢包/延迟模拟参数，确保客户端 RTT 测量反映真实模拟延迟
-  - **非战斗 endpoint**：若 endpoint 未关联活跃战斗，忽略 Ping（不回复、不报错）
-  - **Proto 扩展**：`MainPack` 新增 `int64 timestamp = 14`，`ActionCode` 新增 `Ping=41`、`Pong=42`
-
-  - **当前帧重复下发**：
-    - 服务端 `BattleController.Network.SendUnsyncedFrames` 不再按 `ClientAckedFrame` 组织最近窗口补帧，而是每个权威帧只发送当前 `frameid`。
-    - 同一当前帧会在服务端侧按可调参数重复发送（当前实现默认 `CurrentFrameRepeatSendCount = 3`，可调 1~N，建议压测区间 3~5）。
-    - `BattleInfo.HitEvents` 与 `PlayerStates` 会随当前帧一起重复到达；客户端继续依赖既有去重与幂等消费逻辑处理。
-
-  ## 10. 文档联动约定
-
-  - 会话默认架构说明在：Assets/CLAUDE.md。
-  - 本文件提供“服务端协作视角”的细化链路。
-  - 若改动涉及两端协议/同步行为，请同步记录：D:/unity/hyld-master/hyld-master/BothSide.md。
-
-
-## R4-B网络运动接线（真实Unity运行待验）
-
-PMR3Player新增声明式输入RPC、完整Sync/Aux快照属性、可靠事件/重同步RPC；协议摘要改变，Lobby/客户端/DS必须同版本。局内AP预测、DS主线程预算模拟、SP只插值。输入流重置代次隔离旧包；事件按可靠到达顺序与状态确认边界消费。上行不允许直接指定可信传送/速度/参数。
-两宿主使用独立PhysicsScene内同布局floor/wall、WorldVersion=1，出生墙外x±3。新链WASD/Space输入与简单胶囊表现已接；旧战斗切换仍由HYLD_PMNET_DS=1控制，本轮未执行R6全业务退役。验证入口为Play模式Tools/PMR4/验证 Unity 碰撞适配（真实 PhysX），后续重新Build HyldDS；net8回环门禁不代表PhysX运行通过。状态唯一源见Docs/plans/net-architecture-migration.md P4B1–P4B6。
+- 大厅proto唯一源：`ProtobufAndNotepad/Protobuf/SocketProto.proto`；Request7/8、Action31..41、MainPack13/15已reserved。
+- 局内声明唯一生成集合：`Scripts/PMR3/`，锁文件 `Docs/plans/pmnet-r3-ids.json`；不能手改generated或再造第二注册表。
+- `PMNetVerify`测大厅wire；`PMR4/R5/R6NetworkTest`测真实核心+Transport字节链；`PMR4UnityCheck`编真实Unity2019 API；`PMLegacyRetirementTest`防旧类型/协议/资产GUID复活。
+- 所有测试须先本次build成功，静态/替身/字节链不等于Unity真实PhysX和双客户端验收。用户选择集中后置实机，不逐阶段要求重打包。
+- 特殊技能/抛物线/AoE/弹射/道具、美术/摇杆/回放与R4完整Modifier等仍欠账。具体状态只看 `Docs/plans/net-architecture-migration.md`，接口改动同步 `BothSide.md`。

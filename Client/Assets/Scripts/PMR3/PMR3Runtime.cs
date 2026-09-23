@@ -135,13 +135,24 @@ namespace PMNet.R3
                 world.RegisterClass(PMR3Player.PMGeneratedClassId, CreatePlayerInstance);
             }
 
+            // R5-B2a：投射物声明对象也必须接在**同一个世界工厂**上（客户端要能按 ClassId
+            // 构造接收副本，服务端要能用同一工厂创建）。与玩家副本一样，只按生成的稳定
+            // ClassId 工作，不做任何类型名/反射匹配。
+            if (!world.IsClassRegistered(PMR5Projectile.PMGeneratedClassId))
+            {
+                world.RegisterClass(PMR5Projectile.PMGeneratedClassId, CreateProjectileInstance);
+            }
+
             AttachedWorlds[world] = true;
 
-            // 2) OnRep 分发表（字典赋值，天然幂等）。
+            // 2) OnRep 分发表（字典赋值，天然幂等）。两个类各注册自己的表：
+            //    复制通道按 ClassId 查表，注册 PMR5Projectile 不会替换 PMR3Player 的条目。
             if (bridge.Replication != null)
             {
                 bridge.Replication.RegisterOnRepDispatcher(
                     PMR3Player.PMGeneratedClassId, PMR3Player.PMR3DispatchOnRep);
+                bridge.Replication.RegisterOnRepDispatcher(
+                    PMR5Projectile.PMGeneratedClassId, PMR5Projectile.PMR5DispatchOnRep);
             }
 
             // 3) 桥登记（同一世界重复 Attach 时用最后一次的桥；进程内正常只有一条）。
@@ -180,6 +191,10 @@ namespace PMNet.R3
             global::PMNet.Generated.PMNetGeneratedRegistry.RemoteSender = null;
             PlayerReplicated = null;
             PlayerSpawned = null;
+
+            // R5-B2a：投射物事件是**进程级**静态出口，契约要求「ClearAll 仅进程全 Shutdown 清理」。
+            // 注意它**不**在 Detach 里调用：一个 world 退出不得清掉其它世界的事件订阅。
+            PMR5ProjectileEvents.ClearAll();
         }
 
         /// <summary>某个世界是否已经接好线（宿主用于拒绝「未接线就 Spawn」）。</summary>
@@ -205,6 +220,12 @@ namespace PMNet.R3
             return new PMR3Player();
         }
 
+        /// <summary>投射物副本的构造工厂（对应 `PMNetWorld.RegisterClass` 的工厂参数）。</summary>
+        private static PMNetObject CreateProjectileInstance()
+        {
+            return new PMR5Projectile();
+        }
+
         /// <summary>
         /// 生成 `RemoteSender` 的实现：按目标对象所属世界反查桥，再走桥的 `SendRpc`。
         ///
@@ -218,9 +239,34 @@ namespace PMNet.R3
                 return;
             }
 
+            // R5-B2b：三条投射物生成 RPC 的失败路径**放宽为抛异常**（原 movement/probe 行为不变）。
+            // 理由：投射物的生成/命中/裁决都是不可逆语义，静默 warn 会表现成「偶尔不同步 / 永久假弹」
+            // ——驱动必须能把它转成显式会话 fault（PMR5ProjectileDriver.IsFaulted）。
+            //
+            // R5-B2c 返工：判定必须按 **(ClassId, RpcId)** 而**不是只按 ushort RpcId**。
+            // ushort 命名空间是**每个类**各自的，其它类完全可能合法地分到同一个 RpcId；
+            // 只按 ushort 判定就会把别的类的 RPC 失败也变成抛异常（误伤无关业务）。
+            //
+            // R6-B：四条**战斗 RPC**（上行攻击/上行结果确认/下行攻击裁决/下行比赛结果）
+            // 与 R5 三条投射物 RPC 采用**同一**「失败即抛」口径：它们都是不可逆语义
+            //（攻击声明、权威裁决、终局结果、结果确认），静默 warn 会表现成
+            //「偶尔不扣血 / 偶尔收不到胜负」；R6 驱动必须能把它转成显式会话 fault。
+            // 旧 probe / movement 的告警原行为**逐字不变**。
+            bool projectileRpc = IsProjectileRpc(target.ClassId, rpcId);
+            bool combatRpc = IsCombatRpc(target.ClassId, rpcId);
+            bool criticalRpc = projectileRpc || combatRpc;
+            string criticalKind = projectileRpc ? "投射物" : (combatRpc ? "战斗" : null);
+
             PMNetSessionBridge bridge;
             if (target.World == null || !Bridges.TryGetValue(target.World, out bridge) || bridge == null)
             {
+                if (criticalRpc)
+                {
+                    throw new InvalidOperationException(
+                        "[PMR3Runtime] " + criticalKind + " RPC 发送失败：目标所属世界没有接线（ClassId="
+                        + target.ClassId + " RpcId=" + rpcId + "）。");
+                }
+
                 WarnInternal("RPC 目标所属世界没有接线（ClassId=" + target.ClassId
                              + " RpcId=" + rpcId + "），本次调用被丢弃");
                 return;
@@ -228,8 +274,47 @@ namespace PMNet.R3
 
             if (!bridge.SendRpc(target, rpcId, write))
             {
+                if (criticalRpc)
+                {
+                    throw new InvalidOperationException(
+                        "[PMR3Runtime] " + criticalKind + " RPC 发送被桥拒绝（ClassId=" + target.ClassId
+                        + " RpcId=" + rpcId + "；原因见桥的 RpcRejected* / RpcSendRejected 计数）。");
+                }
+
                 WarnInternal("RPC 发送被桥拒绝（ClassId=" + target.ClassId + " RpcId=" + rpcId + "）");
             }
+        }
+
+        /// <summary>
+        /// 本次调用是否是 R5-B2b 的三条投射物生成 RPC（生成 / 命中 / 裁决）。
+        ///
+        /// 判定口径是 **稳定的 (ClassId, RpcId) 对**，不按对象类型 / 不按方法名反射：
+        /// ID 由 PMNetGen 的锁文件冻结，漂移会先在 PMR5DeclarationTest / decl-check 暴露。
+        /// **不能**只按 RpcId 判定：RpcId 只是类内的 ushort，其它类分到同一个值是合法事件。
+        /// </summary>
+        private static bool IsProjectileRpc(uint classId, ushort rpcId)
+        {
+            if (classId != PMR3Player.PMGeneratedClassId) { return false; }
+
+            return rpcId == PMR3Player.PMGeneratedRpcId_ServerProjectileSpawnV1
+                   || rpcId == PMR3Player.PMGeneratedRpcId_ServerProjectileHitV1
+                   || rpcId == PMR3Player.PMGeneratedRpcId_ClientProjectileDecisionV1;
+        }
+
+        /// <summary>
+        /// 本次调用是否是 R6-B 的四条**战斗** RPC（上行攻击 / 上行结果确认 / 下行攻击裁决 / 下行比赛结果）。
+        ///
+        /// 与 <see cref="IsProjectileRpc"/> 同一口径：判定 **(ClassId, RpcId) 对**，不按类型名/方法名反射。
+        /// ID 由 `Docs/plans/pmnet-r3-ids.json` 冻结，漂移会先在 PMR6DeclarationTest 的 decl-check 暴露。
+        /// </summary>
+        private static bool IsCombatRpc(uint classId, ushort rpcId)
+        {
+            if (classId != PMR3Player.PMGeneratedClassId) { return false; }
+
+            return rpcId == PMR3Player.PMGeneratedRpcId_ServerCombatAttackV1
+                   || rpcId == PMR3Player.PMGeneratedRpcId_ServerCombatResultAckV1
+                   || rpcId == PMR3Player.PMGeneratedRpcId_ClientCombatAttackResultV1
+                   || rpcId == PMR3Player.PMGeneratedRpcId_ClientCombatMatchResultV1;
         }
 
         // =================================================================================
@@ -283,7 +368,7 @@ namespace PMNet.R3
             player.OwnerConnection = owner;
 
             // 权威初值：uid 只来自已认证连接的身份（不从业务包自报 uid 采纳）。
-            player.PMNet_Set_uid(owner.Identity.Uid);
+            player.InitializeIdentity(owner.Identity.Uid);
 
             if (!world.Spawn(player, PMR3Player.PMGeneratedClassId))
             {

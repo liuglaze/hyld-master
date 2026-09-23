@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R6-B 语言面门禁（Unity 2019.4 = C# 7.3 + .NET Standard 2.0）。
+
+      为什么需要它：
+        R6-B 新增的 PMR6CombatDriver.cs（会话级战斗网络驱动）与改动过的 PMR3Runtime.cs /
+        PMR5ProjectileDriver.cs 都会被 Unity 2019.4 编译。最容易越界的写法是：
+          · `switch` 表达式 / `??=` / `using var` / target-typed `new` / range（C# 8+）；
+          · `Math.Clamp` / `Span<T>` / `HashSet<T>.TryGetValue`（netstandard2.1+）；
+          · 依赖 UnityEngine（本批明确禁止：R6 core/driver 必须引擎无关）。
+        这些在本机 IDE（net8）里都不报错，只有在这里编译才会暴露。
+
+      编译范围（本批已冻结的 Include 面，与 PMR5NetworkCheck 同口径 + PMCombat/Shared）：
+        · PMNet 核心与生成产物（PMNet/**，零外部依赖）；
+        · PMPrediction 预测核心 + PMMover 运动模型（PMR3 的 R4 产物依赖它们）；
+        · PMProjectile 纯核心（契约 / 生命周期 / 挂起 / 历史 / 验证 / 整合器 / codec）；
+        · PMCombat 纯核心（PMCombatContracts / PMCombatWeaponPlanner / PMCombatSession）；
+        · Shared 数值源（BattleNumericConfig / PMBattleSim）；
+        · PMR3 声明层 + 生成产物 + R4 运动 codec/driver + R5 投射物 driver + R6 战斗 driver。
+
+      刻意不引用 Google.Protobuf / UnityEngine / 任何 NuGet 包：
+      以证明「战斗/投射物网络层自包含、可 AOT、不依赖引擎」。
+      本工程是**库**，没有 Program.cs：它的验收形式就是「编译 exit 0」。
+
+      构建：dotnet build Tools/PMR6NetworkCheck -c Release
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR6NetworkCheck</AssemblyName>
+    <RootNamespace>PMR6NetworkCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- PMNet 核心 + 生成产物（零外部依赖）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- 预测核心（M07）与运动模型（M08）：PMR3 的 R4-B / R6 位置面依赖，必须一并编译。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+
+    <!-- PMProjectile 纯核心（R5-A/B1 产物；R5/R6 driver 直接消费它）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\**\*.cs" LinkBase="PMProjectile" />
+
+    <!-- PMCombat 纯核心（R6-A1 产物；R6 driver 直接消费它）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\**\*.cs" LinkBase="PMCombat" />
+
+    <!-- 共享数值源（PMCombat 的数值口径来自这里）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Shared" />
+
+    <!-- R3/R5/R6 声明层 + 生成产物 + R4 运动 codec/driver + R5 投射物 driver + R6 战斗 driver。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3" />
+  </ItemGroup>
+
+</Project>

@@ -48,6 +48,8 @@
     <!-- R3-B 声明对象 + 生成产物（PMR3 在 PMNet 目录之外，避免注册表重名）。 -->
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="PMR3" />
+    <!-- R5-B2a：投射物声明对象（PMR3Runtime.Attach 要注册它的工厂/OnRep 分发表，故必须真编）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR5Projectile.cs" LinkBase="PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="PMR3\Generated" />
 
     <!-- 纯 C# 的 DS 侧控制代理（Unity 宿主里也用它，这里直接测同一份源码）。 -->

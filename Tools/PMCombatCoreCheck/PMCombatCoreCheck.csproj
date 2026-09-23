@@ -1,0 +1,76 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R6-A1 门禁（T6A1/T6A2/T6A3 的编译面）：R6 战斗核心（planner + session）必须能在
+      Unity 2019.4 的能力上限内编译，即 netstandard2.0 API + C# 7.3，且**零 UnityEngine / 零 R3**。
+
+      为什么需要它：
+        Unity 2019.4 的托管编译上限就是 C# 7.3 / .NET Standard 2.0。核心代码里最容易悄悄越界的写法是：
+          · Math.Clamp / HashCode.Combine / HashSet.TryGetValue（.NET Standard 2.1 才有）
+          · ??= / switch 表达式 / using var / target-typed new / 元组（C# 8+，元组还需 ValueTuple 包）
+          · 任何 UnityEngine / R3 引用（本批明确禁止：核心要被 DS 与服务端同源编译）
+        这些在本机 IDE 里都不报错，只有在这里编译才会暴露。
+
+      依赖面**逐文件**给定，不用通配符：
+        · PMCombat/PMCombatContracts.cs       —— 主 Agent 冻结的共享契约（只读，本组不修改）
+        · PMCombat/PMCombatWeaponPlanner.cs   —— 本组：攻击计划生成
+        · PMCombat/PMCombatSession.cs         —— 本组：权威会话（账本/资源/授权/结算/胜负）
+        · Shared/BattleNumericConfig.cs       —— 数值单一事实源（只读；hero 0..19、Mana90/ManaPerSegment30、
+                                                 SuperEnergyMax200、ResolveAttack 的 normal=PerShot / super=Total）
+        · Shared/PMBattleSim.cs               —— 公式单一事实源（SpreadDirection / RechargeSuperEnergy）
+        · PMProjectile/*（7 个核心文件）        —— 冻结契约 + codec（PMProjectileSpawnIntent）+
+                                                 lifecycle/pending/history/validator/coordinator
+                                                 （PMProjectileSettlement / PMProjectileValidatedHit）
+        · PMMover/PMMoverState.cs             —— PMVector3（Y-up 米，自包含）
+        · PMNet/PMNetIdentity.cs + PMNetRole.cs —— PMFrameId / PMFrameDomain / PMNetRole
+        · PMNet/PMNetReader.cs + PMNetWriter.cs + PMWireType.cs —— codec 的线格式原语
+
+      刻意**不**用 PMCombat/** 或 PMProjectile/** 通配：
+        · PMProjectile 的 DiagnosticConfig / CandidateCollector 属于 R5-C 诊断与 DS 候选采集层
+          （R6 会用正式授权策略替换诊断策略），不是本组依赖，一起编进来只会制造跨阶段的隐式耦合。
+
+      不引 UnityEngine / 不引 Google.Protobuf / 不引 R3：这是本工程能成立的前提。
+      本工程是**库**，没有 Program.cs：它的验收形式就是「编译 exit 0」。
+
+      构建：dotnet build Tools/PMCombatCoreCheck/PMCombatCoreCheck.csproj -c Release
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMCombatCoreCheck</AssemblyName>
+    <RootNamespace>PMCombatCoreCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 冻结共享契约（主 Agent 落盘，只读依赖） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\PMCombatContracts.cs" LinkBase="PMCombat" />
+    <!-- 本组两份实现（R6-A1） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\PMCombatWeaponPlanner.cs" LinkBase="PMCombat" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\PMCombatSession.cs" LinkBase="PMCombat" />
+    <!-- 数值/公式单一事实源（Shared，只读依赖） -->
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\BattleNumericConfig.cs" LinkBase="Shared" />
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\PMBattleSim.cs" LinkBase="Shared" />
+    <!-- PMProjectile 冻结契约 + codec（PMProjectileSpawnIntent） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCodec.cs" LinkBase="PMProjectile" />
+    <!-- PMProjectile 全核心（授权 key 的最终归宿：PMProjectileSettlement） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileHistory.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileValidator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCoordinator.cs" LinkBase="PMProjectile" />
+    <!-- PMVector3（契约与实现都只用到这一份 Mover 文件，且该文件自包含） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+    <!-- 身份/帧号/角色原语 + codec 的线格式原语 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetReader.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetWriter.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMWireType.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

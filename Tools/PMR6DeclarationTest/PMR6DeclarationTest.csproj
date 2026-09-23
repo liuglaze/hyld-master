@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R6-A2 门禁：PMR3Player 的**战斗声明层**（9 条复制属性 + 4 条 RPC）+ 单一生成集合。
+
+      为什么需要它：
+        「OwnerOnly 的两条资源属性是否真的只发给 owner（初始 Create 不泄 + 后续变更不泄）」
+        「公共 HP/死亡/胜负是否两边都到」
+        「RepNotify 是否真的派发到驱动接缝」
+        「上行攻击/结果确认是否按归属拒绝（非 owner 不得执行实现）」
+        「null driver 时上行是否 Reject（而不是假成功）、下行是否可观察丢弃」
+        「PublishCombatState 的权限是否真的按 World role 把关（AP 不写复制字段）」
+        「旧 ID/旧 RPC 档位是否一条都没漂移、且没有第二个 registry / 没有运行期反射」
+        —— 这些编译期全看不出来，运行时又都长得像「战斗偶尔不同步 / 资源偶尔泄露」。
+
+      编译范围（**刻意不含 PMCombat 纯核心、不含 R5 Projectile/Coordinator**）：
+        - 真实 PMNet 核心（Client/Assets/Scripts/PMNet/**）；
+        - 真实 PMR3 声明层（PMR3Player / PMR3Runtime / PMR5Projectile + PMNetGen 生成产物）。
+      这份「只编声明层也能通过」正是契约的硬要求：声明层不得反向依赖核心实现，
+      否则旧消费者（PMR3RuntimeTest / PMR3IntegrationTest 等）会被迫全部引入核心。
+
+      投递分两条真实路径：
+        (1) 裸 World + 真实 PMReplicationChannel + 真实生命周期 codec —— 用于**逐连接掩码**判定
+            （Create 初值与 Update 记录各自携带哪些槽位），这是 OwnerOnly 权限边界的最强证据；
+        (2) 真实 PMTransport 字节链 + 真实 Bridge（分片/序号/ACK/可靠域都真实参与，手工 link），
+            用于端到端观察「owner 收到资源、observer 收不到」「公共值两边都到」「OnRep 真派发」
+            「RPC 归属与参数域」「null driver 失败关闭」。
+
+      运行：dotnet Tools/PMR6DeclarationTest/bin/Release/net8.0/PMR6DeclarationTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR6DeclarationTest</AssemblyName>
+    <RootNamespace>PMR6DeclarationTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实 PMNet 核心（含 Control/Session/Transport/World/Replication/Generated）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- R3/R5 声明层 + 生成产物（PMR3 在 PMNet 目录之外，避免注册表重名）。
+         **不引 PMCombat / PMProjectile / Coordinator**：声明层的可编译性本身就是被验收的属性。
+         R6-A2 只往 PMR3Player 追加声明，不新增 runtime .cs / meta，故这里的文件集合与 R5 相同。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR5Projectile.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="PMR3\Generated" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只保证生成器先被构建出来（本工程不引用它的程序集，是当进程调用做声明同步校验）。 -->
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+</Project>

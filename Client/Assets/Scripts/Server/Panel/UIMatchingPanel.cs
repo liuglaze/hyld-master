@@ -1,4 +1,4 @@
-/****************************************************
+﻿/****************************************************
     Author:            龙之介
     CreatTime:    2022/4/18 15:50:55
     Description:     Nothing
@@ -53,17 +53,21 @@ namespace MVC
 
                 Logging.HYLDDebug.Log("[R3B] 收到新链入局通知：" + offer);
                 PMNet.Unity.PMClientSessionHost.Enter(offer);
+                if (PMNet.Unity.PMClientSessionHost.IsActive && ExitMathcing != null)
+                {
+                    ExitMathcing.SetActive(false);
+                }
                 return;
             }
 
             if (pack.Returncode == ReturnCode.Succeed)            
             {
-                //1.8更新FightData
-                ExitMathcing.SetActive(false);
-                //初始化比赛数据，异步加载战斗场景
-                Logging.HYLDDebug.LogError("初始化比赛数据，异步加载战斗场景    " + pack);
-                Manger.BattleData.Instance.InitBattleInfo(pack.BattleInfo.RandSeed, pack.BattleInfo.BattleUsers);
-                Manger.ClearSenceManger.LoadScene(SceneConfig.battleScene);
+                // 旧链退役（契约 §B）：原这里是旧房间入局的唯一回退落点
+                // （Manger.BattleData.InitBattleInfo + ClearSenceManger.LoadScene 旧战场）。
+                // 旧战斗链删除后，非 PMDS1 的旧成功通知**没有任何接收者**：
+                // 必须显式报错，绝不能静默回退旧战场去生成第二套入局状态。
+                Logging.HYLDDebug.LogError("[R3B] 收到旧链（非 PMDS1）入局成功通知；旧战斗链已退役，"
+                                           + "只接受 PMDS1 前缀的入局通知，已明确拒绝");
             }
         }
         //private void 

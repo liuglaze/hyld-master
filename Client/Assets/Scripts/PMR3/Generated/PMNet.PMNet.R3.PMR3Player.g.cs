@@ -4,8 +4,9 @@
 //     类：PMNet.R3.PMR3Player
 //     稳定键：CLASS:PMNet.R3.PMR3Player
 //     类型 ID：405815557（0x18304105）
-//     类协议摘要：0x5C7B1234
-//     复制属性：3 个 / RPC：6 条
+//     类协议摘要：0xB09BCD1C
+//     复制属性：12 个 / RPC：13 条
+//     自动属性（auto-property，由 PMNetWeaver 改写 setter / RawSet）：12 个
 // 
 //     生成契约：Docs/plans/net-r2-codegen-contract.md（§2 稳定 ID / §4 API 面）
 //     语言面：C# 7.3 + .NET Standard 2.0（Unity 2019.4 约束，D-R0-48）
@@ -26,7 +27,7 @@ namespace PMNet.R3
         public const uint PMGeneratedClassId = 405815557u;
 
         /// <summary>对象变更掩码总位数（= 本类复制属性数）。</summary>
-        public const ushort PMGeneratedChangeMaskBitCount = 3;
+        public const ushort PMGeneratedChangeMaskBitCount = 12;
 
         /// <summary>
         /// 本类复制属性序号在**整个继承链**上的基址（= 已声明祖先的复制属性总数）。
@@ -38,50 +39,543 @@ namespace PMNet.R3
         /// <summary>复制数组的长度上限（防御越界分配；契约 §8 列为待收敛参数，R2 取 4096）。</summary>
         private const int PMGeneratedMaxArrayLength = 4096;
 
+        // ---------------- 自动属性的复制属性序号（每对象连续，含继承链基址）----------------
+
+        /// <summary>_combatDead 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatDead = 0;
+
+        /// <summary>_combatSuperEnergy 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatSuperEnergy = 1;
+
+        /// <summary>_probeCount 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__probeCount = 2;
+
+        /// <summary>_uid 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__uid = 3;
+
+        /// <summary>_combatMatchEnded 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatMatchEnded = 4;
+
+        /// <summary>_combatTeamId 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatTeamId = 5;
+
+        /// <summary>_combatHp 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatHp = 6;
+
+        /// <summary>_combatMana 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatMana = 7;
+
+        /// <summary>_combatHeroId 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatHeroId = 8;
+
+        /// <summary>_combatWinnerTeamId 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatWinnerTeamId = 9;
+
+        /// <summary>_movementSnapshotV1 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__movementSnapshotV1 = 10;
+
+        /// <summary>_combatMaxHp 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatMaxHp = 11;
+
+        // ---------------- 编织版本门（冻结格式 v1；见 Docs/plans/net-rpc-weaving-contract.md）----------------
+
+        /// <summary>本类的 RPC 编织版本：0 = 编译后尚未编织；PMNetWeaver 成功编织后改为 1。</summary>
+        internal static int PMNet_GetRpcWeaveVersion()
+        {
+            return 0;
+        }
+
+        /// <summary>
+        /// 未编织程序集的守卫：版本不为 1 就抛明确异常（附上修复命令方向），否则返回 1。
+        /// PMNet_BuildEntry 的开头与实例字段初始化都会调用它。
+        /// </summary>
+        private static int PMNet_RequireRpcWeave()
+        {
+            if (PMNet_GetRpcWeaveVersion() != 1)
+            {
+                throw new System.InvalidOperationException(
+                    "PMNet RPC 未编织：本程序集仍处于编译后未处理状态。请先运行 `dotnet PMNetWeaver.dll --weave <assembly.dll>`（构建脚本应在复制 DLL 后执行）。");
+            }
+
+            return 1;
+        }
+
+        /// <summary>
+        /// 实例 guard：字段初始化就调用 Require ⇒ 未编织时 new 直接被拒。
+        /// 字段本身不需要被读取，pragma 压掉「已赋值但未使用」的 CS0414。
+        /// </summary>
+        #pragma warning disable 0414
+        private readonly int PMNet_rpcWeaveGate = PMNet_RequireRpcWeave();
+        #pragma warning restore 0414
+
         // ---------------- 复制属性注册 ----------------
 
         /// <summary>注册本类的复制属性与条件（对应 UE 的 DOREPLIFETIME_WITH_PARAMS_FAST 位置）。</summary>
         protected override void CollectLifetimeReplicatedProps(PMNet.PMRepList outProps)
         {
             base.CollectLifetimeReplicatedProps(outProps);
-            outProps.Add(0, PMNet.PMCond.None, true); // _probeCount（PropertyId=12656）
-            outProps.Add(1, PMNet.PMCond.None, true); // _uid（PropertyId=18801）
-            outProps.Add(2, PMNet.PMCond.None, true); // _movementSnapshotV1（PropertyId=61580）
+            outProps.Add(PMGeneratedPropertyIndex__combatDead, PMNet.PMCond.None, true); // _combatDead（PropertyId=4259）
+            outProps.Add(PMGeneratedPropertyIndex__combatSuperEnergy, PMNet.PMCond.OwnerOnly, true); // _combatSuperEnergy（PropertyId=5878）
+            outProps.Add(PMGeneratedPropertyIndex__probeCount, PMNet.PMCond.None, true); // _probeCount（PropertyId=12656）
+            outProps.Add(PMGeneratedPropertyIndex__uid, PMNet.PMCond.None, true); // _uid（PropertyId=18801）
+            outProps.Add(PMGeneratedPropertyIndex__combatMatchEnded, PMNet.PMCond.None, true); // _combatMatchEnded（PropertyId=21371）
+            outProps.Add(PMGeneratedPropertyIndex__combatTeamId, PMNet.PMCond.None, true); // _combatTeamId（PropertyId=24395）
+            outProps.Add(PMGeneratedPropertyIndex__combatHp, PMNet.PMCond.None, true); // _combatHp（PropertyId=31999）
+            outProps.Add(PMGeneratedPropertyIndex__combatMana, PMNet.PMCond.OwnerOnly, true); // _combatMana（PropertyId=34826）
+            outProps.Add(PMGeneratedPropertyIndex__combatHeroId, PMNet.PMCond.None, true); // _combatHeroId（PropertyId=36554）
+            outProps.Add(PMGeneratedPropertyIndex__combatWinnerTeamId, PMNet.PMCond.None, true); // _combatWinnerTeamId（PropertyId=38154）
+            outProps.Add(PMGeneratedPropertyIndex__movementSnapshotV1, PMNet.PMCond.None, true); // _movementSnapshotV1（PropertyId=61580）
+            outProps.Add(PMGeneratedPropertyIndex__combatMaxHp, PMNet.PMCond.None, true); // _combatMaxHp（PropertyId=64920）
         }
 
         // ---------------- 赋值即标脏的访问器 ----------------
 
         /// <summary>
-        /// 赋值并标脏（Push 模型，契约 D-R0-13）。
-        /// 业务必须在**真实赋值处**改调本访问器：漏标会让该属性静默不同步。
+        /// 兼容访问器（自动属性）：仅转发 `_combatDead = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatDead，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatDead(bool value)
+        {
+            _combatDead = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatSuperEnergy = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatSuperEnergy，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatSuperEnergy(int value)
+        {
+            _combatSuperEnergy = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_probeCount = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__probeCount，只标脏一次。
         /// </summary>
         public void PMNet_Set_probeCount(int value)
         {
             _probeCount = value;
-            MarkPropertyDirty(0);
         }
 
         /// <summary>
-        /// 赋值并标脏（Push 模型，契约 D-R0-13）。
-        /// 业务必须在**真实赋值处**改调本访问器：漏标会让该属性静默不同步。
+        /// 兼容访问器（自动属性）：仅转发 `_uid = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__uid，只标脏一次。
         /// </summary>
         public void PMNet_Set_uid(int value)
         {
             _uid = value;
-            MarkPropertyDirty(1);
         }
 
         /// <summary>
-        /// 赋值并标脏（Push 模型，契约 D-R0-13）。
-        /// 业务必须在**真实赋值处**改调本访问器：漏标会让该属性静默不同步。
+        /// 兼容访问器（自动属性）：仅转发 `_combatMatchEnded = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatMatchEnded，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatMatchEnded(bool value)
+        {
+            _combatMatchEnded = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatTeamId = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatTeamId，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatTeamId(int value)
+        {
+            _combatTeamId = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatHp = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatHp，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatHp(int value)
+        {
+            _combatHp = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatMana = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatMana，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatMana(int value)
+        {
+            _combatMana = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatHeroId = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatHeroId，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatHeroId(int value)
+        {
+            _combatHeroId = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatWinnerTeamId = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatWinnerTeamId，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatWinnerTeamId(int value)
+        {
+            _combatWinnerTeamId = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_movementSnapshotV1 = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__movementSnapshotV1，只标脏一次。
         /// </summary>
         public void PMNet_Set_movementSnapshotV1(byte[] value)
         {
             _movementSnapshotV1 = value;
-            MarkPropertyDirty(2);
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatMaxHp = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatMaxHp，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatMaxHp(int value)
+        {
+            _combatMaxHp = value;
+        }
+
+        // ---------------- 自动属性：编织点（PMNetWeaver 改写）----------------
+
+        // PMNet_PropertyRawSet_<P>：复制层接收侧的唯一写入口。未编织时调用即抛，不会静默写错。
+        // PMNet_PropertySet_<P>：setter 的转发目标（总是存值；只在值变化 + 有权威 + PushBased 时标脏）。
+
+        /// <summary>
+        /// _combatDead 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatDead(bool value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatDead 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatDead(bool value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<bool>.Default.Equals(this._combatDead, value);
+            PMNet_PropertyRawSet__combatDead(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatDead);
+            }
+        }
+
+        /// <summary>
+        /// _combatSuperEnergy 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatSuperEnergy(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatSuperEnergy 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatSuperEnergy(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._combatSuperEnergy, value);
+            PMNet_PropertyRawSet__combatSuperEnergy(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatSuperEnergy);
+            }
+        }
+
+        /// <summary>
+        /// _probeCount 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__probeCount(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _probeCount 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__probeCount(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._probeCount, value);
+            PMNet_PropertyRawSet__probeCount(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__probeCount);
+            }
+        }
+
+        /// <summary>
+        /// _uid 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__uid(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _uid 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__uid(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._uid, value);
+            PMNet_PropertyRawSet__uid(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__uid);
+            }
+        }
+
+        /// <summary>
+        /// _combatMatchEnded 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatMatchEnded(bool value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatMatchEnded 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatMatchEnded(bool value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<bool>.Default.Equals(this._combatMatchEnded, value);
+            PMNet_PropertyRawSet__combatMatchEnded(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatMatchEnded);
+            }
+        }
+
+        /// <summary>
+        /// _combatTeamId 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatTeamId(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatTeamId 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatTeamId(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._combatTeamId, value);
+            PMNet_PropertyRawSet__combatTeamId(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatTeamId);
+            }
+        }
+
+        /// <summary>
+        /// _combatHp 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatHp(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatHp 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatHp(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._combatHp, value);
+            PMNet_PropertyRawSet__combatHp(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatHp);
+            }
+        }
+
+        /// <summary>
+        /// _combatMana 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatMana(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatMana 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatMana(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._combatMana, value);
+            PMNet_PropertyRawSet__combatMana(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatMana);
+            }
+        }
+
+        /// <summary>
+        /// _combatHeroId 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatHeroId(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatHeroId 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatHeroId(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._combatHeroId, value);
+            PMNet_PropertyRawSet__combatHeroId(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatHeroId);
+            }
+        }
+
+        /// <summary>
+        /// _combatWinnerTeamId 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatWinnerTeamId(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatWinnerTeamId 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatWinnerTeamId(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._combatWinnerTeamId, value);
+            PMNet_PropertyRawSet__combatWinnerTeamId(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatWinnerTeamId);
+            }
+        }
+
+        /// <summary>
+        /// _movementSnapshotV1 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__movementSnapshotV1(byte[] value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _movementSnapshotV1 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__movementSnapshotV1(byte[] value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<byte[]>.Default.Equals(this._movementSnapshotV1, value);
+            PMNet_PropertyRawSet__movementSnapshotV1(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__movementSnapshotV1);
+            }
+        }
+
+        /// <summary>
+        /// _combatMaxHp 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatMaxHp(int value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatMaxHp 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatMaxHp(int value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this._combatMaxHp, value);
+            PMNet_PropertyRawSet__combatMaxHp(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatMaxHp);
+            }
         }
 
         // ---------------- 属性读写器（供 PMPropertyDescriptor 持委托）----------------
+
+        /// <summary>写出 _combatDead 的当前值。</summary>
+        private static void PMNet_Write__combatDead(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteBool(self._combatDead);
+        }
+
+        /// <summary>读入并赋值 _combatDead（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatDead(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            bool pmValue = r.ReadBool();
+
+            self.PMNet_PropertyRawSet__combatDead(pmValue);
+        }
+
+        /// <summary>写出 _combatSuperEnergy 的当前值。</summary>
+        private static void PMNet_Write__combatSuperEnergy(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteInt32(self._combatSuperEnergy);
+        }
+
+        /// <summary>读入并赋值 _combatSuperEnergy（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatSuperEnergy(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__combatSuperEnergy(pmValue);
+        }
 
         /// <summary>写出 _probeCount 的当前值。</summary>
         private static void PMNet_Write__probeCount(PMNet.PMNetObject t, PMNet.PMNetWriter w)
@@ -90,11 +584,13 @@ namespace PMNet.R3
             w.WriteInt32(self._probeCount);
         }
 
-        /// <summary>读入并赋值 _probeCount。注意：这是一个接收侧写入口，位于本 partial 内所以能访问私有成员。</summary>
+        /// <summary>读入并赋值 _probeCount（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
         private static void PMNet_Read__probeCount(PMNet.PMNetObject t, PMNet.PMNetReader r)
         {
             PMR3Player self = (PMR3Player)t;
-            self._probeCount = r.ReadInt32();
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__probeCount(pmValue);
         }
 
         /// <summary>写出 _uid 的当前值。</summary>
@@ -104,11 +600,109 @@ namespace PMNet.R3
             w.WriteInt32(self._uid);
         }
 
-        /// <summary>读入并赋值 _uid。注意：这是一个接收侧写入口，位于本 partial 内所以能访问私有成员。</summary>
+        /// <summary>读入并赋值 _uid（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
         private static void PMNet_Read__uid(PMNet.PMNetObject t, PMNet.PMNetReader r)
         {
             PMR3Player self = (PMR3Player)t;
-            self._uid = r.ReadInt32();
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__uid(pmValue);
+        }
+
+        /// <summary>写出 _combatMatchEnded 的当前值。</summary>
+        private static void PMNet_Write__combatMatchEnded(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteBool(self._combatMatchEnded);
+        }
+
+        /// <summary>读入并赋值 _combatMatchEnded（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatMatchEnded(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            bool pmValue = r.ReadBool();
+
+            self.PMNet_PropertyRawSet__combatMatchEnded(pmValue);
+        }
+
+        /// <summary>写出 _combatTeamId 的当前值。</summary>
+        private static void PMNet_Write__combatTeamId(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteInt32(self._combatTeamId);
+        }
+
+        /// <summary>读入并赋值 _combatTeamId（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatTeamId(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__combatTeamId(pmValue);
+        }
+
+        /// <summary>写出 _combatHp 的当前值。</summary>
+        private static void PMNet_Write__combatHp(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteInt32(self._combatHp);
+        }
+
+        /// <summary>读入并赋值 _combatHp（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatHp(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__combatHp(pmValue);
+        }
+
+        /// <summary>写出 _combatMana 的当前值。</summary>
+        private static void PMNet_Write__combatMana(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteInt32(self._combatMana);
+        }
+
+        /// <summary>读入并赋值 _combatMana（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatMana(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__combatMana(pmValue);
+        }
+
+        /// <summary>写出 _combatHeroId 的当前值。</summary>
+        private static void PMNet_Write__combatHeroId(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteInt32(self._combatHeroId);
+        }
+
+        /// <summary>读入并赋值 _combatHeroId（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatHeroId(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__combatHeroId(pmValue);
+        }
+
+        /// <summary>写出 _combatWinnerTeamId 的当前值。</summary>
+        private static void PMNet_Write__combatWinnerTeamId(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteInt32(self._combatWinnerTeamId);
+        }
+
+        /// <summary>读入并赋值 _combatWinnerTeamId（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatWinnerTeamId(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__combatWinnerTeamId(pmValue);
         }
 
         /// <summary>写出 _movementSnapshotV1 的当前值。</summary>
@@ -131,14 +725,15 @@ namespace PMNet.R3
             }
         }
 
-        /// <summary>读入并赋值 _movementSnapshotV1。注意：这是一个接收侧写入口，位于本 partial 内所以能访问私有成员。</summary>
+        /// <summary>读入并赋值 _movementSnapshotV1（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
         private static void PMNet_Read__movementSnapshotV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
         {
             PMR3Player self = (PMR3Player)t;
+            byte[] pmValue;
             int n = r.ReadSInt32();
             if (n < 0)
             {
-                self._movementSnapshotV1 = null;
+                pmValue = null;
             }
             else
             {
@@ -154,8 +749,26 @@ namespace PMNet.R3
                     a[i] = (byte)r.ReadVarint();
                 }
 
-                self._movementSnapshotV1 = a;
+                pmValue = a;
             }
+
+            self.PMNet_PropertyRawSet__movementSnapshotV1(pmValue);
+        }
+
+        /// <summary>写出 _combatMaxHp 的当前值。</summary>
+        private static void PMNet_Write__combatMaxHp(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteInt32(self._combatMaxHp);
+        }
+
+        /// <summary>读入并赋值 _combatMaxHp（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatMaxHp(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            int pmValue = r.ReadInt32();
+
+            self.PMNet_PropertyRawSet__combatMaxHp(pmValue);
         }
 
         // ---------------- RepNotify 分发（0 = 无）----------------
@@ -172,7 +785,34 @@ namespace PMNet.R3
             switch (onRepMethodId)
             {
                 case 1:
+                    self.OnRep_CombatDead();
+                    return;
+                case 2:
+                    self.OnRep_CombatSuperEnergy();
+                    return;
+                case 3:
+                    self.OnRep_CombatMatchEnded();
+                    return;
+                case 4:
+                    self.OnRep_CombatTeamId();
+                    return;
+                case 5:
+                    self.OnRep_CombatHp();
+                    return;
+                case 6:
+                    self.OnRep_CombatMana();
+                    return;
+                case 7:
+                    self.OnRep_CombatHeroId();
+                    return;
+                case 8:
+                    self.OnRep_CombatWinnerTeamId();
+                    return;
+                case 9:
                     self.OnRep_MovementSnapshot();
+                    return;
+                case 10:
+                    self.OnRep_CombatMaxHp();
                     return;
                 default:
                     return;
@@ -230,11 +870,11 @@ namespace PMNet.R3
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 ClientMovementEventsV1（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ClientMovementEventsV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ClientMovementEventsV1（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_ClientMovementEventsV1(byte[] p0)
+        private void PMNet_ClientMovementEventsV1(byte[] p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
@@ -322,11 +962,11 @@ namespace PMNet.R3
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 ServerMovementResyncV1（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ServerMovementResyncV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ServerMovementResyncV1（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_ServerMovementResyncV1(uint p0)
+        private void PMNet_ServerMovementResyncV1(uint p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
@@ -350,6 +990,119 @@ namespace PMNet.R3
                     delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
                     {
                         w.WriteUInt32(p0);
+                    });
+            }
+        }
+
+        /// <summary>RPC ServerProjectileSpawnV1 的稳定 ID（16 位，D-R0-49）。</summary>
+        public const ushort PMGeneratedRpcId_ServerProjectileSpawnV1 = 21590;
+
+        /// <summary>读出参数、过校验、调用业务实现（接收侧分发）。</summary>
+        private static void PMNet_RpcInvoke_ServerProjectileSpawnV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            byte[] p0;
+            int n = r.ReadSInt32();
+            if (n < 0)
+            {
+                p0 = null;
+            }
+            else
+            {
+                if (n > PMGeneratedMaxArrayLength)
+                {
+                    // 越界长度 = 数据损坏，抛异常而不是静默截断（静默截断会掩盖协议错误）。
+                    throw new System.FormatException("PMNet 复制数组长度越界：byte[]");
+                }
+
+                byte[] a = new byte[n];
+                for (int i = 0; i < n; i++)
+                {
+                    a[i] = (byte)r.ReadVarint();
+                }
+
+                p0 = a;
+            }
+
+            if (!r.IsAtEnd)
+            {
+                throw new System.FormatException("RPC ServerProjectileSpawnV1 载荷存在尾随字节：参数只占 " + r.Consumed + " 字节，载荷更长");
+            }
+
+            // 校验（ForceValidate 三态）：Reject 只跳过实现、**不断连**；Report 上报后仍执行。
+            // ★ 非法返回值按**失败关闭**处理：C# 的枚举允许任意整数，若写成
+            //   「Reject / Report / 否则执行」，一个 (PMRpcValidation)99 就会变成**放行**。
+            PMNet.PMRpcValidation pmVerdict = self.ServerProjectileSpawnV1_ForceValidate(p0);
+            if (pmVerdict != PMNet.PMRpcValidation.Accept)
+            {
+                PMNet.PMRpcValidation pmReported = pmVerdict == PMNet.PMRpcValidation.Report
+                    ? PMNet.PMRpcValidation.Report
+                    : PMNet.PMRpcValidation.Reject;
+                PMNet.PMRpcValidationSink.NotifyReported(
+                    t, PMGeneratedRpcId_ServerProjectileSpawnV1, pmReported, "ServerProjectileSpawnV1");
+
+                if (pmReported == PMNet.PMRpcValidation.Reject)
+                {
+                    return;
+                }
+            }
+            self.ServerProjectileSpawnV1(p0);
+        }
+
+        /// <summary>
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ServerProjectileSpawnV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ServerProjectileSpawnV1（编织后它是网络入口），不要直接调用本方法。
+        /// </summary>
+        private void PMNet_ServerProjectileSpawnV1(byte[] p0)
+        {
+            PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
+                NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
+
+            byte[] p0Snapshot = null;
+            // 实参预处理（快照 / 长度门）必须在**本地执行之前**：
+            // Multicast 在服务端会先本地执行、再外发，业务实现可以就地改写数组实参。
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                if (p0 != null)
+                {
+                    if (p0.Length > PMGeneratedMaxArrayLength)
+                    {
+                        throw new System.FormatException("RPC ServerProjectileSpawnV1 的数组实参 p0 超长（上限 4096）：" + p0.Length);
+                    }
+
+                    // 浅拷贝即足够：支持的元素集是整型/浮点/布尔/枚举/string，均为值类型或不可变引用。
+                    p0Snapshot = (byte[])p0.Clone();
+                }
+
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldExecuteLocal(callspace))
+            {
+                ServerProjectileSpawnV1(p0);
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
+                PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
+                    this, PMGeneratedRpcId_ServerProjectileSpawnV1,
+                    delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+                    {
+                        byte[] a = p0Snapshot;
+                        if (a == null)
+                        {
+                            // -1 = null（契约 §6 的“长度 + 元素”需要一个 null 哨兵，否则 null 与空数组不可区分）
+                            w.WriteSInt32(-1);
+                        }
+                        else
+                        {
+                            w.WriteSInt32(a.Length);
+                            for (int i = 0; i < a.Length; i++)
+                            {
+                                w.WriteVarint((ulong)a[i]);
+                            }
+                        }
                     });
             }
         }
@@ -410,11 +1163,11 @@ namespace PMNet.R3
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 ServerMovementInputV1（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ServerMovementInputV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ServerMovementInputV1（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_ServerMovementInputV1(byte[] p0)
+        private void PMNet_ServerMovementInputV1(byte[] p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
@@ -505,11 +1258,11 @@ namespace PMNet.R3
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 ClientMovementResyncV1（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ClientMovementResyncV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ClientMovementResyncV1（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_ClientMovementResyncV1(byte[] p0)
+        private void PMNet_ClientMovementResyncV1(byte[] p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
@@ -542,6 +1295,119 @@ namespace PMNet.R3
                 // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
                 PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
                     this, PMGeneratedRpcId_ClientMovementResyncV1,
+                    delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+                    {
+                        byte[] a = p0Snapshot;
+                        if (a == null)
+                        {
+                            // -1 = null（契约 §6 的“长度 + 元素”需要一个 null 哨兵，否则 null 与空数组不可区分）
+                            w.WriteSInt32(-1);
+                        }
+                        else
+                        {
+                            w.WriteSInt32(a.Length);
+                            for (int i = 0; i < a.Length; i++)
+                            {
+                                w.WriteVarint((ulong)a[i]);
+                            }
+                        }
+                    });
+            }
+        }
+
+        /// <summary>RPC ServerProjectileHitV1 的稳定 ID（16 位，D-R0-49）。</summary>
+        public const ushort PMGeneratedRpcId_ServerProjectileHitV1 = 33011;
+
+        /// <summary>读出参数、过校验、调用业务实现（接收侧分发）。</summary>
+        private static void PMNet_RpcInvoke_ServerProjectileHitV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            byte[] p0;
+            int n = r.ReadSInt32();
+            if (n < 0)
+            {
+                p0 = null;
+            }
+            else
+            {
+                if (n > PMGeneratedMaxArrayLength)
+                {
+                    // 越界长度 = 数据损坏，抛异常而不是静默截断（静默截断会掩盖协议错误）。
+                    throw new System.FormatException("PMNet 复制数组长度越界：byte[]");
+                }
+
+                byte[] a = new byte[n];
+                for (int i = 0; i < n; i++)
+                {
+                    a[i] = (byte)r.ReadVarint();
+                }
+
+                p0 = a;
+            }
+
+            if (!r.IsAtEnd)
+            {
+                throw new System.FormatException("RPC ServerProjectileHitV1 载荷存在尾随字节：参数只占 " + r.Consumed + " 字节，载荷更长");
+            }
+
+            // 校验（ForceValidate 三态）：Reject 只跳过实现、**不断连**；Report 上报后仍执行。
+            // ★ 非法返回值按**失败关闭**处理：C# 的枚举允许任意整数，若写成
+            //   「Reject / Report / 否则执行」，一个 (PMRpcValidation)99 就会变成**放行**。
+            PMNet.PMRpcValidation pmVerdict = self.ServerProjectileHitV1_ForceValidate(p0);
+            if (pmVerdict != PMNet.PMRpcValidation.Accept)
+            {
+                PMNet.PMRpcValidation pmReported = pmVerdict == PMNet.PMRpcValidation.Report
+                    ? PMNet.PMRpcValidation.Report
+                    : PMNet.PMRpcValidation.Reject;
+                PMNet.PMRpcValidationSink.NotifyReported(
+                    t, PMGeneratedRpcId_ServerProjectileHitV1, pmReported, "ServerProjectileHitV1");
+
+                if (pmReported == PMNet.PMRpcValidation.Reject)
+                {
+                    return;
+                }
+            }
+            self.ServerProjectileHitV1(p0);
+        }
+
+        /// <summary>
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ServerProjectileHitV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ServerProjectileHitV1（编织后它是网络入口），不要直接调用本方法。
+        /// </summary>
+        private void PMNet_ServerProjectileHitV1(byte[] p0)
+        {
+            PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
+                NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
+
+            byte[] p0Snapshot = null;
+            // 实参预处理（快照 / 长度门）必须在**本地执行之前**：
+            // Multicast 在服务端会先本地执行、再外发，业务实现可以就地改写数组实参。
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                if (p0 != null)
+                {
+                    if (p0.Length > PMGeneratedMaxArrayLength)
+                    {
+                        throw new System.FormatException("RPC ServerProjectileHitV1 的数组实参 p0 超长（上限 4096）：" + p0.Length);
+                    }
+
+                    // 浅拷贝即足够：支持的元素集是整型/浮点/布尔/枚举/string，均为值类型或不可变引用。
+                    p0Snapshot = (byte[])p0.Clone();
+                }
+
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldExecuteLocal(callspace))
+            {
+                ServerProjectileHitV1(p0);
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
+                PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
+                    this, PMGeneratedRpcId_ServerProjectileHitV1,
                     delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
                     {
                         byte[] a = p0Snapshot;
@@ -597,11 +1463,11 @@ namespace PMNet.R3
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 ServerProbe（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ServerProbe 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ServerProbe（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_ServerProbe(int p0)
+        private void PMNet_ServerProbe(int p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
@@ -629,6 +1495,345 @@ namespace PMNet.R3
             }
         }
 
+        /// <summary>RPC ClientProjectileDecisionV1 的稳定 ID（16 位，D-R0-49）。</summary>
+        public const ushort PMGeneratedRpcId_ClientProjectileDecisionV1 = 38620;
+
+        /// <summary>读出参数、过校验、调用业务实现（接收侧分发）。</summary>
+        private static void PMNet_RpcInvoke_ClientProjectileDecisionV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            byte[] p0;
+            int n = r.ReadSInt32();
+            if (n < 0)
+            {
+                p0 = null;
+            }
+            else
+            {
+                if (n > PMGeneratedMaxArrayLength)
+                {
+                    // 越界长度 = 数据损坏，抛异常而不是静默截断（静默截断会掩盖协议错误）。
+                    throw new System.FormatException("PMNet 复制数组长度越界：byte[]");
+                }
+
+                byte[] a = new byte[n];
+                for (int i = 0; i < n; i++)
+                {
+                    a[i] = (byte)r.ReadVarint();
+                }
+
+                p0 = a;
+            }
+
+            if (!r.IsAtEnd)
+            {
+                throw new System.FormatException("RPC ClientProjectileDecisionV1 载荷存在尾随字节：参数只占 " + r.Consumed + " 字节，载荷更长");
+            }
+            self.ClientProjectileDecisionV1(p0);
+        }
+
+        /// <summary>
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ClientProjectileDecisionV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ClientProjectileDecisionV1（编织后它是网络入口），不要直接调用本方法。
+        /// </summary>
+        private void PMNet_ClientProjectileDecisionV1(byte[] p0)
+        {
+            PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
+                NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
+
+            byte[] p0Snapshot = null;
+            // 实参预处理（快照 / 长度门）必须在**本地执行之前**：
+            // Multicast 在服务端会先本地执行、再外发，业务实现可以就地改写数组实参。
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                if (p0 != null)
+                {
+                    if (p0.Length > PMGeneratedMaxArrayLength)
+                    {
+                        throw new System.FormatException("RPC ClientProjectileDecisionV1 的数组实参 p0 超长（上限 4096）：" + p0.Length);
+                    }
+
+                    // 浅拷贝即足够：支持的元素集是整型/浮点/布尔/枚举/string，均为值类型或不可变引用。
+                    p0Snapshot = (byte[])p0.Clone();
+                }
+
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldExecuteLocal(callspace))
+            {
+                ClientProjectileDecisionV1(p0);
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
+                PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
+                    this, PMGeneratedRpcId_ClientProjectileDecisionV1,
+                    delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+                    {
+                        byte[] a = p0Snapshot;
+                        if (a == null)
+                        {
+                            // -1 = null（契约 §6 的“长度 + 元素”需要一个 null 哨兵，否则 null 与空数组不可区分）
+                            w.WriteSInt32(-1);
+                        }
+                        else
+                        {
+                            w.WriteSInt32(a.Length);
+                            for (int i = 0; i < a.Length; i++)
+                            {
+                                w.WriteVarint((ulong)a[i]);
+                            }
+                        }
+                    });
+            }
+        }
+
+        /// <summary>RPC ClientCombatMatchResultV1 的稳定 ID（16 位，D-R0-49）。</summary>
+        public const ushort PMGeneratedRpcId_ClientCombatMatchResultV1 = 39181;
+
+        /// <summary>读出参数、过校验、调用业务实现（接收侧分发）。</summary>
+        private static void PMNet_RpcInvoke_ClientCombatMatchResultV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            uint p0 = r.ReadUInt32();
+            int p1 = r.ReadInt32();
+
+            if (!r.IsAtEnd)
+            {
+                throw new System.FormatException("RPC ClientCombatMatchResultV1 载荷存在尾随字节：参数只占 " + r.Consumed + " 字节，载荷更长");
+            }
+            self.ClientCombatMatchResultV1(p0, p1);
+        }
+
+        /// <summary>
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ClientCombatMatchResultV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ClientCombatMatchResultV1（编织后它是网络入口），不要直接调用本方法。
+        /// </summary>
+        private void PMNet_ClientCombatMatchResultV1(uint p0, int p1)
+        {
+            PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
+                NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
+
+            // 实参预处理（快照 / 长度门）必须在**本地执行之前**：
+            // Multicast 在服务端会先本地执行、再外发，业务实现可以就地改写数组实参。
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldExecuteLocal(callspace))
+            {
+                ClientCombatMatchResultV1(p0, p1);
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
+                PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
+                    this, PMGeneratedRpcId_ClientCombatMatchResultV1,
+                    delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+                    {
+                        w.WriteUInt32(p0);
+                        w.WriteInt32(p1);
+                    });
+            }
+        }
+
+        /// <summary>RPC ServerCombatAttackV1 的稳定 ID（16 位，D-R0-49）。</summary>
+        public const ushort PMGeneratedRpcId_ServerCombatAttackV1 = 42343;
+
+        /// <summary>读出参数、过校验、调用业务实现（接收侧分发）。</summary>
+        private static void PMNet_RpcInvoke_ServerCombatAttackV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            uint p0 = r.ReadUInt32();
+            bool p1 = r.ReadBool();
+            float p2 = r.ReadFloat();
+            float p3 = r.ReadFloat();
+
+            if (!r.IsAtEnd)
+            {
+                throw new System.FormatException("RPC ServerCombatAttackV1 载荷存在尾随字节：参数只占 " + r.Consumed + " 字节，载荷更长");
+            }
+
+            // 校验（ForceValidate 三态）：Reject 只跳过实现、**不断连**；Report 上报后仍执行。
+            // ★ 非法返回值按**失败关闭**处理：C# 的枚举允许任意整数，若写成
+            //   「Reject / Report / 否则执行」，一个 (PMRpcValidation)99 就会变成**放行**。
+            PMNet.PMRpcValidation pmVerdict = self.ServerCombatAttackV1_ForceValidate(p0, p1, p2, p3);
+            if (pmVerdict != PMNet.PMRpcValidation.Accept)
+            {
+                PMNet.PMRpcValidation pmReported = pmVerdict == PMNet.PMRpcValidation.Report
+                    ? PMNet.PMRpcValidation.Report
+                    : PMNet.PMRpcValidation.Reject;
+                PMNet.PMRpcValidationSink.NotifyReported(
+                    t, PMGeneratedRpcId_ServerCombatAttackV1, pmReported, "ServerCombatAttackV1");
+
+                if (pmReported == PMNet.PMRpcValidation.Reject)
+                {
+                    return;
+                }
+            }
+            self.ServerCombatAttackV1(p0, p1, p2, p3);
+        }
+
+        /// <summary>
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ServerCombatAttackV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ServerCombatAttackV1（编织后它是网络入口），不要直接调用本方法。
+        /// </summary>
+        private void PMNet_ServerCombatAttackV1(uint p0, bool p1, float p2, float p3)
+        {
+            PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
+                NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
+
+            // 实参预处理（快照 / 长度门）必须在**本地执行之前**：
+            // Multicast 在服务端会先本地执行、再外发，业务实现可以就地改写数组实参。
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldExecuteLocal(callspace))
+            {
+                ServerCombatAttackV1(p0, p1, p2, p3);
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
+                PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
+                    this, PMGeneratedRpcId_ServerCombatAttackV1,
+                    delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+                    {
+                        w.WriteUInt32(p0);
+                        w.WriteBool(p1);
+                        w.WriteFloat(p2);
+                        w.WriteFloat(p3);
+                    });
+            }
+        }
+
+        /// <summary>RPC ClientCombatAttackResultV1 的稳定 ID（16 位，D-R0-49）。</summary>
+        public const ushort PMGeneratedRpcId_ClientCombatAttackResultV1 = 44706;
+
+        /// <summary>读出参数、过校验、调用业务实现（接收侧分发）。</summary>
+        private static void PMNet_RpcInvoke_ClientCombatAttackResultV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            uint p0 = r.ReadUInt32();
+            bool p1 = r.ReadBool();
+            int p2 = r.ReadInt32();
+
+            if (!r.IsAtEnd)
+            {
+                throw new System.FormatException("RPC ClientCombatAttackResultV1 载荷存在尾随字节：参数只占 " + r.Consumed + " 字节，载荷更长");
+            }
+            self.ClientCombatAttackResultV1(p0, p1, p2);
+        }
+
+        /// <summary>
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ClientCombatAttackResultV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ClientCombatAttackResultV1（编织后它是网络入口），不要直接调用本方法。
+        /// </summary>
+        private void PMNet_ClientCombatAttackResultV1(uint p0, bool p1, int p2)
+        {
+            PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
+                NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
+
+            // 实参预处理（快照 / 长度门）必须在**本地执行之前**：
+            // Multicast 在服务端会先本地执行、再外发，业务实现可以就地改写数组实参。
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldExecuteLocal(callspace))
+            {
+                ClientCombatAttackResultV1(p0, p1, p2);
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
+                PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
+                    this, PMGeneratedRpcId_ClientCombatAttackResultV1,
+                    delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+                    {
+                        w.WriteUInt32(p0);
+                        w.WriteBool(p1);
+                        w.WriteInt32(p2);
+                    });
+            }
+        }
+
+        /// <summary>RPC ServerCombatResultAckV1 的稳定 ID（16 位，D-R0-49）。</summary>
+        public const ushort PMGeneratedRpcId_ServerCombatResultAckV1 = 50908;
+
+        /// <summary>读出参数、过校验、调用业务实现（接收侧分发）。</summary>
+        private static void PMNet_RpcInvoke_ServerCombatResultAckV1(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            uint p0 = r.ReadUInt32();
+
+            if (!r.IsAtEnd)
+            {
+                throw new System.FormatException("RPC ServerCombatResultAckV1 载荷存在尾随字节：参数只占 " + r.Consumed + " 字节，载荷更长");
+            }
+
+            // 校验（ForceValidate 三态）：Reject 只跳过实现、**不断连**；Report 上报后仍执行。
+            // ★ 非法返回值按**失败关闭**处理：C# 的枚举允许任意整数，若写成
+            //   「Reject / Report / 否则执行」，一个 (PMRpcValidation)99 就会变成**放行**。
+            PMNet.PMRpcValidation pmVerdict = self.ServerCombatResultAckV1_ForceValidate(p0);
+            if (pmVerdict != PMNet.PMRpcValidation.Accept)
+            {
+                PMNet.PMRpcValidation pmReported = pmVerdict == PMNet.PMRpcValidation.Report
+                    ? PMNet.PMRpcValidation.Report
+                    : PMNet.PMRpcValidation.Reject;
+                PMNet.PMRpcValidationSink.NotifyReported(
+                    t, PMGeneratedRpcId_ServerCombatResultAckV1, pmReported, "ServerCombatResultAckV1");
+
+                if (pmReported == PMNet.PMRpcValidation.Reject)
+                {
+                    return;
+                }
+            }
+            self.ServerCombatResultAckV1(p0);
+        }
+
+        /// <summary>
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ServerCombatResultAckV1 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ServerCombatResultAckV1（编织后它是网络入口），不要直接调用本方法。
+        /// </summary>
+        private void PMNet_ServerCombatResultAckV1(uint p0)
+        {
+            PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
+                NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
+
+            // 实参预处理（快照 / 长度门）必须在**本地执行之前**：
+            // Multicast 在服务端会先本地执行、再外发，业务实现可以就地改写数组实参。
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldExecuteLocal(callspace))
+            {
+                ServerCombatResultAckV1(p0);
+            }
+
+            if (PMNet.PMRpcDispatch.ShouldSendRemote(callspace))
+            {
+                // 闭包捕获实参；数组用快照（值类型/string 不必）：编码推迟到真正发送时也不会读到被覆盖的值。
+                PMNet.Generated.PMNetGeneratedRegistry.EnqueueRemote(
+                    this, PMGeneratedRpcId_ServerCombatResultAckV1,
+                    delegate(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+                    {
+                        w.WriteUInt32(p0);
+                    });
+            }
+        }
+
         /// <summary>RPC ClientEcho 的稳定 ID（16 位，D-R0-49）。</summary>
         public const ushort PMGeneratedRpcId_ClientEcho = 63853;
 
@@ -646,11 +1851,11 @@ namespace PMNet.R3
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 ClientEcho（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ClientEcho 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 ClientEcho（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_ClientEcho(int p0)
+        private void PMNet_ClientEcho(int p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
@@ -683,59 +1888,181 @@ namespace PMNet.R3
         /// <summary>
         /// 本类贡献给 PMNetRegistry 的条目。
         /// 协议摘要用 PMStableHash 现算（与生成期同一实现），不写死字面量。
+        /// 第一条语句是编织门：未编织程序集在这里就被拒。
+        /// RegisterAll 会先把所有类的 BuildEntry 求值完再 RegisterClass，
+        /// 因此这里抛出时全局注册表还是空的（不会留下半注册）。
         /// </summary>
         internal static PMNet.PMNetClassEntry PMNet_BuildEntry()
         {
-            PMNet.PMPropertyDescriptor[] props = new PMNet.PMPropertyDescriptor[3];
+            PMNet_RequireRpcWeave();
+
+            PMNet.PMPropertyDescriptor[] props = new PMNet.PMPropertyDescriptor[12];
             PMNet.PMPropertyDescriptor p0 = new PMNet.PMPropertyDescriptor();
-            p0.PropertyId = 12656;
+            p0.PropertyId = 4259;
             p0.Condition = PMNet.PMCond.None;
             p0.MaskOffset = 0;
             p0.MaskBitCount = 1;
             p0.QuantizerId = 0;
-            p0.OnRepMethodId = 0;
+            p0.OnRepMethodId = 1;
             p0.PushBased = true;
-            p0.MemberName = "_probeCount";
-            p0.SetterName = "PMNet_Set_probeCount";
-            p0.Writer = PMNet_Write__probeCount;
-            p0.Reader = PMNet_Read__probeCount;
+            p0.MemberName = "_combatDead";
+            p0.SetterName = "PMNet_Set_combatDead";
+            p0.Writer = PMNet_Write__combatDead;
+            p0.Reader = PMNet_Read__combatDead;
             props[0] = p0;
             PMNet.PMPropertyDescriptor p1 = new PMNet.PMPropertyDescriptor();
-            p1.PropertyId = 18801;
-            p1.Condition = PMNet.PMCond.None;
+            p1.PropertyId = 5878;
+            p1.Condition = PMNet.PMCond.OwnerOnly;
             p1.MaskOffset = 1;
             p1.MaskBitCount = 1;
             p1.QuantizerId = 0;
-            p1.OnRepMethodId = 0;
+            p1.OnRepMethodId = 2;
             p1.PushBased = true;
-            p1.MemberName = "_uid";
-            p1.SetterName = "PMNet_Set_uid";
-            p1.Writer = PMNet_Write__uid;
-            p1.Reader = PMNet_Read__uid;
+            p1.MemberName = "_combatSuperEnergy";
+            p1.SetterName = "PMNet_Set_combatSuperEnergy";
+            p1.Writer = PMNet_Write__combatSuperEnergy;
+            p1.Reader = PMNet_Read__combatSuperEnergy;
             props[1] = p1;
             PMNet.PMPropertyDescriptor p2 = new PMNet.PMPropertyDescriptor();
-            p2.PropertyId = 61580;
+            p2.PropertyId = 12656;
             p2.Condition = PMNet.PMCond.None;
             p2.MaskOffset = 2;
             p2.MaskBitCount = 1;
             p2.QuantizerId = 0;
-            p2.OnRepMethodId = 1;
+            p2.OnRepMethodId = 0;
             p2.PushBased = true;
-            p2.MemberName = "_movementSnapshotV1";
-            p2.SetterName = "PMNet_Set_movementSnapshotV1";
-            p2.Writer = PMNet_Write__movementSnapshotV1;
-            p2.Reader = PMNet_Read__movementSnapshotV1;
+            p2.MemberName = "_probeCount";
+            p2.SetterName = "PMNet_Set_probeCount";
+            p2.Writer = PMNet_Write__probeCount;
+            p2.Reader = PMNet_Read__probeCount;
             props[2] = p2;
+            PMNet.PMPropertyDescriptor p3 = new PMNet.PMPropertyDescriptor();
+            p3.PropertyId = 18801;
+            p3.Condition = PMNet.PMCond.None;
+            p3.MaskOffset = 3;
+            p3.MaskBitCount = 1;
+            p3.QuantizerId = 0;
+            p3.OnRepMethodId = 0;
+            p3.PushBased = true;
+            p3.MemberName = "_uid";
+            p3.SetterName = "PMNet_Set_uid";
+            p3.Writer = PMNet_Write__uid;
+            p3.Reader = PMNet_Read__uid;
+            props[3] = p3;
+            PMNet.PMPropertyDescriptor p4 = new PMNet.PMPropertyDescriptor();
+            p4.PropertyId = 21371;
+            p4.Condition = PMNet.PMCond.None;
+            p4.MaskOffset = 4;
+            p4.MaskBitCount = 1;
+            p4.QuantizerId = 0;
+            p4.OnRepMethodId = 3;
+            p4.PushBased = true;
+            p4.MemberName = "_combatMatchEnded";
+            p4.SetterName = "PMNet_Set_combatMatchEnded";
+            p4.Writer = PMNet_Write__combatMatchEnded;
+            p4.Reader = PMNet_Read__combatMatchEnded;
+            props[4] = p4;
+            PMNet.PMPropertyDescriptor p5 = new PMNet.PMPropertyDescriptor();
+            p5.PropertyId = 24395;
+            p5.Condition = PMNet.PMCond.None;
+            p5.MaskOffset = 5;
+            p5.MaskBitCount = 1;
+            p5.QuantizerId = 0;
+            p5.OnRepMethodId = 4;
+            p5.PushBased = true;
+            p5.MemberName = "_combatTeamId";
+            p5.SetterName = "PMNet_Set_combatTeamId";
+            p5.Writer = PMNet_Write__combatTeamId;
+            p5.Reader = PMNet_Read__combatTeamId;
+            props[5] = p5;
+            PMNet.PMPropertyDescriptor p6 = new PMNet.PMPropertyDescriptor();
+            p6.PropertyId = 31999;
+            p6.Condition = PMNet.PMCond.None;
+            p6.MaskOffset = 6;
+            p6.MaskBitCount = 1;
+            p6.QuantizerId = 0;
+            p6.OnRepMethodId = 5;
+            p6.PushBased = true;
+            p6.MemberName = "_combatHp";
+            p6.SetterName = "PMNet_Set_combatHp";
+            p6.Writer = PMNet_Write__combatHp;
+            p6.Reader = PMNet_Read__combatHp;
+            props[6] = p6;
+            PMNet.PMPropertyDescriptor p7 = new PMNet.PMPropertyDescriptor();
+            p7.PropertyId = 34826;
+            p7.Condition = PMNet.PMCond.OwnerOnly;
+            p7.MaskOffset = 7;
+            p7.MaskBitCount = 1;
+            p7.QuantizerId = 0;
+            p7.OnRepMethodId = 6;
+            p7.PushBased = true;
+            p7.MemberName = "_combatMana";
+            p7.SetterName = "PMNet_Set_combatMana";
+            p7.Writer = PMNet_Write__combatMana;
+            p7.Reader = PMNet_Read__combatMana;
+            props[7] = p7;
+            PMNet.PMPropertyDescriptor p8 = new PMNet.PMPropertyDescriptor();
+            p8.PropertyId = 36554;
+            p8.Condition = PMNet.PMCond.None;
+            p8.MaskOffset = 8;
+            p8.MaskBitCount = 1;
+            p8.QuantizerId = 0;
+            p8.OnRepMethodId = 7;
+            p8.PushBased = true;
+            p8.MemberName = "_combatHeroId";
+            p8.SetterName = "PMNet_Set_combatHeroId";
+            p8.Writer = PMNet_Write__combatHeroId;
+            p8.Reader = PMNet_Read__combatHeroId;
+            props[8] = p8;
+            PMNet.PMPropertyDescriptor p9 = new PMNet.PMPropertyDescriptor();
+            p9.PropertyId = 38154;
+            p9.Condition = PMNet.PMCond.None;
+            p9.MaskOffset = 9;
+            p9.MaskBitCount = 1;
+            p9.QuantizerId = 0;
+            p9.OnRepMethodId = 8;
+            p9.PushBased = true;
+            p9.MemberName = "_combatWinnerTeamId";
+            p9.SetterName = "PMNet_Set_combatWinnerTeamId";
+            p9.Writer = PMNet_Write__combatWinnerTeamId;
+            p9.Reader = PMNet_Read__combatWinnerTeamId;
+            props[9] = p9;
+            PMNet.PMPropertyDescriptor p10 = new PMNet.PMPropertyDescriptor();
+            p10.PropertyId = 61580;
+            p10.Condition = PMNet.PMCond.None;
+            p10.MaskOffset = 10;
+            p10.MaskBitCount = 1;
+            p10.QuantizerId = 0;
+            p10.OnRepMethodId = 9;
+            p10.PushBased = true;
+            p10.MemberName = "_movementSnapshotV1";
+            p10.SetterName = "PMNet_Set_movementSnapshotV1";
+            p10.Writer = PMNet_Write__movementSnapshotV1;
+            p10.Reader = PMNet_Read__movementSnapshotV1;
+            props[10] = p10;
+            PMNet.PMPropertyDescriptor p11 = new PMNet.PMPropertyDescriptor();
+            p11.PropertyId = 64920;
+            p11.Condition = PMNet.PMCond.None;
+            p11.MaskOffset = 11;
+            p11.MaskBitCount = 1;
+            p11.QuantizerId = 0;
+            p11.OnRepMethodId = 10;
+            p11.PushBased = true;
+            p11.MemberName = "_combatMaxHp";
+            p11.SetterName = "PMNet_Set_combatMaxHp";
+            p11.Writer = PMNet_Write__combatMaxHp;
+            p11.Reader = PMNet_Read__combatMaxHp;
+            props[11] = p11;
 
             PMNet.PMReplicationDescriptor rep = new PMNet.PMReplicationDescriptor();
             rep.ClassId = PMGeneratedClassId;
             rep.Properties = props;
             rep.ChangeMaskBitCount = PMGeneratedChangeMaskBitCount;
-            rep.HasConditionalMask = false;
+            rep.HasConditionalMask = true;
             rep.ProtocolHash = PMNet.PMStableHash.ClassProtocolHash(PMGeneratedClassId, props);
             rep.TypeName = "PMNet.R3.PMR3Player";
 
-            PMNet.PMNetRpcEntry[] rpcs = new PMNet.PMNetRpcEntry[6];
+            PMNet.PMNetRpcEntry[] rpcs = new PMNet.PMNetRpcEntry[13];
             PMNet.PMRpcDescriptor d0 = new PMNet.PMRpcDescriptor();
             d0.RpcId = PMGeneratedRpcId_ClientMovementEventsV1;
             d0.Direction = PMNet.PMRpcKind.Client;
@@ -763,57 +2090,148 @@ namespace PMNet.R3
             r1.Invoke = PMNet_RpcInvoke_ServerMovementResyncV1;
             rpcs[1] = r1;
             PMNet.PMRpcDescriptor d2 = new PMNet.PMRpcDescriptor();
-            d2.RpcId = PMGeneratedRpcId_ServerMovementInputV1;
+            d2.RpcId = PMGeneratedRpcId_ServerProjectileSpawnV1;
             d2.Direction = PMNet.PMRpcKind.Server;
-            d2.IsReliable = false;
+            d2.IsReliable = true;
             d2.Validator = PMNet.PMRpcValidator.ForceValidate;
             d2.ParamLayoutId = 40153;
-            d2.MethodName = "ServerMovementInputV1";
+            d2.MethodName = "ServerProjectileSpawnV1";
 
             PMNet.PMNetRpcEntry r2 = new PMNet.PMNetRpcEntry();
             r2.Descriptor = d2;
             r2.OwningClassId = PMGeneratedClassId;
-            r2.Invoke = PMNet_RpcInvoke_ServerMovementInputV1;
+            r2.Invoke = PMNet_RpcInvoke_ServerProjectileSpawnV1;
             rpcs[2] = r2;
             PMNet.PMRpcDescriptor d3 = new PMNet.PMRpcDescriptor();
-            d3.RpcId = PMGeneratedRpcId_ClientMovementResyncV1;
-            d3.Direction = PMNet.PMRpcKind.Client;
-            d3.IsReliable = true;
-            d3.Validator = PMNet.PMRpcValidator.None;
+            d3.RpcId = PMGeneratedRpcId_ServerMovementInputV1;
+            d3.Direction = PMNet.PMRpcKind.Server;
+            d3.IsReliable = false;
+            d3.Validator = PMNet.PMRpcValidator.ForceValidate;
             d3.ParamLayoutId = 40153;
-            d3.MethodName = "ClientMovementResyncV1";
+            d3.MethodName = "ServerMovementInputV1";
 
             PMNet.PMNetRpcEntry r3 = new PMNet.PMNetRpcEntry();
             r3.Descriptor = d3;
             r3.OwningClassId = PMGeneratedClassId;
-            r3.Invoke = PMNet_RpcInvoke_ClientMovementResyncV1;
+            r3.Invoke = PMNet_RpcInvoke_ServerMovementInputV1;
             rpcs[3] = r3;
             PMNet.PMRpcDescriptor d4 = new PMNet.PMRpcDescriptor();
-            d4.RpcId = PMGeneratedRpcId_ServerProbe;
-            d4.Direction = PMNet.PMRpcKind.Server;
+            d4.RpcId = PMGeneratedRpcId_ClientMovementResyncV1;
+            d4.Direction = PMNet.PMRpcKind.Client;
             d4.IsReliable = true;
-            d4.Validator = PMNet.PMRpcValidator.ForceValidate;
-            d4.ParamLayoutId = 21580;
-            d4.MethodName = "ServerProbe";
+            d4.Validator = PMNet.PMRpcValidator.None;
+            d4.ParamLayoutId = 40153;
+            d4.MethodName = "ClientMovementResyncV1";
 
             PMNet.PMNetRpcEntry r4 = new PMNet.PMNetRpcEntry();
             r4.Descriptor = d4;
             r4.OwningClassId = PMGeneratedClassId;
-            r4.Invoke = PMNet_RpcInvoke_ServerProbe;
+            r4.Invoke = PMNet_RpcInvoke_ClientMovementResyncV1;
             rpcs[4] = r4;
             PMNet.PMRpcDescriptor d5 = new PMNet.PMRpcDescriptor();
-            d5.RpcId = PMGeneratedRpcId_ClientEcho;
-            d5.Direction = PMNet.PMRpcKind.Client;
+            d5.RpcId = PMGeneratedRpcId_ServerProjectileHitV1;
+            d5.Direction = PMNet.PMRpcKind.Server;
             d5.IsReliable = true;
-            d5.Validator = PMNet.PMRpcValidator.None;
-            d5.ParamLayoutId = 21580;
-            d5.MethodName = "ClientEcho";
+            d5.Validator = PMNet.PMRpcValidator.ForceValidate;
+            d5.ParamLayoutId = 40153;
+            d5.MethodName = "ServerProjectileHitV1";
 
             PMNet.PMNetRpcEntry r5 = new PMNet.PMNetRpcEntry();
             r5.Descriptor = d5;
             r5.OwningClassId = PMGeneratedClassId;
-            r5.Invoke = PMNet_RpcInvoke_ClientEcho;
+            r5.Invoke = PMNet_RpcInvoke_ServerProjectileHitV1;
             rpcs[5] = r5;
+            PMNet.PMRpcDescriptor d6 = new PMNet.PMRpcDescriptor();
+            d6.RpcId = PMGeneratedRpcId_ServerProbe;
+            d6.Direction = PMNet.PMRpcKind.Server;
+            d6.IsReliable = true;
+            d6.Validator = PMNet.PMRpcValidator.ForceValidate;
+            d6.ParamLayoutId = 21580;
+            d6.MethodName = "ServerProbe";
+
+            PMNet.PMNetRpcEntry r6 = new PMNet.PMNetRpcEntry();
+            r6.Descriptor = d6;
+            r6.OwningClassId = PMGeneratedClassId;
+            r6.Invoke = PMNet_RpcInvoke_ServerProbe;
+            rpcs[6] = r6;
+            PMNet.PMRpcDescriptor d7 = new PMNet.PMRpcDescriptor();
+            d7.RpcId = PMGeneratedRpcId_ClientProjectileDecisionV1;
+            d7.Direction = PMNet.PMRpcKind.Client;
+            d7.IsReliable = true;
+            d7.Validator = PMNet.PMRpcValidator.None;
+            d7.ParamLayoutId = 40153;
+            d7.MethodName = "ClientProjectileDecisionV1";
+
+            PMNet.PMNetRpcEntry r7 = new PMNet.PMNetRpcEntry();
+            r7.Descriptor = d7;
+            r7.OwningClassId = PMGeneratedClassId;
+            r7.Invoke = PMNet_RpcInvoke_ClientProjectileDecisionV1;
+            rpcs[7] = r7;
+            PMNet.PMRpcDescriptor d8 = new PMNet.PMRpcDescriptor();
+            d8.RpcId = PMGeneratedRpcId_ClientCombatMatchResultV1;
+            d8.Direction = PMNet.PMRpcKind.Client;
+            d8.IsReliable = true;
+            d8.Validator = PMNet.PMRpcValidator.None;
+            d8.ParamLayoutId = 48121;
+            d8.MethodName = "ClientCombatMatchResultV1";
+
+            PMNet.PMNetRpcEntry r8 = new PMNet.PMNetRpcEntry();
+            r8.Descriptor = d8;
+            r8.OwningClassId = PMGeneratedClassId;
+            r8.Invoke = PMNet_RpcInvoke_ClientCombatMatchResultV1;
+            rpcs[8] = r8;
+            PMNet.PMRpcDescriptor d9 = new PMNet.PMRpcDescriptor();
+            d9.RpcId = PMGeneratedRpcId_ServerCombatAttackV1;
+            d9.Direction = PMNet.PMRpcKind.Server;
+            d9.IsReliable = true;
+            d9.Validator = PMNet.PMRpcValidator.ForceValidate;
+            d9.ParamLayoutId = 50011;
+            d9.MethodName = "ServerCombatAttackV1";
+
+            PMNet.PMNetRpcEntry r9 = new PMNet.PMNetRpcEntry();
+            r9.Descriptor = d9;
+            r9.OwningClassId = PMGeneratedClassId;
+            r9.Invoke = PMNet_RpcInvoke_ServerCombatAttackV1;
+            rpcs[9] = r9;
+            PMNet.PMRpcDescriptor d10 = new PMNet.PMRpcDescriptor();
+            d10.RpcId = PMGeneratedRpcId_ClientCombatAttackResultV1;
+            d10.Direction = PMNet.PMRpcKind.Client;
+            d10.IsReliable = true;
+            d10.Validator = PMNet.PMRpcValidator.None;
+            d10.ParamLayoutId = 59194;
+            d10.MethodName = "ClientCombatAttackResultV1";
+
+            PMNet.PMNetRpcEntry r10 = new PMNet.PMNetRpcEntry();
+            r10.Descriptor = d10;
+            r10.OwningClassId = PMGeneratedClassId;
+            r10.Invoke = PMNet_RpcInvoke_ClientCombatAttackResultV1;
+            rpcs[10] = r10;
+            PMNet.PMRpcDescriptor d11 = new PMNet.PMRpcDescriptor();
+            d11.RpcId = PMGeneratedRpcId_ServerCombatResultAckV1;
+            d11.Direction = PMNet.PMRpcKind.Server;
+            d11.IsReliable = true;
+            d11.Validator = PMNet.PMRpcValidator.ForceValidate;
+            d11.ParamLayoutId = 64819;
+            d11.MethodName = "ServerCombatResultAckV1";
+
+            PMNet.PMNetRpcEntry r11 = new PMNet.PMNetRpcEntry();
+            r11.Descriptor = d11;
+            r11.OwningClassId = PMGeneratedClassId;
+            r11.Invoke = PMNet_RpcInvoke_ServerCombatResultAckV1;
+            rpcs[11] = r11;
+            PMNet.PMRpcDescriptor d12 = new PMNet.PMRpcDescriptor();
+            d12.RpcId = PMGeneratedRpcId_ClientEcho;
+            d12.Direction = PMNet.PMRpcKind.Client;
+            d12.IsReliable = true;
+            d12.Validator = PMNet.PMRpcValidator.None;
+            d12.ParamLayoutId = 21580;
+            d12.MethodName = "ClientEcho";
+
+            PMNet.PMNetRpcEntry r12 = new PMNet.PMNetRpcEntry();
+            r12.Descriptor = d12;
+            r12.OwningClassId = PMGeneratedClassId;
+            r12.Invoke = PMNet_RpcInvoke_ClientEcho;
+            rpcs[12] = r12;
 
             PMNet.PMNetClassEntry entry = new PMNet.PMNetClassEntry();
             entry.ClassId = PMGeneratedClassId;

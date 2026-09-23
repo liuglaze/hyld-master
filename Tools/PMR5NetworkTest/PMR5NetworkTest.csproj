@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-B2b / B2c 验收门禁（契约 Docs/plans/net-r5-network-contract.md「B2b网络driver」）。
+
+      为什么需要它：
+        「DS 是否真的用 World 预留的 NetId 上线」「Pending 期间客户端是否真的看不到幽灵对象」
+        「拒绝/TTL 是否真的把预留退掉」「非 owner 冒名上行是否真的被拒」
+        「裁决下行丢包/重复/乱序是否幂等」「Confirm 与 Create 的顺序是否都正确」
+        「假弹已结束时迟到镜像是否不复活」「stop → 墓碑 → DestroyObject 是否真的复制到客户端」
+        「100 目标是否真的按 ≤48 分包且不超 Verify 配额」「发送失败是否真的可见」
+        —— 这些编译期完全看不出来，运行期又都长得像「偶尔不同步 / 偶尔丢一条 / 永久假弹」。
+
+      测什么（除单列说明外全部是**真实实现**，不直接调业务方法冒充网络）：
+        · 真实 PMNet 核心（PMNet/**，含 Transport / Session / World / Replication / Generated）；
+        · 真实 R5 声明对象与生成产物（PMR3/**，含生成桩 `PMNet_*` 与三条投射物 RPC）；
+        · 真实 PMProjectile 纯核心（契约 / 生命周期 / 挂起 / 历史 / 验证 / 整合器 / codec）；
+        · 投递走**真实 PMTransport 字节链**（分片/序号/ACK/可靠域真实参与），
+          链路用「手工 link + 手工 hub」（与 PMR3RuntimeTest / PMR4NetworkTest 同一手法）；
+        · 声明同步用**真实生成器**（PMNetGen 的 decl-check 模式，只校验不写盘，逐字节）。
+
+      刻意不引用 UnityEngine：R5-B2b 的网络层是纯 C#；Unity 表现属 C（PMUnityProjectile*）。
+
+      运行：dotnet Tools/PMR5NetworkTest/bin/Release/net8.0/PMR5NetworkTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR5NetworkTest</AssemblyName>
+    <RootNamespace>PMR5NetworkTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实源码面：测的就是这些实现本身。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\**\*.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只保证生成器先被构建出来（本工程不引用它的程序集，是当进程调用做声明同步校验）。 -->
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMCombat/**/*.cs" LinkBase="PMCombat" />
+    <Compile Include="../../Client/Assets/Scripts/Shared/**/*.cs" LinkBase="Shared" />
+  </ItemGroup>
+</Project>

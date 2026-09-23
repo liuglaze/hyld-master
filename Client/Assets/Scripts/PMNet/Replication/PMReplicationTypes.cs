@@ -165,6 +165,16 @@ namespace PMNet
         /// <summary>标脏但值未变、因而未发数据的槽位次数（D-R0-13）。</summary>
         public long SuppressedUnchanged;
 
+        /// <summary>
+        /// `PushBased=false` 的槽位被真正采样的次数（取当前值与基线比较，无论最终是否发出）。
+        ///
+        /// 用途：把"没有载荷"拆成两种完全不同的原因 ——
+        ///   - 采样了但值没变（本计数与 <see cref="SuppressedUnchanged"/> 同时增长）；
+        ///   - 压根没被调度（两个计数都不动）。
+        /// 缺了它，"无变化所以不发"与"该发却没发"在统计上长得一模一样。
+        /// </summary>
+        public long PollSampledSlots;
+
         /// <summary>收到的丢包通知条数（传输层丢失提醒，驱动提前重发）。</summary>
         public long LossReports;
 
@@ -229,6 +239,7 @@ namespace PMNet
             sb.Append(" transition=").Append(TransitionForceSends);
             sb.Append(" condFiltered=").Append(ConditionFiltered);
             sb.Append(" suppressedUnchanged=").Append(SuppressedUnchanged);
+            sb.Append(" pollSampled=").Append(PollSampledSlots);
             sb.Append(" loss=").Append(LossReports);
             sb.Append(" deferredBudget=").Append(DeferredByBudget);
             sb.Append(" deferredInflight=").Append(DeferredByInflight);

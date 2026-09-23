@@ -11,8 +11,7 @@
 
       覆盖范围：
         Client/Assets/Scripts/Server/Boot/PMNetBootstrap.cs   ← 启动身份判定与分流
-        Client/Assets/Scripts/Server/Boot/PMDsHost.cs         ← DS 进程宿主（socket / tick / 心跳 / 路由接线）
-        Client/Assets/Scripts/Server/Net/*.cs                ← P3'-1 战斗 UDP 路由层
+        Client/Assets/Scripts/Server/Boot/PMDsHost.cs         ← DS 进程宿主（新链会话 wrapper：bootstrap 校验 / Pump / 幂等清理）
         Client/Assets/Editor/PMDsBuild.cs                      ← DS 构建入口
         Client/Assets/Scripts/Log/Loging.cs                    ← 真实日志类（校验日志 API 用法）
 
@@ -59,9 +58,6 @@
     <!-- 权威 protoc 产物：路由层的 MainPack / ActionCode 来自它 -->
     <Compile Include="..\..\Client\Assets\Scripts\Server\SocketProto.cs" LinkBase="Client\Proto" />
 
-    <!-- P3'-1 新增的战斗 UDP 路由层（同时由 PMUdpRouterCheck 单独门禁） -->
-    <Compile Include="..\..\Client\Assets\Scripts\Server\Net\**\*.cs" LinkBase="Client\Net" />
-
     <!-- 被校验的胶水文件 -->
     <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMNetBootstrap.cs" LinkBase="Client\Boot" />
     <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsHost.cs" LinkBase="Client\Boot" />
@@ -79,6 +75,8 @@
     <!-- R3-B 的声明对象 + 生成物（PMR3 在 PMNet 目录之外，不会被上面的 PMNet 通配符收进来） -->
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="Client\PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="Client\PMR3" />
+    <!-- R5-B2a：投射物声明对象（PMR3Runtime.Attach 要注册它的工厂/OnRep 分发表，故必须真编）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR5Projectile.cs" LinkBase="Client\PMR3" />
     <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="Client\PMR3\Generated" />
 
     <!--
@@ -97,4 +95,16 @@
     <Compile Include="..\..\Client\Assets\Editor\PMDsBuild.cs" LinkBase="Client\Editor" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMProjectile/**/*.cs" LinkBase="PMProjectile" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMR3/PMR5ProjectileDriver.cs" LinkBase="PMR3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMCombat/**/*.cs" LinkBase="PMCombat" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMR3/PMR6CombatDriver.cs" LinkBase="PMR3" />
+  </ItemGroup>
 </Project>

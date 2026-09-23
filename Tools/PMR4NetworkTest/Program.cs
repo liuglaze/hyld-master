@@ -5,7 +5,7 @@
 //       正向：全字段往返；负向：NaN/未知 Mode/越界/缺必填/尾部/跨 kind/身份非法全部被拒
 //       且**不产生部分结果**。手写字节意味着测试是解码器的独立对照，而不是"用实现测实现"。
 //   [2] **真实链路**：AP→DS→AP/SP 走**真实 PMTransport 字节链**（分片/序号/ACK/可靠域/
-//       不可靠域都真实参与）+ **真实生成桩**（`PMNet_*`）+ 真实世界/复制/生命周期，
+//       不可靠域都真实参与）+ **真实声明层入口**（普通名 `ServerMovementInputV1` 等）+ 真实世界/复制/生命周期，
 //       覆盖：属性收敛、输入首包丢失、重复/乱序、完整状态差异回滚、事件先后与迟到、
 //       重同步升流与旧流丢弃、SP 只插值、DS 预算防加速、多角色隔离。
 //   [3] **声明同步**：调真实生成器 `PMNetGen --decl-check` 逐字节校验产物与声明/锁文件一致，
@@ -280,13 +280,13 @@ namespace PMR4NetworkTest
 
             // A3：运行期描述符（零反射注册表）。
             CheckTrue(PMNetRegistry.IsSealed, "注册表已封板");
-            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 3, "复制属性位宽 == 3");
+            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 12, "复制属性位宽 == 12（R4原3项 + R6战斗9项）");
             CheckEq(PMR3Player.PMGeneratedClassId, 405815557u, "运行期 ClassId 与锁一致");
 
             PMNetClassEntry entry;
             CheckTrue(PMNetRegistry.TryGetClass(PMR3Player.PMGeneratedClassId, out entry) && entry != null,
                 "PMR3Player 已注册");
-            CheckEq(entry.Rep.Properties.Length, 3, "复制描述符属性数 == 3");
+            CheckEq(entry.Rep.Properties.Length, 12, "复制描述符属性数 == 12（含R6战斗属性）");
 
             PMNetRpcEntry rpc;
             CheckTrue(PMNetRegistry.TryGetRpc(PMR3Player.PMGeneratedClassId,
@@ -2138,7 +2138,7 @@ namespace PMR4NetworkTest
                 regressing.Aux = c.ApDriver.GetPredictedAux();
 
                 long rejectedBefore = c.ApDriver.ResyncRejectedRegressing;
-                c.OwnerPlayer.PMNet_ClientMovementResyncV1(PMR4MovementCodec.EncodeSnapshot(true, regressing));
+                c.OwnerPlayer.ClientMovementResyncV1(PMR4MovementCodec.EncodeSnapshot(true, regressing));
                 c.Rig.Frame(2);
                 c.Apply();
                 CheckTrue(c.ApDriver.ResyncRejectedRegressing > rejectedBefore,
@@ -2288,7 +2288,7 @@ namespace PMR4NetworkTest
             byte[] payload = PMR4MovementCodec.EncodeEvents(
                 c.Epoch, c.DsDriver.InstanceId, stream, sequence, records);
 
-            c.ServerPlayer.PMNet_ClientMovementEventsV1(payload);
+            c.ServerPlayer.ClientMovementEventsV1(payload);
         }
 
         /// <summary>经**真实生成桩**从 DS 侧发一张重同步完整快照（owner-only 可靠 RPC）。</summary>
@@ -2304,7 +2304,7 @@ namespace PMR4NetworkTest
             blob.Sync = c.DsDriver.GetAuthoritativeSync();
             blob.Aux = c.DsDriver.GetAuthoritativeAux();
 
-            c.ServerPlayer.PMNet_ClientMovementResyncV1(PMR4MovementCodec.EncodeSnapshot(true, blob));
+            c.ServerPlayer.ClientMovementResyncV1(PMR4MovementCodec.EncodeSnapshot(true, blob));
         }
 
         /// <summary>
@@ -2669,7 +2669,7 @@ namespace PMR4NetworkTest
                         only2[0].Input = Move(0f, 0f, 0f, false);
                         byte[] gapPayload = PMR4MovementCodec.EncodeInputs(
                             c2.Epoch, c2.ApDriver.InstanceId, c2.ApDriver.StreamVersion, only2);
-                        c2.OwnerPlayer.PMNet_ServerMovementInputV1(gapPayload);
+                        c2.OwnerPlayer.ServerMovementInputV1(gapPayload);
                         // 发送→传输层 flush→投递→派发 都发生在帧边界上，且**各需一帧**。
                         c2.Rig.Frame(2);
                         PMPumpResult gapPump = c2.DsDriver.Pump(16.0, c2.ServerFrameId());
@@ -2730,7 +2730,7 @@ namespace PMR4NetworkTest
                     e.Input = Move(0f, 1f, 0f, false);
                     byte[] payload = PMR4MovementCodec.EncodeInputs(epoch, da.InstanceId, da.StreamVersion,
                         new[] { e });
-                    a.PMNet_ServerMovementInputV1(payload);
+                    a.ServerMovementInputV1(payload);
                     rig.Frame(1);
                     da.Pump(16.0, new PMFrameId(PMFrameDomain.AuthorityServer, i + 1));
                 }
@@ -2747,7 +2747,7 @@ namespace PMR4NetworkTest
                 wrong.StepMs = 16;
                 wrong.Input = Move(0f, 1f, 0f, false);
                 byte[] wrongPayload = PMR4MovementCodec.EncodeInputs(epoch, 12345u, 1u, new[] { wrong });
-                b.PMNet_ServerMovementInputV1(wrongPayload);
+                b.ServerMovementInputV1(wrongPayload);
                 rig.Frame(1);
                 db.Pump(16.0, new PMFrameId(PMFrameDomain.AuthorityServer, 99));
                 CheckTrue(db.InputRejectedIdentity > 0, "instanceId 不匹配的上行输入被拒（身份校验）");
@@ -2775,7 +2775,7 @@ namespace PMR4NetworkTest
                     long rejectedBefore = rig.ServerViews[1].Connection.RpcRejected;
                     long boundaryBefore = da.OutputBoundary.Value;
 
-                    victim.PMNet_ServerMovementInputV1(cheatPayload);
+                    victim.ServerMovementInputV1(cheatPayload);
                     rig.Frame(2);
                     da.Pump(16.0, new PMFrameId(PMFrameDomain.AuthorityServer, 500));
 

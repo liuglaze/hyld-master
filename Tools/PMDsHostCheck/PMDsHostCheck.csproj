@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      旧链退役（net-legacy-retirement-contract.md §C）后的 DS 宿主门禁：**只测 PMDsHost 这个 wrapper**。
+
+      为什么需要它：
+        删掉「无 -bootstrap 的裸 UDP 诊断分支」后，PMDsHost 变成一个新链会话宿主的轻量 wrapper，
+        而 Tools/PMUnityGlueCheck 只能证明它「编得过」——编得过并不等于：
+          · 缺 -bootstrap 时真的 Quit(1) 且**不**启动会话（= 不出现第二套权威/第二个监听面）；
+          · 有 bootstrap 时真的调了一整次 Start，并且每帧恰好 Pump 一次；
+          · 会话请求退出后不再 Pump；
+          · OnDestroy / OnApplicationQuit 重复到达时 Dispose 只生效一次。
+
+      做法（有限 HostStubs，**非真实 Unity**）：
+        · 编**真实**的 Client/Assets/Scripts/Server/Boot/PMDsHost.cs；
+        · UnityEngine / Logging / PMNetLaunchOptions 用最小替身（见 HostStubs.cs 说明）；
+        · PMDsSessionHost 用**受控替身**（记录 StartCalls / PumpCalls / DisposeCalls），
+          这样「wrapper 的调用次序与次数」才是可断言的；
+        · 另外做一组**结构门**（读真实源码做 token 断言），确认旧路由/裸 socket/诊断 MainPack
+          与旧 run_ds 形态没有再回来。
+
+      本工程证明什么 / 不证明什么：
+        · 证明：PMDsHost 的控制流（失败退出、驱动次数、退出后停 Pump、清理幂等）+ 退役面的结构事实；
+        · 不证明：真实 PMDsSessionHost 的装配、真实 Unity 运行期行为（那由 PMUnityGlueCheck / PMClientCheck
+          编真实源码覆盖编译面，运行期仍由用户实机验收）。
+
+      运行：在本工程目录执行 dotnet run -c Release（或 dotnet build 后直接跑产物）。
+      语言面：net8.0 运行 + C# 7.3（与 Unity 2019.4 的编译上限一致，避免写出编辑器编不过的 wrapper）。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMDsHostCheck</AssemblyName>
+    <RootNamespace>PMDsHostCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>CS0169;CS0414;CS0649;CS8981</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="HostStubs.cs" />
+
+    <!-- 被校验的真实源码（wrapper 本体）。注意：刻意**不**引 Google.Protobuf / 旧路由层。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Boot\PMDsHost.cs" LinkBase="Client\Boot" />
+  </ItemGroup>
+
+</Project>

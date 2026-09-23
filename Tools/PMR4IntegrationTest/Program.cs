@@ -17,7 +17,7 @@
 //    · 真实认证材料：PMDsMatchKey / PMDsTicketIssuer / PMDsBootstrapDocument / PMDsEntryCodec；
 //      DS 侧逐身份验票走真实 PMHandshakeServer（与真实 DS 同一条代码路径）；
 //    · 真实 PMUdpSessionEndpoint.OpenServer / OpenClient（真实 UDP socket、真实握手）；
-//    · 真实 PMR3 声明对象与生成桩（PMNet_ServerMovementInputV1 / PMNet_ClientMovementEventsV1 …）；
+//    · 真实 PMR3 声明对象与生成桩（ServerMovementInputV1 / ClientMovementEventsV1 …）；
 //    · 真实 PMR4MovementCodec / PMR4MovementDriver（上游输入批与旧流快照都用真实 codec 编码）；
 //    · 可控确定性碰撞环境 PMMoverTestWorld（**同一套**给 DS 与两个客户端）。
 //
@@ -644,7 +644,7 @@ namespace PMR4IntegrationTest
             CheckTrue(stalePayload != null && stalePayload.Length > 0, "F9 旧流输入批已用真实 codec 编码");
 
             long rejectedStreamBefore = dsDriver.InputRejectedStream;
-            _clientA.ApPlayer.PMNet_ServerMovementInputV1(stalePayload);
+            _clientA.ApPlayer.ServerMovementInputV1(stalePayload);
             for (int i = 0; i < 6; i++) { Frames(1); }
 
             CheckTrue(dsDriver.InputRejectedStream > rejectedStreamBefore,

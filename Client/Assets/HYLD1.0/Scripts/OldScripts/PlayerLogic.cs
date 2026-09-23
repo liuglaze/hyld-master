@@ -49,6 +49,9 @@ using Image = UnityEngine.UI.Image;
 /// </summary>
 public class PlayerLogic : MonoBehaviour
 {
+	// 旧链退役（契约 §B）：原取 `LocalPositionJumpTraceThreshold`(0.8f)。
+	// 该值只服务本文件的位置跳变日志门限，不能为取常量而保留旧 BattleData，故内联同值常量。
+	private const float LocalPositionJumpTraceThreshold = 0.8f;
 	public int playerID = -1;
 	[FormerlySerializedAs("selfTransform")] public Transform selfUITransform;
 	[FormerlySerializedAs("target")] public Transform selfBodyTransform;
@@ -232,7 +235,7 @@ public class PlayerLogic : MonoBehaviour
 		HYLDStaticValue.Players[playerID].playerPositon=RevivePositon;
 		selfBodyTransform.position=RevivePositon;
 		float reviveDelta = Vector3.Distance(beforeRevive, RevivePositon);
-		if (playerID == HYLDStaticValue.playerSelfIDInServer && reviveDelta >= Manger.BattleData.LocalPositionJumpTraceThreshold)
+		if (playerID == HYLDStaticValue.playerSelfIDInServer && reviveDelta >= LocalPositionJumpTraceThreshold)
 		{
 			Logging.HYLDDebug.FrameTrace($"[LocalPosJump][Revive] playerID={playerID} delta={reviveDelta:F3} before=({beforeRevive.x:F2},{beforeRevive.y:F2},{beforeRevive.z:F2}) revive=({RevivePositon.x:F2},{RevivePositon.y:F2},{RevivePositon.z:F2})");
 		}

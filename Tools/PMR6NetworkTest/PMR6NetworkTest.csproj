@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R6-B 验收门禁（契约 Docs/plans/net-r6-combat-contract.md「B 整合与宿主」+「验收 T6B」）。
+
+      为什么需要它：
+        「客户端按了一次攻击键，DS 是否真的按同一份 planner 批准、真的扣了一次资源」
+        「N 颗预测弹是否真的经真实字节链到达 DS、真的被 core 按已批准 slot 授权」
+        「客户端上报的预测命中是否真的经 DS 真实 history 验证后由 core 唯一出口结算」
+        「HP/能量是否真的回流、资源是否真的只复制给 owner（OwnerOnly）」
+        「Mana 不足 / 伪造多弹 / 抛物线 / 未知英雄是否真的拒绝且**无资源副作用**」
+        「重复 attack / 重复 Spawn 是否真的不二次扣费」
+        「一血终局的结果是否真的逐 owner 可靠送达、ACK 闭环与 5s 宽限是否真的按口径收敛」
+        「客户端是否真的无法篡改资源、无法在 dead/end 后写任何东西」
+        「一个会话 Dispose 是否真的不牵连另一个会话」
+        —— 这些编译期完全看不出来，运行期又都长得像「偶尔不扣血 / 偶尔多扣蓝 / 胜负偶尔不到」。
+
+      测什么（除单列说明外全部是**真实实现**，不直接调业务方法冒充网络）：
+        · 真实 PMNet 核心（PMNet/**，含 Transport / Session / World / Replication / Generated）；
+        · 真实 R5 声明对象与生成产物（PMR3/**，含生成桩 `PMNet_*`）；
+        · 真实 PMProjectile 纯核心（契约 / 生命周期 / 挂起 / 历史 / 验证 / 整合器 / codec）；
+        · 真实 PMCombat 纯核心（PMCombatWeaponPlanner / PMCombatSession —— 不替身、不绕过）；
+        · 真实 R5 投射物驱动 + 真实 R6 战斗驱动；
+        · 投递走**真实 PMTransport 字节链**（分片/序号/ACK/可靠域真实参与），
+          链路用「手工 link + 手工 hub」（与 PMR5NetworkTest / PMR3RuntimeTest 同一手法）。
+
+      刻意不引用 UnityEngine：R6-B 的网络层是纯 C#；Unity 表现/位置冻结属宿主。
+
+      运行：dotnet Tools/PMR6NetworkTest/bin/Release/net8.0/PMR6NetworkTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR6NetworkTest</AssemblyName>
+    <RootNamespace>PMR6NetworkTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实源码面：测的就是这些实现本身。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMPrediction\**\*.cs" LinkBase="PMPrediction" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\**\*.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\**\*.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMCombat\**\*.cs" LinkBase="PMCombat" />
+    <Compile Include="..\..\Client\Assets\Scripts\Shared\**\*.cs" LinkBase="Shared" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\**\*.cs" LinkBase="PMR3" />
+  </ItemGroup>
+
+</Project>

@@ -17,8 +17,22 @@ namespace PMNet.Control
     /// </summary>
     public sealed class PMDsLobbyHostOptions
     {
-        /// <summary>是否启用新链（由 <c>HYLD_PMNET_DS=1</c> 显式打开；默认关闭 = opt-in）。</summary>
+        /// <summary>
+        /// 是否启用 DS 宿主。
+        /// 旧战斗链退役后本字段在 production 恒为 true（<see cref="FromEnvironment"/> 不再读
+        /// <c>HYLD_PMNET_DS</c>）；保留它只为测试可以显式禁用宿主，
+        /// 此时匹配会**显式失败**，不回退旧链。
+        /// </summary>
         public bool Enabled;
+
+        /// <summary>
+        /// 旧选链开关 <c>HYLD_PMNET_DS</c> 是否被显式设置过。
+        /// 它**不再参与选链**（Enabled 恒为 true，旧链已退役）；只为启动时打一条明确的忽略日志。
+        /// </summary>
+        public bool DeprecatedLegacySwitchIgnored;
+
+        /// <summary>被忽略的旧开关原始值（仅用于日志）。</summary>
+        public string DeprecatedLegacySwitchValue = string.Empty;
 
         /// <summary>控制通道监听地址（首版只允许 loopback）。</summary>
         public string ListenAddress = "127.0.0.1";
@@ -92,18 +106,29 @@ namespace PMNet.Control
 
         /// <summary>
         /// 从环境变量装载配置。**不提供任何猜测出来的默认路径**：
-        /// 未显式配置 exe/工作目录/引导目录时，新链保持关闭。
+        /// 未显式配置 exe/工作目录/引导目录时，宿主不会启动（匹配显式失败，而不是猜路径）。
         ///
         /// 变量清单：
-        /// - <c>HYLD_PMNET_DS</c> = 1|true 打开新链；
         /// - <c>HYLD_PMNET_DS_EXE</c> / <c>HYLD_PMNET_DS_WORKDIR</c> / <c>HYLD_PMNET_DS_BOOTSTRAP_DIR</c>；
         /// - <c>HYLD_PMNET_DS_PORT_FIRST</c> / <c>HYLD_PMNET_DS_PORT_LAST</c>；
         /// - <c>HYLD_PMNET_DS_CONTROL_ADDR</c> / <c>HYLD_PMNET_DS_CONTROL_PORT</c>。
+        ///
+        /// 注意（旧链退役）：<c>HYLD_PMNET_DS</c> 已**不再是选链开关**。旧战斗链已删除，
+        /// 因此 Enabled 恒为 true；显式写 0 也不会恢复旧链，只会记录一条被忽略的日志。
         /// </summary>
         public static PMDsLobbyHostOptions FromEnvironment()
         {
             PMDsLobbyHostOptions options = new PMDsLobbyHostOptions();
-            options.Enabled = ReadBool("HYLD_PMNET_DS", false);
+
+            // 新链是唯一链路：不再有任何开关能选回旧链。
+            options.Enabled = true;
+            string legacySwitch = Environment.GetEnvironmentVariable("HYLD_PMNET_DS");
+            if (!string.IsNullOrEmpty(legacySwitch))
+            {
+                options.DeprecatedLegacySwitchIgnored = true;
+                options.DeprecatedLegacySwitchValue = legacySwitch;
+            }
+
             options.DsExecutablePath = ReadString("HYLD_PMNET_DS_EXE", string.Empty);
             options.DsWorkingDirectory = ReadString("HYLD_PMNET_DS_WORKDIR", string.Empty);
             options.BootstrapRootDirectory = ReadString("HYLD_PMNET_DS_BOOTSTRAP_DIR", string.Empty);
@@ -130,19 +155,6 @@ namespace PMNet.Control
             }
 
             return fallback;
-        }
-
-        private static bool ReadBool(string name, bool fallback)
-        {
-            string value = Environment.GetEnvironmentVariable(name);
-            if (string.IsNullOrEmpty(value))
-            {
-                return fallback;
-            }
-
-            return value == "1"
-                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -427,10 +439,7 @@ namespace PMNet.Control
         public long UnboundConnectionsClosedByTimeout;
         public long PumpExceptions;
 
-        /// <summary>是否启用新链（由 <see cref="Server"/> 在启动时按配置置位；缺省关闭 = opt-in）。</summary>
-        public static bool NewChainEnabled { get; internal set; }
-
-        /// <summary>进程内唯一实例（未启用时为 null）。</summary>
+        /// <summary>进程内唯一实例（未启动时为 null）。</summary>
         public static PMDsLobbyHost Instance { get; internal set; }
 
         public PMDsLobbyHost(PMDsLobbyHostOptions options, IPMDsClock clock,
@@ -765,7 +774,7 @@ namespace PMNet.Control
             _commands.Enqueue(command);
         }
 
-        /// <summary>该 uid 是否正被新链的某个会话占用（旧 ClearSence/旧路由用它避免误作用新局）。</summary>
+        /// <summary>该 uid 是否正被新链的某个会话占用（大厅侧只读查询：已入局的 uid 不应再走任何大厅局内路由）。</summary>
         public bool IsUidInMatch(int uid)
         {
             return _ledger.IsOccupied(uid);

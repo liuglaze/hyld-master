@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-A3 语言面门禁：整合器 PMProjectileCoordinator 加上它消费的两组真实核心（A1 生命周期/Pending、
+      A2 历史/验证）必须能在 Unity 2019.4 的能力上限内编译，即 netstandard2.0 + C# 7.3，零 UnityEngine。
+
+      为什么需要它：
+        Unity 2019.4 的托管编译上限就是 C# 7.3 / .NET Standard 2.0。整合器最容易悄悄越界的写法是：
+          · Math.Clamp / HashCode.Combine（.NET Standard 2.1 才有）
+          · ??= / switch 表达式 / using var / target-typed new / 元组（C# 8+）
+          · 依赖 UnityEngine 的 Vector3 / Physics（本批明确禁止，几何由 A2 自算）
+        这些在本机 IDE 里都不报错，只有在这里编译才会暴露。
+
+      依赖面**逐文件**给定，不用通配符，也**不 glob** 并行的 B1 codec（PMProjectileCodec 正在并行实现，
+      A3 禁止引用或等待它）：
+        · PMProjectile/PMProjectileContracts.cs   —— 主 Agent 冻结的共享契约（只读）
+        · PMProjectile/PMProjectileLifecycle.cs   —— A1：生命周期 / 假弹接管 / 激活账本 / 墓碑
+        · PMProjectile/PMProjectilePending.cs     —— A1：三类 Pending 队列
+        · PMProjectile/PMProjectileHistory.cs     —— A2：目标历史
+        · PMProjectile/PMProjectileValidator.cs   —— A2：L0–L4 命中验证
+        · PMProjectile/PMProjectileCoordinator.cs —— A3：本整合器
+        · PMNet/PMNetIdentity.cs + PMNet/PMNetRole.cs —— PMFrameId / PMFrameDomain / PMNetRole
+        · PMMover/PMMoverState.cs                 —— PMVector3（Y-up 米，只依赖 System）
+
+      不引 UnityEngine / 不引 Google.Protobuf：这是本工程能成立的前提（M09 零 Unity 依赖）。
+      本工程是**库**，没有 Program.cs：它的验收形式就是「编译 exit 0」。
+
+      构建：dotnet build Tools/PMProjectileIntegrationCheck/PMProjectileIntegrationCheck.csproj -c Release
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMProjectileIntegrationCheck</AssemblyName>
+    <RootNamespace>PMProjectileIntegrationCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 冻结共享契约（主 Agent 落盘，只读依赖） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <!-- A1：生命周期 / 三类 Pending（只读依赖，本组不修改） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <!-- A2：目标历史 / L0-L4 命中验证（只读依赖，本组不修改） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileHistory.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileValidator.cs" LinkBase="PMProjectile" />
+    <!-- A3：本整合器（唯一新增实现） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCoordinator.cs" LinkBase="PMProjectile" />
+    <!-- 身份 / 帧号 / 角色原语（PMFrameId 出现在冻结契约里） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+    <!-- PMVector3（契约与实现都只用到这一份 Mover 文件，且该文件自包含） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+  </ItemGroup>
+
+</Project>

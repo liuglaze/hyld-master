@@ -282,7 +282,15 @@ internal static class Program
             Check(loaded, "D4 产物已存在：TryLoad 成功" + (loaded ? "" : "（" + Shorten(loadError) + "）"));
             if (loaded)
             {
-                CheckEq(ExpectedValidDigest, info.CollisionDigest, "D5 产物 collisionDigest（真实烘焙值）");
+                // 真实产物不是下方临时部署夹具：从磁盘摘要独立计算前4字节小端值。
+                using (JsonDocument actual = JsonDocument.Parse(File.ReadAllText(expected, Encoding.UTF8)))
+                {
+                    string hash = actual.RootElement.GetProperty("contentDigest").GetString();
+                    uint expectedBakedDigest = uint.Parse(hash.Substring(6, 2) + hash.Substring(4, 2)
+                        + hash.Substring(2, 2) + hash.Substring(0, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+                    if (expectedBakedDigest == 0u) expectedBakedDigest = 1u;
+                    CheckEq(expectedBakedDigest, info.CollisionDigest, "D5 产物 collisionDigest（独立小端派生）");
+                }
             }
         }
         else

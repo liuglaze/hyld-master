@@ -10,7 +10,7 @@
 //
 // 客户端侧**不是 Unity，也不是 UI**：两个纯 C# 测试客户端各自装配真实的
 //   PMSession / PMNetWorld / PMNetSessionBridge / PMUdpSessionEndpoint.OpenClient / PMR3Runtime，
-// 用真实 UDP 走真实握手与票据验证，各发一次 owner ServerProbe（经生成桩 PMNet_ServerProbe），
+// 用真实 UDP 走真实握手与票据验证，各发一次 owner ServerProbe（经声明层入口 ServerProbe），
 // 观察 ClientEcho / ProbeCount / 两个副本。真实 UnityUI 分流（UIMatchingPanel 的 PMDS1: 分支）
 // 与真实 Application.Quit 收尾不在本工具范围（属 T42 的 UI/跨机待办）。
 //
@@ -25,7 +25,7 @@
 //                `--hold-seconds N` 暂缓探针做真实长局；`--drop-control-after-ready`
 //                停控制下行验证 DS 非 0 退出。三者互不改变默认行为。
 //   --movement  在**探针开闸之前**插入 R4-B 真实 DS 权威运动验收（见 RunMovementPhase）：
-//                用**真实生成的运动 input RPC**（PMNet_ServerMovementInputV1）驱动真实
+//                用**真实生成的运动 input RPC**（ServerMovementInputV1）驱动真实
 //                Unity DS，逐项验收：Create 初值非空 / 每客户端 1 AP + 1 SP / 权威位移 /
 //                撞墙停在 ±0.9 不穿墙 / Space 起跳峰值 > 1.5 后落回 y≈1 且 Walking /
 //                owner 可靠 Mode+Landed 事件各 kind 到达且 Key 去重 / 对手 SP 副本收到
@@ -878,8 +878,8 @@ namespace PMR3UnitySmoke
                     LastProbeNonce = ProbeNonceSent;
                     player.ProbeSentCount++;
 
-                    // 经**生成的调用桩**发（PMNet_ServerProbe），不手写业务状态包（契约 §7.4）。
-                    player.PMNet_ServerProbe(LastProbeNonce);
+                    // 经**声明层入口**发（普通名 ServerProbe），不手写业务状态包（契约 §7.4）。
+                    player.ServerProbe(LastProbeNonce);
                 }
 
                 PendingProbes.Clear();
@@ -2510,7 +2510,7 @@ namespace PMR3UnitySmoke
                         rig.TicksAccepted++;
                         rig.JumpEdgePending = false;
 
-                        // 真实生成的 input RPC：PMNet_ServerMovementInputV1（Unreliable + ForceValidate）。
+                        // 真实生成的 input RPC：ServerMovementInputV1（Unreliable + ForceValidate）。
                         rig.ApDriver.SendInputPayload();
                     }
                     else
@@ -2566,7 +2566,7 @@ namespace PMR3UnitySmoke
 
             /// <summary>
             /// 重同步升流验收：
-            ///   ① 客户端经**真实生成桩** <c>PMNet_ServerMovementResyncV1</c> 请求重同步
+            ///   ① 客户端经**真实生成桩** <c>ServerMovementResyncV1</c> 请求重同步
             ///      ⇒ DS 升流 + 下发完整可信快照（Reliable，owner-only）；
             ///   ② 用**旧流代次**编码一包合法 V1 载荷（帧号正好是 DS 期望的下一帧）手工上行：
             ///      若旧流被接纳，胶囊会立即向 +X 反向加速；断言权威 x **从未反向** ⇒ 旧流输入无效；
@@ -2602,7 +2602,7 @@ namespace PMR3UnitySmoke
                     + " resyncRequestsSent=" + rig.ApDriver.ResyncRequestsSent);
 
                 // ① 真实生成桩上行（Reliable + ForceValidate）；Owner 校验由生成物负责。
-                rig.ApPlayer.PMNet_ServerMovementResyncV1(oldStream);
+                rig.ApPlayer.ServerMovementResyncV1(oldStream);
 
                 bool rebound = MovementWaitFor(delegate { return rig.ApDriver.StreamVersion == oldStream + 1u; }, 8000);
                 MovementDrain(200);
@@ -2809,7 +2809,7 @@ namespace PMR3UnitySmoke
                         frameCursor, batchCount, moveX, moveZ);
 
                     // 真实生成的调用桩（owner 校验/Condition/可靠性都由生成物决定）。
-                    rig.ApPlayer.PMNet_ServerMovementInputV1(payload);
+                    rig.ApPlayer.ServerMovementInputV1(payload);
                     framesSent += batchCount;
                     frameCursor += batchCount;
 

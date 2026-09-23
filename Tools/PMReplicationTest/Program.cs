@@ -73,6 +73,51 @@ namespace PMReplicationTest
                     "IsolateOnRepExceptions 恒 false（回调异常不隔离、穿透到网络层）",
                     delegate (PMRepOptions o) { return new FaultUnisolatedOnRepChannel(o); },
                     new string[] { "[P." }),
+                new FaultCase(
+                    "F6 轮询属性（PushBased=false）必须参与调度",
+                    "ShouldPollProperty 恒 false（旧实现：NeedsWork 的触发源里没有 `PushBased=false`）",
+                    delegate (PMRepOptions o) { return new FaultNoPollChannel(o); },
+                    new string[] { "SA4 ", "SB3 " }),
+                new FaultCase(
+                    "F7 可见性跃迁必须记录两个方向",
+                    "IsVisibilityTransition 只认 met && !wasActive（旧实现：失去可见性不被记录）",
+                    delegate (PMRepOptions o) { return new FaultGainOnlyTransitionChannel(o); },
+                    new string[] { "SG3 ", "SG4 " }),
+                new FaultCase(
+                    "F8 不可见槽位的未知基线不算工作",
+                    "ShouldWorkOnUnknownBaseline 恒 true（旧实现：不可见槽位永久占用每连接预算）",
+                    delegate (PMRepOptions o) { return new FaultBaselineAlwaysWorkChannel(o); },
+                    new string[] { "SE2 " }),
+                new FaultCase(
+                    "F9 每连接对象预算必须轮转",
+                    "UseFairBudgetRotation 恒 false（旧实现：每轮从表头分配预算，前缀常驻轮询饿死后续对象）",
+                    delegate (PMRepOptions o) { return new FaultPrefixBudgetChannel(o); },
+                    new string[] { "SF3 " }),
+                new FaultCase(
+                    "F10 不可见槽位不执行 Writer",
+                    "IsSlotFullyConfirmed 覆写为'先采样再判可见性'（旧实现：确认前不判可见性就执行 Writer）",
+                    delegate (PMRepOptions o) { return new FaultSampleInvisibleSlotChannel(o); },
+                    new string[] { "SD3 " }),
+                new FaultCase(
+                    "F11 旧调度语义整块还原（轮询补丁之前的实现）",
+                    "五个决策点同时取旧形态：不采样 PushBased=false / 只认单向可见性跃迁 / 任何未知基线都算工作 / 表头优先 / 确认前先采样",
+                    delegate (PMRepOptions o) { return new FaultOldPollingSemanticsChannel(o); },
+                    new string[] { "SA4 ", "SB3 ", "SD3 ", "SE2 ", "SF3 ", "SG3 ", "SG4 " }),
+                new FaultCase(
+                    "F12 对象级触发源（ForceInclude / 脏位）必须按可见性过滤",
+                    "ShouldFilterForceAndDirtyByVisibility 恒 false（旧实现：ForceIncludeCount>0 与 Dirty.HasAny 不分可见性，不可见槽位上的标记终身吃预算）",
+                    delegate (PMRepOptions o) { return new FaultUnfilteredWorkChannel(o); },
+                    new string[] { "T-a5 ", "T-a6 ", "T-b4 " }),
+                new FaultCase(
+                    "F13 失去可见性必须当场记住（预算顺延不能丢）",
+                    "ShouldCommitVisibilityLossUpfront 恒 false（旧实现：只在进入 ScanAndAppend 时才记录，顺延的轮次把这次丢失丢掉）",
+                    delegate (PMRepOptions o) { return new FaultLossOnlyOnScanChannel(o); },
+                    new string[] { "T-c1-8", "T-c1-9", "T-c2-8" }),
+                new FaultCase(
+                    "F14 旧调度语义整块还原（本轮修复之前的实现）",
+                    "两个决策点同时取旧形态：ForceInclude/脏位不分可见性 + 失去可见性只在扫描时记录",
+                    delegate (PMRepOptions o) { return new FaultOldForceDirtySemanticsChannel(o); },
+                    new string[] { "T-a5 ", "T-a6 ", "T-b4 ", "T-c1-8", "T-c1-9", "T-c2-8" }),
             };
 
             int caughtCount = 0;
@@ -188,6 +233,11 @@ namespace PMReplicationTest
             Section("P. 回调异常与协议失败分离（RV2 返工）", TestOnRepExceptionIsolation);
             Section("Q. 暂存工厂必须产出新对象（RV2 返工）", TestStagingFactoryRejection);
             Section("R. 非纯 Reader 的剩余边界（诚实记录）", TestNonPureReaderBoundary);
+            Section("S. 轮询（PushBased=false）调度：可见非 Push 每轮采样 / 无变化不发 / "
+                + "补不齐的不可见槽位不耗预算 / 预算轮转", TestPollScheduling);
+            Section("T. 独立对抗审查：**对象级**触发源（ForceInclude/脏位）也必须按可见性过滤 / "
+                + "失去可见性必须当场记住（预算顺延不能丢）/ 对象表增删下的游标 / ACK 落后与视图切换",
+                TestAdversarialReview);
 
             SuiteResult result = new SuiteResult();
             result.Passed = _passed;
@@ -218,6 +268,24 @@ namespace PMReplicationTest
             }
 
             Console.WriteLine();
+        }
+
+        /// <summary>
+        /// 子用例隔离：一个子用例抛异常不影响同一 Section 里的其它子用例。
+        /// 缺陷注入时这一点尤其重要 —— 否则"前面的子用例先炸了"会让后面那些本该抓住缺陷的
+        /// 断言根本没机会执行，负向验证就会变成假阴性（看起来没抓住，其实是没跑）。
+        /// </summary>
+        private static void SubSection(string name, Action body)
+        {
+            try
+            {
+                body();
+            }
+            catch (Exception ex)
+            {
+                _failures.Add("[" + name + "] 测试体抛异常：" + ex.GetType().Name + " " + ex.Message);
+                Console.WriteLine("    FAIL " + name + " 测试体抛异常：" + ex.GetType().Name + " " + ex.Message);
+            }
         }
 
         private static void Check(bool ok, string label)
@@ -373,6 +441,185 @@ namespace PMReplicationTest
             }
         }
 
+        private sealed class FaultNoPollChannel : PMReplicationChannel
+        {
+            public FaultNoPollChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool ShouldPollProperty(int slot)
+            {
+                // 缺陷（旧实现）：`NeedsWork` 的触发源里没有"可见且 PushBased=false"。
+                // 后果：业务直接写字段（不调用 MarkPropertyDirty）的修改**永不参与比较**
+                // ⇒ 该属性静默不同步，且只在"没走 PMNet_Set / MarkPropertyDirty"时才复现。
+                return false;
+            }
+        }
+
+        private sealed class FaultGainOnlyTransitionChannel : PMReplicationChannel
+        {
+            public FaultGainOnlyTransitionChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool IsVisibilityTransition(int slot, bool met, bool wasActive)
+            {
+                // 缺陷（旧实现）：只把"不满足 → 满足"当作跃迁，"满足 → 不满足"不进入扫描，
+                // 于是 ConditionActive 停在 true；条件再变回满足时判不出跃迁 ⇒ 不补发。
+                return met && !wasActive;
+            }
+        }
+
+        private sealed class FaultBaselineAlwaysWorkChannel : PMReplicationChannel
+        {
+            public FaultBaselineAlwaysWorkChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool ShouldWorkOnUnknownBaseline(bool slotVisible)
+            {
+                // 缺陷（旧实现）：任何未知基线都算工作。对某条连接**永远不可见**的槽位
+                // （OwnerOnly 之于非拥有者 / Never 等）永远拿不到基线 ⇒ 该对象终身每轮
+                // 占用这条连接的调度预算，后面的对象被无限顺延（等价于丢弃）。
+                return true;
+            }
+        }
+
+        private sealed class FaultPrefixBudgetChannel : PMReplicationChannel
+        {
+            public FaultPrefixBudgetChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool UseFairBudgetRotation()
+            {
+                // 缺陷（旧实现）：每轮都从对象表表头分配预算。常驻轮询对象会把预算吃光，
+                // 后面的对象即使有真实修改也永久顺延。
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 把轮询调度补丁之前的**整块**调度语义一次性还原（五个决策点全部取旧形态）。
+        ///
+        /// 单个缺陷子类只证明"某一条断言抓得住某一个轴"；把五个轴同时还原，才能证明
+        /// "旧实现在这一节里是**成片**失败的"，而不是靠某一条断言独扛
+        /// —— 也就是"这些新断言确实在测旧实现没有的行为"。
+        /// </summary>
+        private sealed class FaultOldPollingSemanticsChannel : PMReplicationChannel
+        {
+            public FaultOldPollingSemanticsChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool ShouldPollProperty(int slot)
+            {
+                return false;                        // 旧：调度判据里没有 PushBased=false
+            }
+
+            protected override bool IsVisibilityTransition(int slot, bool met, bool wasActive)
+            {
+                return met && !wasActive;            // 旧：只认"不满足 → 满足"
+            }
+
+            protected override bool ShouldWorkOnUnknownBaseline(bool slotVisible)
+            {
+                return true;                         // 旧：任何未知基线都算工作
+            }
+
+            protected override bool UseFairBudgetRotation()
+            {
+                return false;                        // 旧：每轮从对象表表头分配预算
+            }
+
+            protected override bool IsSlotFullyConfirmed(PMRepObjectEntry entry, int slot)
+            {
+                SerializeSlot(entry.Object, slot);   // 旧：确认前先采样（不判可见性）
+                return base.IsSlotFullyConfirmed(entry, slot);
+            }
+        }
+
+        private sealed class FaultSampleInvisibleSlotChannel : PMReplicationChannel
+        {
+            public FaultSampleInvisibleSlotChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool IsSlotFullyConfirmed(PMRepObjectEntry entry, int slot)
+            {
+                // 缺陷（旧实现）：先取当前值（执行 Writer）再逐连接判可见性 ——
+                // 于是对一个对本连接完全不可见的槽位也会采样一次它的值。
+                // （`SerializeSlot` 走的就是描述符 Writer，语义与旧实现的 `SerializeProperty` 相同。）
+                SerializeSlot(entry.Object, slot);
+                return base.IsSlotFullyConfirmed(entry, slot);
+            }
+        }
+
+        private sealed class FaultUnfilteredWorkChannel : PMReplicationChannel
+        {
+            public FaultUnfilteredWorkChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool ShouldFilterForceAndDirtyByVisibility()
+            {
+                // 缺陷（旧实现）：`NeedsWork` 只看 `state.ForceIncludeCount > 0` 与 `obj.Dirty.HasAny`
+                // —— 二者都是**对象级**的（不区分连接），于是"对这条连接永远不可见"的槽位上挂着的
+                // `ForceInclude`（典型：`Dynamic` 改写成 `Never` 后 SetDynamicCondition 留在所有
+                // 连接上的标记永远清不掉）或脏位（典型：owner-only 字段服务端频繁变脏）会让该对象
+                // **终身每轮**占用这条连接的调度预算。
+                return false;
+            }
+        }
+
+        private sealed class FaultLossOnlyOnScanChannel : PMReplicationChannel
+        {
+            public FaultLossOnlyOnScanChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool ShouldCommitVisibilityLossUpfront()
+            {
+                // 缺陷（旧实现）："满足 → 不满足"只在真正进入 `ScanAndAppend` 时才写进
+                // `ConditionActive`；而调度预算耗尽的轮次会顺延（直接 continue），根本不进扫描
+                // ⇒ 这次丢失只活在本轮的 `_condScratch` 里，下一轮被覆盖。条件在顺延期间变回
+                // 满足时"不满足 → 满足"无从判定 ⇒ **漏强制补发**（值相同、无脏位时尤其明显）。
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 把本轮修复之前的**整块**调度语义一次性还原（两个决策点同时取旧形态）。
+        ///
+        /// 单个缺陷子类只证明"某一条断言抓得住某一个轴"；把两个轴同时还原，才能证明
+        /// "旧实现在 T 节里是**成片**失败的"，而不是靠某一条断言独扛。
+        /// </summary>
+        private sealed class FaultOldForceDirtySemanticsChannel : PMReplicationChannel
+        {
+            public FaultOldForceDirtySemanticsChannel(PMRepOptions options)
+                : base(options)
+            {
+            }
+
+            protected override bool ShouldFilterForceAndDirtyByVisibility()
+            {
+                return false;                        // 旧：ForceIncludeCount>0 / Dirty.HasAny 不分可见性
+            }
+
+            protected override bool ShouldCommitVisibilityLossUpfront()
+            {
+                return false;                        // 旧：失去可见性只在扫描时记录
+            }
+        }
+
         // ------------------------------------------------------------------ 描述符与测试装置
 
         private static readonly string[] SlotNames = new string[] { "A", "B", "C", "S" };
@@ -396,6 +643,17 @@ namespace PMReplicationTest
         /// <summary>手写一份复制描述符（刻意不经生成器：B 与 A 必须能各自独立验收）。</summary>
         private static PMReplicationDescriptor MakeDescriptor(uint classId, PMCond[] conditions, ushort[] onRepIds)
         {
+            return MakeDescriptor(classId, conditions, onRepIds, null);
+        }
+
+        /// <summary>
+        /// 同上，但可逐槽位指定 `PushBased`（null = 全部 Push）。
+        ///
+        /// 为什么必须能表达"混合"：只有让同一张描述符里同时存在 Push 与轮询槽位，
+        /// 才能把"轮询真的生效"与"整层不再需要标脏"区分开 —— 后者是意图之外的退化。
+        /// </summary>
+        private static PMReplicationDescriptor MakeDescriptor(uint classId, PMCond[] conditions, ushort[] onRepIds, bool[] pushBased)
+        {
             int n = SlotNames.Length;
             PMPropertyDescriptor[] props = new PMPropertyDescriptor[n];
             bool hasConditional = false;
@@ -416,9 +674,59 @@ namespace PMReplicationTest
                 props[i].OnRepMethodId = onRepIds == null ? (ushort)0 : onRepIds[i];
                 props[i].Writer = SlotWriters[i];
                 props[i].Reader = SlotReaders[i];
+                props[i].PushBased = pushBased == null ? true : pushBased[(i < pushBased.Length) ? i : 0];
+                props[i].MemberName = SlotNames[i];
+                props[i].SetterName = "PMNet_Set" + SlotNames[i];
+            }
+
+            PMReplicationDescriptor desc = new PMReplicationDescriptor();
+            desc.ClassId = classId;
+            desc.Properties = props;
+            desc.ChangeMaskBitCount = n;
+            desc.HasConditionalMask = hasConditional;
+            desc.ProtocolHash = PMStableHash.ClassProtocolHash(classId, props);
+            desc.TypeName = "RepObj";
+            return desc;
+        }
+
+        /// <summary>
+        /// 与 <see cref="MakeDescriptor"/> 同形，但每个槽位的 Writer 会先给 `writerCalls[slot]`
+        /// 计数再写值。
+        ///
+        /// 用途：断言"对某条连接**不可见**的槽位不该被采样"（Writer 是业务提供的委托，
+        /// 不该为一条看不到它的连接白跑一次）。用计数而不是抛异常，是为了让"多跑了一次"
+        /// 与"整个链路断了"可以区分。
+        /// </summary>
+        private static PMReplicationDescriptor MakeCountingDescriptor(uint classId, PMCond[] conditions, int[] writerCalls)
+        {
+            int n = SlotNames.Length;
+            PMPropertyDescriptor[] props = new PMPropertyDescriptor[n];
+            bool hasConditional = false;
+
+            for (int i = 0; i < n; i++)
+            {
+                int captured = i;
+                PMCond condition = conditions == null ? PMCond.None : conditions[(i < conditions.Length) ? i : 0];
+                if (condition != PMCond.None)
+                {
+                    hasConditional = true;
+                }
+
+                props[i].PropertyId = (ushort)(100 + i);
+                props[i].Condition = condition;
+                props[i].MaskOffset = (ushort)i;
+                props[i].MaskBitCount = 1;
+                props[i].QuantizerId = 0;
+                props[i].OnRepMethodId = 0;
                 props[i].PushBased = true;
                 props[i].MemberName = SlotNames[i];
                 props[i].SetterName = "PMNet_Set" + SlotNames[i];
+                props[i].Writer = delegate (PMNetObject t, PMNetWriter w)
+                {
+                    writerCalls[captured]++;
+                    SlotWriters[captured](t, w);
+                };
+                props[i].Reader = SlotReaders[i];
             }
 
             PMReplicationDescriptor desc = new PMReplicationDescriptor();
@@ -451,9 +759,23 @@ namespace PMReplicationTest
 
             public static Rig Create(uint classId, int clientCount, PMCond[] conditions, ushort[] onRepIds, PMRepOptions options)
             {
+                return CreateWithDescriptor(classId, clientCount, MakeDescriptor(classId, conditions, onRepIds), options);
+            }
+
+            /// <summary>同上，但可逐槽位指定 `PushBased`（轮询调度用例需要）。</summary>
+            public static Rig Create(uint classId, int clientCount, PMCond[] conditions, ushort[] onRepIds, PMRepOptions options, bool[] pushBased)
+            {
+                return CreateWithDescriptor(classId, clientCount, MakeDescriptor(classId, conditions, onRepIds, pushBased), options);
+            }
+
+            /// <summary>
+            /// 用一张**自定义**描述符建装置（计数 Writer / 自定义 PushBased 的用例需要）。
+            /// 描述符仍然经 `PMNetRegistry` 注册 —— 与生产路径一致（运行期不扫反射，只读静态表）。
+            /// </summary>
+            public static Rig CreateWithDescriptor(uint classId, int clientCount, PMReplicationDescriptor desc, PMRepOptions options)
+            {
                 PMNetRegistry.Reset();
 
-                PMReplicationDescriptor desc = MakeDescriptor(classId, conditions, onRepIds);
                 PMNetClassEntry entry = new PMNetClassEntry();
                 entry.ClassId = classId;
                 entry.TypeName = "RepObj";
@@ -522,6 +844,46 @@ namespace PMReplicationTest
                     ServerObj.MarkPropertyDirty(i);
                 }
             }
+        }
+
+        /// <summary>往已有装置里再挂一个服务端权威对象（并登记进复制层）。</summary>
+        private static RepObj AddServerObject(Rig rig)
+        {
+            RepObj obj = new RepObj();
+            if (!rig.ServerWorld.Spawn(obj, rig.ClassId))
+            {
+                throw new InvalidOperationException("追加对象 Spawn 失败");
+            }
+
+            rig.Sender.RegisterObject(obj);
+            return obj;
+        }
+
+        /// <summary>把服务端世界里"尚未发出"的 Create 记录投给某条连接的客户端世界。</summary>
+        private static void DeliverLifecycleToClient(Rig rig, Rig.Client client)
+        {
+            byte[] batch = rig.ServerWorld.BuildLifecycleBatch(client.Conn);
+            if (batch != null && batch.Length > 0)
+            {
+                client.World.OnLifecycleMessage(batch, 0, batch.Length);
+            }
+        }
+
+        /// <summary>在客户端世界里找某个服务端对象的副本；找不到返回 null（调用方必须判空）。</summary>
+        private static RepObj FindClientCopy(Rig rig, Rig.Client client, RepObj serverObj)
+        {
+            if (serverObj == null || !serverObj.NetId.IsValid)
+            {
+                return null;
+            }
+
+            PMNetObject found;
+            if (!client.World.TryFind(serverObj.NetId, out found))
+            {
+                return null;
+            }
+
+            return found as RepObj;
         }
 
         private static void OnRepHandler(PMNetObject obj, ushort methodId)
@@ -636,6 +998,46 @@ namespace PMReplicationTest
 
                 for (int r = 0; r < msg.Updates.Count; r++)
                 {
+                    for (int k = 0; k < msg.Updates[r].Slots.Length; k++)
+                    {
+                        int slot = msg.Updates[r].Slots[k];
+                        if (!all.Contains(slot))
+                        {
+                            all.Add(slot);
+                        }
+                    }
+                }
+            }
+
+            all.Sort();
+            return all;
+        }
+
+        /// <summary>
+        /// 某连接已发出的载荷里，**指定 NetId** 那个对象出现过的全部槽位（去重、升序）。
+        ///
+        /// 为何必须按对象过滤：同一个测试装置里多个对象共用同一张描述符（也就共用同一批
+        /// 条件属性）。断言"槽位 1 被发出"而不看 NetId，会被**另一个对象**的同类槽位满足
+        /// —— 那是假阳性（尤其做缺陷注入时，会把该抓的失败掩盖掉）。
+        /// </summary>
+        private static List<int> SentSlotsFor(TestConn conn, uint netId, string context)
+        {
+            List<int> all = new List<int>();
+            for (int i = 0; i < conn.Sent.Count; i++)
+            {
+                PMRepMessage msg = Decode(conn.Sent[i], context);
+                if (msg == null)
+                {
+                    continue;
+                }
+
+                for (int r = 0; r < msg.Updates.Count; r++)
+                {
+                    if (msg.Updates[r].NetId != netId)
+                    {
+                        continue;
+                    }
+
                     for (int k = 0; k < msg.Updates[r].Slots.Length; k++)
                     {
                         int slot = msg.Updates[r].Slots[k];
@@ -2300,6 +2702,934 @@ namespace PMReplicationTest
             Check(onReps.Count == 1 && onReps[0] == 1,
                 "R8 只在完整提交后才派发 OnRep（实际 " + onReps.Count + " 次）");
             Check(receiver.PendingAckCount(conn) == 1, "R9 完整提交后回 ACK");
+        }
+
+        // ==================================================================================
+        //  S. 轮询（PushBased=false）调度
+        //
+        //  `PushBased=false` 的契约是"业务直接写字段、不标脏，由复制层每轮取当前值与基线比较"。
+        //  旧实现的调度判据只有 未知基线 / ForceInclude / 脏位 / 条件跃迁，**不含"可见且非 Push"**，
+        //  于是这类属性永不参与比较（静默不同步）；同一处缺失还连带三个缺陷：
+        //    * 永远拿不到基线的不可见槽位让对象终身占用每连接预算；
+        //    * "满足 → 不满足"没被记录，重新可见时不补发（值相同、无脏位时尤其明显）；
+        //    * 轮询对象常驻候选后，每轮从表头分配预算会让后面的对象永久饥饿。
+        //  以下每个子用例都先用**缺陷子类**证明它抓得住对应的旧行为（见 [2] 的 F6..F10）。
+        // ==================================================================================
+
+        /// <summary>槽位 0 为轮询式（PushBased=false），其余为 Push。</summary>
+        private static readonly bool[] PollOnSlot0 = new bool[] { false, true, true, true };
+
+        private static void TestPollScheduling()
+        {
+            SubSection("S-a 轮询直接字段写与无变化抑制", TestPollDirectWriteAndSuppression);
+            SubSection("S-b 轮询与 Push 混合", TestPollMixedWithPush);
+            SubSection("S-c 全 Push 对象仍然只认脏位", TestPollPushOnlyStillNeedsDirty);
+            SubSection("S-d 不可见槽位不被采样", TestPollInvisibleSlotNotSampled);
+            SubSection("S-e 不可见槽位不消耗每连接预算", TestPollInvisibleSlotDoesNotConsumeBudget);
+            SubSection("S-f 每连接对象预算轮转（无前缀饥饿）", TestPollBudgetRotation);
+            SubSection("S-g 失去可见性被记录 / 重新可见强制补发", TestPollVisibilityLossAndRegain);
+            SubSection("S-h 两条连线的轮询收敛 / 旧 ACK / 丢包", TestPollTwoConnections);
+        }
+
+        // ------------------------------------------------------------------ S-a
+
+        private static void TestPollDirectWriteAndSuppression()
+        {
+            Rig rig = Rig.Create(0x5001u, 1, null, null, null, PollOnSlot0);
+            Rig.Client c = rig.Clients[0];
+
+            // 首轮：基线缺失 ⇒ 仍然全量（轮询不改变"初始状态全量"）
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 2;
+            rig.ServerObj.C = 0f;
+            rig.ServerObj.S = string.Empty;
+            long sampledBefore = rig.Sender.Stats.PollSampledSlots;
+            rig.Sender.Tick();
+
+            List<int> initial = SentSlots(c.Conn, "SA1");
+            Check(initial.Count == 4, "SA1 轮询属性首轮仍然全量补齐（实际 " + SlotsToString(initial) + "）");
+            Check(rig.Sender.Stats.PollSampledSlots > sampledBefore, "SA2 轮询槽位在首轮被采样（"
+                  + sampledBefore + " → " + rig.Sender.Stats.PollSampledSlots + "）");
+
+            Deliver(rig, c);
+            Check(c.Obj.A == 1 && c.Obj.B == 2, "SA3 初始值到达客户端（A=1/B=2）");
+            Check(!rig.ServerObj.Dirty.HasAny, "SA3b 首轮 ACK 后对象没有残留脏位（轮询不依赖脏位）");
+
+            // ★ 核心：全部追平之后，直接写字段（**不调用 MarkPropertyDirty**）仍必须同步
+            c.Conn.Sent.Clear();
+            rig.ServerObj.A = 42;
+            rig.Sender.Tick();
+            Check(c.Conn.Sent.Count >= 1, "SA4 全部基线 ACK 且脏位清空后，轮询属性直接字段写仍被采样发送（实际 "
+                  + c.Conn.Sent.Count + " 个载荷）");
+
+            List<int> changed = SentSlots(c.Conn, "SA5");
+            Check(changed.Count == 1 && changed[0] == 0, "SA5 载荷里只有被改动的轮询槽位（实际 "
+                  + SlotsToString(changed) + "）");
+            Deliver(rig, c);
+            Check(c.Obj.A == 42, "SA6 客户端收到轮询直接改的值（实际 " + c.Obj.A + "）");
+
+            // 值没变 ⇒ 采样了，但不发（"无变化不发"必须与"压根没调度"可区分）
+            c.Conn.Sent.Clear();
+            long suppressedBefore = rig.Sender.Stats.SuppressedUnchanged;
+            long sampledBefore2 = rig.Sender.Stats.PollSampledSlots;
+            for (int i = 0; i < 3; i++)
+            {
+                rig.Sender.Tick();
+            }
+
+            Check(c.Conn.Sent.Count == 0, "SA7 值没变 ⇒ 轮询采样后不发任何载荷（实际 " + c.Conn.Sent.Count + "）");
+            Check(rig.Sender.Stats.PollSampledSlots > sampledBefore2, "SA8 采样确实发生了（计数增长，不是没调度；"
+                  + sampledBefore2 + " → " + rig.Sender.Stats.PollSampledSlots + "）");
+            Check(rig.Sender.Stats.SuppressedUnchanged > suppressedBefore, "SA9 值未变的抑制被计数（D-R0-13）");
+        }
+
+        // ------------------------------------------------------------------ S-b
+
+        private static void TestPollMixedWithPush()
+        {
+            Rig rig = Rig.Create(0x5002u, 1, null, null, null, PollOnSlot0);
+            Rig.Client c = rig.Clients[0];
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 1;
+            rig.Sender.Tick();
+            Deliver(rig, c);
+            Check(c.Obj.A == 1 && c.Obj.B == 1, "SB1 混合对象基线建立（A=1/B=1）");
+
+            // Push 槽位标脏 + 改值 ⇒ 照常走 Push 路径（轮询的存在不破坏它）
+            c.Conn.Sent.Clear();
+            rig.ServerObj.B = 2;
+            rig.ServerObj.MarkPropertyDirty(1);
+            rig.Sender.Tick();
+            List<int> pushSlots = SentSlots(c.Conn, "SB2");
+            Check(pushSlots.Contains(1), "SB2 Push 槽位标脏 + 改值仍照常发（实际 " + SlotsToString(pushSlots) + "）");
+            Deliver(rig, c);
+            Check(c.Obj.B == 2, "SB2b Push 槽位送达（B=" + c.Obj.B + "）");
+
+            // 轮询槽位改值（不标脏）⇒ 一定发
+            c.Conn.Sent.Clear();
+            rig.ServerObj.A = 7;
+            rig.Sender.Tick();
+            List<int> pollSlots = SentSlots(c.Conn, "SB3");
+            Check(pollSlots.Contains(0), "SB3 轮询槽位的修改一定被带上（实际 " + SlotsToString(pollSlots) + "）");
+            Check(!pollSlots.Contains(2) && !pollSlots.Contains(3),
+                "SB3b 未改动且未标脏的其它槽位不被带上（实际 " + SlotsToString(pollSlots) + "）");
+            Deliver(rig, c);
+            Check(c.Obj.A == 7, "SB4 客户端拿到轮询槽位的新值（实际 A=" + c.Obj.A + "）");
+
+            // Push 槽位改值但不标脏：轮询候选会让该对象**整对象扫描**，于是它可能被顺便发现。
+            // 契约明确允许这一点（"不承诺数组元素绝不会因其它候选顺便被发现"），
+            // 因此这里断言**实际行为**，不把"允许"写成"禁止"。
+            c.Conn.Sent.Clear();
+            rig.ServerObj.B = 3;
+            rig.Sender.Tick();
+            List<int> incidental = SentSlots(c.Conn, "SB5");
+            Check(incidental.Contains(1), "SB5 轮询候选触发的整对象比较会顺便发现未标脏的 Push 变化（契约允许，实际 "
+                  + SlotsToString(incidental) + "）");
+            Deliver(rig, c);
+            Check(c.Obj.B == 3, "SB5b 顺便发现的值同样收敛（B=" + c.Obj.B + "）");
+        }
+
+        // ------------------------------------------------------------------ S-c
+
+        private static void TestPollPushOnlyStillNeedsDirty()
+        {
+            Rig rig = Rig.Create(0x5003u, 1, null, null, null);
+            Rig.Client c = rig.Clients[0];
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 1;
+            rig.Sender.Tick();
+            Deliver(rig, c);
+            Check(c.Obj.B == 1, "SC1 全 Push 对象基线建立（B=1）");
+
+            c.Conn.Sent.Clear();
+            rig.ServerObj.B = 99;                    // 直接写字段，不标脏
+            rig.Sender.Tick();
+            Check(c.Conn.Sent.Count == 0, "SC2 全 Push 对象：直接写字段不标脏 ⇒ 不调度、不发（与轮询对照，实际 "
+                  + c.Conn.Sent.Count + "）");
+            Check(rig.Sender.Stats.PollSampledSlots == 0, "SC3 全 Push 对象不产生轮询采样（实际 "
+                  + rig.Sender.Stats.PollSampledSlots + "）");
+            Deliver(rig, c);
+            Check(c.Obj.B == 1, "SC4 客户端没有拿到未标脏的 Push 值（实际 B=" + c.Obj.B + "）");
+        }
+
+        // ------------------------------------------------------------------ S-d
+
+        private static void TestPollInvisibleSlotNotSampled()
+        {
+            int[] writerCalls = new int[4];
+            PMReplicationDescriptor desc = MakeCountingDescriptor(0x5400u,
+                new PMCond[] { PMCond.None, PMCond.OwnerOnly, PMCond.None, PMCond.None }, writerCalls);
+
+            Rig rig = Rig.CreateWithDescriptor(0x5400u, 1, desc, null);
+            Rig.Client c = rig.Clients[0];
+            rig.Sender.ViewRoleResolver = delegate (PMNetObject o, PMNetConnection conn)
+            {
+                return PMRepViewRole.Simulated;      // 槽位 1（OwnerOnly）对这条连接不可见
+            };
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 5;
+            rig.MarkAllDirty();
+            TickAndDeliver(rig, c);
+
+            Check(c.Obj.A == 1, "SD1 可见槽位送达（A=1）");
+            Check(c.Obj.B == 0, "SD2 不可见槽位（OwnerOnly × 非拥有者）没有送到客户端（实际 B=" + c.Obj.B + "）");
+
+            for (int i = 0; i < writerCalls.Length; i++)
+            {
+                writerCalls[i] = 0;
+            }
+
+            rig.ServerObj.A = 2;
+            rig.ServerObj.MarkPropertyDirty(0);
+            rig.ServerObj.MarkPropertyDirty(1);      // 不可见槽位也标脏（业务可能标记它）
+            TickAndDeliver(rig, c);
+
+            Check(writerCalls[1] == 0, "SD3 不可见槽位的 Writer 没有被执行（实际 " + writerCalls[1] + " 次）");
+            Check(writerCalls[0] > 0, "SD3b 可见槽位的 Writer 正常执行（对照，" + writerCalls[0] + " 次）");
+            Check(!rig.ServerObj.Dirty.IsDirty(1), "SD4 不可见槽位的脏位不把对象永久卡在待比较集合（已清）");
+            Check(c.Obj.A == 2, "SD4b 可见槽位仍正常推进（A=" + c.Obj.A + "）");
+        }
+
+        // ------------------------------------------------------------------ S-e
+
+        private static void TestPollInvisibleSlotDoesNotConsumeBudget()
+        {
+            PMRepOptions opt = new PMRepOptions();
+            opt.MaxObjectsPerConnectionPerTick = 1;
+
+            PMReplicationDescriptor desc = MakeDescriptor(0x5800u,
+                new PMCond[] { PMCond.None, PMCond.OwnerOnly, PMCond.None, PMCond.None }, null);
+
+            Rig rig = Rig.CreateWithDescriptor(0x5800u, 1, desc, opt);
+            Rig.Client c = rig.Clients[0];
+            rig.Sender.ViewRoleResolver = delegate (PMNetObject o, PMNetConnection conn)
+            {
+                return PMRepViewRole.Simulated;      // 槽位 1 的基线对这条连接永远补不齐
+            };
+
+            rig.ServerObj.A = 1;
+            rig.MarkAllDirty();
+            TickAndDeliver(rig, c);
+            Check(!rig.ServerObj.Dirty.HasAny,
+                "SE1 第一个对象已无脏位（不可见槽位不把对象卡在待比较集合，只剩补不齐的基线）");
+
+            RepObj second = AddServerObject(rig);
+            DeliverLifecycleToClient(rig, c);
+            RepObj secondCopy = FindClientCopy(rig, c, second);
+            Check(secondCopy != null, "SE1b 第二个对象的客户端副本已创建");
+
+            second.A = 7;
+            second.MarkPropertyDirty(0);
+            for (int round = 0; round < 4; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(secondCopy != null && secondCopy.A == 7,
+                "SE1c 第二个对象的基线已建立（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+
+            long deferredBefore = rig.Sender.Stats.DeferredByBudget;
+
+            // 预算 = 1。若"永远补不齐的不可见基线"被当成工作，第一个对象会**终身**占用唯一名额，
+            // 第二个对象每轮的真实修改都会被顺延（顺延无限次 = 丢弃）。这里第二个对象每轮都改，
+            // 因此只要第一个对象真的在抢预算，顺延计数必然每轮 +1。
+            for (int round = 0; round < 4; round++)
+            {
+                second.A = 100 + round;
+                second.MarkPropertyDirty(0);
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(rig.Sender.Stats.DeferredByBudget == deferredBefore,
+                "SE2 不可见槽位的未知基线不占用每连接预算（预算 1 下 4 轮 0 次顺延，实际 +"
+                + (rig.Sender.Stats.DeferredByBudget - deferredBefore) + "）");
+            Check(secondCopy != null && secondCopy.A == 103,
+                "SE3 第二个对象每轮都被处理（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+        }
+
+        // ------------------------------------------------------------------ S-f
+
+        private static void TestPollBudgetRotation()
+        {
+            PMRepOptions opt = new PMRepOptions();
+            opt.MaxObjectsPerConnectionPerTick = 1;
+
+            Rig rig = Rig.Create(0x5500u, 1, null, null, opt, PollOnSlot0);
+            Rig.Client c = rig.Clients[0];
+
+            // 三个"常驻轮询"对象：每个都含可见的非 Push 槽位 ⇒ 每轮都是候选。
+            // 预算 = 1 时若每轮都从对象表表头开始（旧行为），表头对象会把唯一名额吃光，
+            // 后面的对象即使有真实修改也永远排不上。
+            RepObj[] objs = new RepObj[3];
+            objs[0] = rig.ServerObj;
+            for (int i = 1; i < objs.Length; i++)
+            {
+                objs[i] = AddServerObject(rig);
+            }
+
+            DeliverLifecycleToClient(rig, c);
+
+            RepObj[] copies = new RepObj[objs.Length];
+            bool allCopies = true;
+            for (int i = 0; i < objs.Length; i++)
+            {
+                copies[i] = FindClientCopy(rig, c, objs[i]);
+                if (copies[i] == null)
+                {
+                    allCopies = false;
+                }
+            }
+
+            Check(allCopies, "SF1 三个对象的客户端副本都已创建");
+
+            for (int i = 0; i < objs.Length; i++)
+            {
+                objs[i].A = i + 1;
+            }
+
+            for (int round = 0; round < objs.Length + 2; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            bool baselineOk = allCopies;
+            for (int i = 0; i < objs.Length && baselineOk; i++)
+            {
+                if (copies[i].A != i + 1)
+                {
+                    baselineOk = false;
+                }
+            }
+
+            Check(baselineOk, "SF2 三个对象的基线都已建立（预算 1 下每轮推进一个）");
+
+            for (int i = 0; i < objs.Length; i++)
+            {
+                objs[i].A = 100 + i;                 // 轮询：不标脏
+            }
+
+            for (int round = 0; round < objs.Length + 1; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            bool advanced = allCopies;
+            for (int i = 0; i < objs.Length && advanced; i++)
+            {
+                if (copies[i].A != 100 + i)
+                {
+                    advanced = false;
+                }
+            }
+
+            string actual = "<副本缺失>";
+            if (allCopies)
+            {
+                actual = copies[0].A + "," + copies[1].A + "," + copies[2].A;
+            }
+
+            Check(advanced, "SF3 预算 1 下三个常驻轮询对象都能在有限轮次内推进（无前缀饥饿），实际 ["
+                  + actual + "]");
+        }
+
+        // ------------------------------------------------------------------ S-g
+
+        private static void TestPollVisibilityLossAndRegain()
+        {
+            PMReplicationDescriptor desc = MakeDescriptor(0x5600u,
+                new PMCond[] { PMCond.None, PMCond.OwnerOnly, PMCond.None, PMCond.None }, null);
+
+            Rig rig = Rig.CreateWithDescriptor(0x5600u, 1, desc, null);
+            Rig.Client c = rig.Clients[0];
+            uint netId = rig.ServerObj.NetId.Value;
+
+            PMRepViewRole role = PMRepViewRole.Autonomous;
+            rig.Sender.ViewRoleResolver = delegate (PMNetObject o, PMNetConnection conn) { return role; };
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 5;
+            rig.MarkAllDirty();
+            TickAndDeliver(rig, c);
+            Check(c.Obj.B == 5, "SG1 拥有者视角下 OwnerOnly 槽位已送达（B=" + c.Obj.B + "）");
+
+            // 失去可见性：不改值、不标脏 —— 只 Tick 一轮，让复制层"记录"这次丢失
+            role = PMRepViewRole.Simulated;
+            c.Conn.Sent.Clear();
+            rig.Sender.Tick();
+            Check(c.Conn.Sent.Count == 0, "SG2 失去可见性本身不产生载荷（实际 " + c.Conn.Sent.Count + "）");
+
+            bool active;
+            Check(rig.Sender.TryGetConditionActive(c.Conn, netId, 1, out active) && !active,
+                "SG3 失去可见性被记录下来（ConditionActive=false，实际 " + active + "）");
+
+            // 重新可见：值相同（5）、无脏位 ⇒ 契约仍要求强制补发一次当前值
+            role = PMRepViewRole.Autonomous;
+            c.Conn.Sent.Clear();
+            long forceBefore = rig.Sender.Stats.TransitionForceSends;
+            rig.Sender.Tick();
+
+            List<int> slots = SentSlots(c.Conn, "SG4");
+            Check(slots.Contains(1), "SG4 重新可见 ⇒ 强制补发（值未变、无脏位也必须补发，实际 "
+                  + SlotsToString(slots) + "）");
+            Check(rig.Sender.Stats.TransitionForceSends > forceBefore, "SG5 跃迁补发计数增长（"
+                  + forceBefore + " → " + rig.Sender.Stats.TransitionForceSends + "）");
+            Deliver(rig, c);
+            Check(c.Obj.B == 5, "SG6 客户端持有当前值（B=" + c.Obj.B + "）");
+        }
+
+        // ------------------------------------------------------------------ S-h
+
+        private static void TestPollTwoConnections()
+        {
+            Rig rig = Rig.Create(0x5700u, 2, null, null, null, PollOnSlot0);
+            Rig.Client fast = rig.Clients[0];
+            Rig.Client slow = rig.Clients[1];
+            uint netId = rig.ServerObj.NetId.Value;
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 1;
+            rig.Sender.Tick();
+            DeliverAll(rig);
+            Check(fast.Obj.A == 1 && slow.Obj.A == 1, "SH1 两条连接的基线都已建立");
+
+            // 只服务 fast：slow 的基线落后多版（轮询式，全程不标脏）
+            for (int i = 2; i <= 6; i++)
+            {
+                rig.ServerObj.A = i * 10;
+                rig.Sender.Tick();
+                Deliver(rig, fast);
+            }
+
+            Check(fast.Obj.A == 60, "SH2 fast 连接已追到最新（A=" + fast.Obj.A + "）");
+            Check(slow.Obj.A == 1, "SH3 slow 连接仍停在旧基线（A=" + slow.Obj.A + "）");
+            Check(slow.Conn.Sent.Count > 0, "SH4 slow 的落后更新仍在待投递队列里（"
+                  + slow.Conn.Sent.Count + " 个载荷）");
+
+            // 旧 ACK：不得把"尚未追平"的连接状态当成已同步
+            byte[] oldAck = MakeAckMessage(netId, 1L);
+            long staleBefore = rig.Sender.Stats.StaleAckIgnored;
+            rig.Sender.OnMessage(slow.Conn, oldAck, 0, oldAck.Length);
+            Check(rig.Sender.Stats.StaleAckIgnored > staleBefore, "SH5 旧 ACK 被判为过期（"
+                  + staleBefore + " → " + rig.Sender.Stats.StaleAckIgnored + "）");
+            Check(slow.Obj.A == 1, "SH5b 旧 ACK 没有让 slow 的连接状态被当成已同步（A=" + slow.Obj.A + "）");
+
+            // 丢包通知：去掉一条在途记录（容量归还），未确认的值仍会重发
+            long[] inflight = rig.Sender.GetInflightVersions(slow.Conn, netId);
+            Check(inflight.Length >= 1, "SH6 slow 侧存在在途记录（" + inflight.Length + " 条）");
+
+            bool removed = inflight.Length >= 1 && rig.Sender.OnLoss(slow.Conn, netId, inflight[0]);
+            Check(removed, "SH7 丢包通知被处理（容量归还，未确认的值仍会重发）");
+
+            rig.Sender.Tick();
+            Deliver(rig, slow);
+            Check(slow.Obj.A == 60, "SH8 slow 最终收敛到最新值（A=" + slow.Obj.A + "）");
+            Check(fast.Obj.A == 60, "SH9 fast 未因 slow 的旧 ACK/丢包回退（A=" + fast.Obj.A + "）");
+        }
+        // ==================================================================================
+        //  T. 独立对抗审查（第二轮）
+        //
+        //  上一轮修好了"未知基线按可见性过滤"，但同一处**剩下两个缺口**：
+        //    * `state.ForceIncludeCount > 0` 与 `obj.Dirty.HasAny` 仍然不分可见性 —— 二者是
+        //      **对象级**的（`ForceInclude[slot]` 由 Set*Condition* 一次写给所有连接；脏位更是
+        //      整对象共享）。owner-only 字段服务端频繁变脏、或 `Dynamic` 改写成 `Never` 后留下的
+        //      `ForceInclude` 永远清不掉，都会让非拥有者连接**终身每轮**占预算。
+        //    * "失去可见性"只在进入 `ScanAndAppend` 时才写进 `ConditionActive`；预算耗尽的轮次
+        //      直接顺延、不进扫描，于是这次丢失只留在本轮的 `_condScratch` 里、下一轮被覆盖，
+        //      条件在顺延期间变回满足时判不出跃迁 ⇒ **漏强制补发**。
+        //  本节的每个子用例都对应一个可复现反例；F12/F13 两个缺陷子类把这两个缺口还原成旧行为，
+        //  用来证明这些断言不是空断言。
+        // ==================================================================================
+
+        private static void TestAdversarialReview()
+        {
+            SubSection("T-a 不可见槽位上的 ForceInclude 不占预算（Dynamic→Never）", TestInvisibleForceIncludeDoesNotConsumeBudget);
+            SubSection("T-b 不可见槽位的脏位不占预算（owner-only 频繁变脏）", TestInvisibleDirtyDoesNotConsumeBudget);
+            SubSection("T-c1 预算顺延期间失去可见性必须被记住（同值无脏位也要补发）", TestVisibilityLossRecordedDespiteBudgetDeferral);
+            SubSection("T-c2 顺延 + ACK 路径清掉脏位 ⇒ 重新可见仍必须补发（否则永久停在旧值）", TestDeferredLossWithForeignDirtyClear);
+            SubSection("T-d 对象表增删（下标位移）下游标不产生永久饥饿", TestBudgetCursorUnderObjectChurn);
+            SubSection("T-e ACK 落后 + 可见性切换：旧 ACK 不推进水位、重新可见收敛", TestAckLagWithVisibilitySwitch);
+        }
+
+        // ------------------------------------------------------------------ T-a
+
+        private static void TestInvisibleForceIncludeDoesNotConsumeBudget()
+        {
+            PMRepOptions opt = new PMRepOptions();
+            opt.MaxObjectsPerConnectionPerTick = 1;
+
+            PMReplicationDescriptor desc = MakeDescriptor(0x6001u,
+                new PMCond[] { PMCond.None, PMCond.Dynamic, PMCond.None, PMCond.None }, null);
+
+            Rig rig = Rig.CreateWithDescriptor(0x6001u, 1, desc, opt);
+            Rig.Client c = rig.Clients[0];
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 5;
+            rig.MarkAllDirty();
+            TickAndDeliver(rig, c);
+            Check(c.Obj.B == 5, "T-a1 基线建立（Dynamic 未覆盖 ⇒ 可见，B=" + c.Obj.B + "）");
+
+            Check(rig.Sender.SetDynamicCondition(rig.ServerObj, 1, PMCond.Never),
+                "T-a2 Dynamic 条件改写为 Never 被接受（对所有连接 RequireSend ⇒ ForceInclude 挂上）");
+
+            RepObj second = AddServerObject(rig);
+            DeliverLifecycleToClient(rig, c);
+            RepObj secondCopy = FindClientCopy(rig, c, second);
+            Check(secondCopy != null, "T-a3 第二个对象的客户端副本已创建");
+
+            second.A = 7;
+            second.MarkPropertyDirty(0);
+            for (int round = 0; round < 4; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(secondCopy != null && secondCopy.A == 7,
+                "T-a4 第二个对象基线建立（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+
+            long deferredBefore = rig.Sender.Stats.DeferredByBudget;
+            long filteredBefore = rig.Sender.Stats.ConditionFiltered;
+
+            for (int round = 0; round < 4; round++)
+            {
+                second.A = 100 + round;
+                second.MarkPropertyDirty(0);
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(rig.Sender.Stats.DeferredByBudget == deferredBefore,
+                "T-a5 挂在不可见槽位上的 ForceInclude 不占用每连接预算（预算 1 下 0 次顺延，实际 +"
+                + (rig.Sender.Stats.DeferredByBudget - deferredBefore) + "）");
+            Check(rig.Sender.Stats.ConditionFiltered == filteredBefore,
+                "T-a6 该对象不再因不可见槽位进入扫描（ConditionFiltered 不再增长，实际 +"
+                + (rig.Sender.Stats.ConditionFiltered - filteredBefore) + "）");
+            Check(secondCopy != null && secondCopy.A == 103,
+                "T-a7 第二个对象每轮都被处理（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+
+            // 改回可见：当前值必须补发（条件跃迁 / 仍挂着的 ForceInclude 两条独立机制都不该漏）
+            Check(rig.Sender.SetDynamicCondition(rig.ServerObj, 1, PMCond.None),
+                "T-a8 Dynamic 改回 None（槽位重新可见）");
+
+            c.Conn.Sent.Clear();
+            long forceBefore = rig.Sender.Stats.TransitionForceSends;
+            rig.Sender.Tick();
+            List<int> slots = SentSlotsFor(c.Conn, rig.ServerObj.NetId.Value, "T-a9");
+            Check(slots.Contains(1),
+                "T-a9 槽位重新可见后当前值被补发（X 实际 " + SlotsToString(slots) + "）");
+            Check(rig.Sender.Stats.TransitionForceSends > forceBefore,
+                "T-a10 跃迁补发计数增长（" + forceBefore + " → " + rig.Sender.Stats.TransitionForceSends + "）");
+            Deliver(rig, c);
+            Check(c.Obj.B == 5, "T-a11 客户端持有当前值（B=" + c.Obj.B + "）");
+        }
+
+        // ------------------------------------------------------------------ T-b
+
+        private static void TestInvisibleDirtyDoesNotConsumeBudget()
+        {
+            PMRepOptions opt = new PMRepOptions();
+            opt.MaxObjectsPerConnectionPerTick = 1;
+
+            PMReplicationDescriptor desc = MakeDescriptor(0x6002u,
+                new PMCond[] { PMCond.None, PMCond.OwnerOnly, PMCond.None, PMCond.None }, null);
+
+            Rig rig = Rig.CreateWithDescriptor(0x6002u, 1, desc, opt);
+            Rig.Client c = rig.Clients[0];
+            rig.Sender.ViewRoleResolver = delegate (PMNetObject o, PMNetConnection conn)
+            {
+                return PMRepViewRole.Simulated;      // 槽位 1（OwnerOnly）对这条连接永远不可见
+            };
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 5;
+            rig.MarkAllDirty();
+            TickAndDeliver(rig, c);
+            Check(c.Obj.B == 0, "T-b1 不可见槽位从未送达（B=" + c.Obj.B + "）");
+
+            RepObj second = AddServerObject(rig);
+            DeliverLifecycleToClient(rig, c);
+            RepObj secondCopy = FindClientCopy(rig, c, second);
+            Check(secondCopy != null, "T-b2 第二个对象的客户端副本已创建");
+
+            second.A = 7;
+            second.MarkPropertyDirty(0);
+            for (int round = 0; round < 4; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(secondCopy != null && secondCopy.A == 7,
+                "T-b3 第二个对象基线建立（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+
+            long deferredBefore = rig.Sender.Stats.DeferredByBudget;
+
+            for (int round = 0; round < 4; round++)
+            {
+                // 服务端权威侧频繁写 owner-only 字段并标脏（业务正常行为）
+                rig.ServerObj.B = 100 + round;
+                rig.ServerObj.MarkPropertyDirty(1);
+
+                second.A = 200 + round;
+                second.MarkPropertyDirty(0);
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(rig.Sender.Stats.DeferredByBudget == deferredBefore,
+                "T-b4 不可见槽位的脏位不占用每连接预算（预算 1 下 0 次顺延，实际 +"
+                + (rig.Sender.Stats.DeferredByBudget - deferredBefore) + "）");
+            Check(secondCopy != null && secondCopy.A == 203,
+                "T-b5 第二个对象每轮都被处理（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+        }
+
+        // ------------------------------------------------------------------ T-c1
+
+        private static void TestVisibilityLossRecordedDespiteBudgetDeferral()
+        {
+            PMRepOptions opt = new PMRepOptions();
+            opt.MaxObjectsPerConnectionPerTick = 1;
+
+            PMReplicationDescriptor desc = MakeDescriptor(0x6003u,
+                new PMCond[] { PMCond.None, PMCond.OwnerOnly, PMCond.None, PMCond.None }, null);
+
+            Rig rig = Rig.CreateWithDescriptor(0x6003u, 1, desc, opt);
+            Rig.Client c = rig.Clients[0];
+            uint netId = rig.ServerObj.NetId.Value;
+
+            PMRepViewRole role = PMRepViewRole.Autonomous;
+            rig.Sender.ViewRoleResolver = delegate (PMNetObject o, PMNetConnection conn) { return role; };
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 5;
+            rig.MarkAllDirty();
+            TickAndDeliver(rig, c);
+            Check(c.Obj.B == 5, "T-c1-1 拥有者视角下基线建立（B=" + c.Obj.B + "）");
+
+            RepObj second = AddServerObject(rig);
+            DeliverLifecycleToClient(rig, c);
+            RepObj secondCopy = FindClientCopy(rig, c, second);
+            Check(secondCopy != null, "T-c1-2 第二个对象的客户端副本已创建");
+
+            second.A = 1;
+            second.MarkPropertyDirty(0);
+            for (int round = 0; round < 4; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(secondCopy != null && secondCopy.A == 1,
+                "T-c1-3 第二个对象基线建立（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+
+            // 把游标推到"下一个该处理第二个对象"：本轮只有 X 需要工作 ⇒ X 必被处理，
+            // 轮转游标落到"X 之后"（= 第二个对象）。
+            rig.ServerObj.A = 2;
+            rig.ServerObj.MarkPropertyDirty(0);
+            TickAndDeliver(rig, c);
+            Check(c.Obj.A == 2, "T-c1-4 游标就位轮：X 被处理（A=" + c.Obj.A + "）");
+
+            // 失去可见性：本轮 X 被预算顺延（起点在第二个对象）—— 这正是"丢失只留在
+            // `_condScratch` 里"的触发条件。
+            role = PMRepViewRole.Simulated;
+            second.A = 3;
+            second.MarkPropertyDirty(0);
+            long deferredBefore = rig.Sender.Stats.DeferredByBudget;
+            rig.Sender.Tick();
+
+            Check(rig.Sender.Stats.DeferredByBudget > deferredBefore,
+                "T-c1-5 本轮 X 被预算顺延（实际 +" + (rig.Sender.Stats.DeferredByBudget - deferredBefore) + "）");
+            Check(c.Conn.Sent.Count > 0, "T-c1-6 同一轮第二个对象的更新照常发出（" + c.Conn.Sent.Count + " 个载荷）");
+
+            Deliver(rig, c);
+            Check(secondCopy != null && secondCopy.A == 3,
+                "T-c1-7 第二个对象送达（A=" + (secondCopy == null ? -1 : secondCopy.A) + "）");
+
+            bool active;
+            Check(rig.Sender.TryGetConditionActive(c.Conn, netId, 1, out active) && !active,
+                "T-c1-8 预算顺延没有丢掉\"失去可见性\"这个事实（ConditionActive=false，实际 " + active + "）");
+
+            // 重新可见：值相同（5）、无脏位 ⇒ 契约仍要求强制补发一次当前值
+            role = PMRepViewRole.Autonomous;
+            c.Conn.Sent.Clear();
+            long forceBefore = rig.Sender.Stats.TransitionForceSends;
+            rig.Sender.Tick();
+
+            List<int> slots = SentSlotsFor(c.Conn, netId, "T-c1-9");
+            Check(slots.Contains(1),
+                "T-c1-9 重新可见 ⇒ 强制补发（值未变、无脏位也必须补发，X 实际 " + SlotsToString(slots) + "）");
+            Check(rig.Sender.Stats.TransitionForceSends > forceBefore,
+                "T-c1-10 跃迁补发计数增长（" + forceBefore + " → " + rig.Sender.Stats.TransitionForceSends + "）");
+            Deliver(rig, c);
+            Check(c.Obj.B == 5, "T-c1-11 客户端持有当前值（B=" + c.Obj.B + "）");
+        }
+
+        // ------------------------------------------------------------------ T-c2
+
+        private static void TestDeferredLossWithForeignDirtyClear()
+        {
+            PMRepOptions opt = new PMRepOptions();
+            opt.MaxObjectsPerConnectionPerTick = 1;
+
+            PMReplicationDescriptor desc = MakeDescriptor(0x6004u,
+                new PMCond[] { PMCond.None, PMCond.OwnerOnly, PMCond.None, PMCond.None }, null);
+
+            Rig rig = Rig.CreateWithDescriptor(0x6004u, 1, desc, opt);
+            Rig.Client c = rig.Clients[0];
+
+            PMRepViewRole role = PMRepViewRole.Autonomous;
+            rig.Sender.ViewRoleResolver = delegate (PMNetObject o, PMNetConnection conn) { return role; };
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 5;
+            rig.MarkAllDirty();
+            TickAndDeliver(rig, c);
+            Check(c.Obj.B == 5, "T-c2-1 拥有者视角下基线建立（B=" + c.Obj.B + "）");
+
+            RepObj second = AddServerObject(rig);
+            RepObj third = AddServerObject(rig);
+            DeliverLifecycleToClient(rig, c);
+            RepObj secondCopy = FindClientCopy(rig, c, second);
+            RepObj thirdCopy = FindClientCopy(rig, c, third);
+            Check(secondCopy != null && thirdCopy != null, "T-c2-2 两个附加对象的客户端副本已创建");
+
+            second.A = 1;
+            second.MarkPropertyDirty(0);
+            third.A = 1;
+            third.MarkPropertyDirty(0);
+            for (int round = 0; round < 6; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(secondCopy != null && thirdCopy != null && secondCopy.A == 1 && thirdCopy.A == 1,
+                "T-c2-3 三个对象基线都建立");
+
+            // 造一条"尚未确认"的 X 记录：本轮只有 X 需要工作 ⇒ X 必被处理，游标落到 X 之后；
+            // 我们**故意不投递**它的 ACK（模拟落后的确认）。
+            rig.ServerObj.A = 2;
+            rig.ServerObj.MarkPropertyDirty(0);
+            rig.Sender.Tick();
+            Check(c.Conn.Sent.Count > 0, "T-c2-4 X 的更新已发出（留作在途，稍后才投递）");
+
+            // 失去可见性（游标起点在 second 上）⇒ X 连两轮被顺延。
+            role = PMRepViewRole.Simulated;
+            second.A = 2;
+            second.MarkPropertyDirty(0);
+            long deferredBefore = rig.Sender.Stats.DeferredByBudget;
+            rig.Sender.Tick();
+            Check(rig.Sender.Stats.DeferredByBudget > deferredBefore,
+                "T-c2-5 X 在失去可见性这一轮被预算顺延（实际 +"
+                + (rig.Sender.Stats.DeferredByBudget - deferredBefore) + "）");
+
+            rig.ServerObj.B = 9;
+            rig.ServerObj.MarkPropertyDirty(1);
+            third.A = 3;
+            third.MarkPropertyDirty(0);
+            long deferredBefore2 = rig.Sender.Stats.DeferredByBudget;
+            rig.Sender.Tick();
+            Check(rig.Sender.Stats.DeferredByBudget > deferredBefore2,
+                "T-c2-6 第二个顺延轮（期间 owner-only 字段被改写并标脏，实际 +"
+                + (rig.Sender.Stats.DeferredByBudget - deferredBefore2) + "）");
+
+            // 投递所有在途载荷（含 X 的 slot 0 记录）：ACK 到达后 `TryClearSettledDirty` 会把
+            // "对本连接不可见"的 slot 1 脏位当成已结算而清掉 —— 这就是最狠的前提：脏位没了，
+            // 只剩跃迁补偿能把这个值补上。
+            Deliver(rig, c);
+            Check(!rig.ServerObj.Dirty.IsDirty(1),
+                "T-c2-7 对外不可见的 slot 1 脏位被 ACK 路径当作已结算清掉（构造前提）");
+
+            // 重新可见：当前值 9 ≠ 客户端基线 5，但脏位已清、旧实现里这次丢失从未被记录
+            // ⇒ 该对象对本连接再无任何触发源，客户端**永久**停在旧值。
+            role = PMRepViewRole.Autonomous;
+            c.Conn.Sent.Clear();
+            for (int round = 0; round < 3; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            Check(c.Obj.B == 9,
+                "T-c2-8 重新可见后 owner-only 字段收敛到最新值（实际 B=" + c.Obj.B + "）");
+        }
+
+        // ------------------------------------------------------------------ T-d
+
+        private static void TestBudgetCursorUnderObjectChurn()
+        {
+            PMRepOptions opt = new PMRepOptions();
+            opt.MaxObjectsPerConnectionPerTick = 1;
+
+            Rig rig = Rig.Create(0x6005u, 1, null, null, opt, PollOnSlot0);
+            Rig.Client c = rig.Clients[0];
+
+            const int trackedCount = 3;
+            RepObj[] tracked = new RepObj[trackedCount];
+            tracked[0] = rig.ServerObj;
+            for (int i = 1; i < trackedCount; i++)
+            {
+                tracked[i] = AddServerObject(rig);
+            }
+
+            DeliverLifecycleToClient(rig, c);
+
+            RepObj[] copies = new RepObj[trackedCount];
+            bool allCopies = true;
+            for (int i = 0; i < trackedCount; i++)
+            {
+                copies[i] = FindClientCopy(rig, c, tracked[i]);
+                if (copies[i] == null) { allCopies = false; }
+            }
+
+            Check(allCopies, "T-d1 三个被跟踪对象的客户端副本都已创建");
+
+            for (int i = 0; i < trackedCount; i++) { tracked[i].A = i + 1; }
+            for (int round = 0; round < trackedCount + 2; round++)
+            {
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            bool baselineOk = allCopies;
+            for (int i = 0; i < trackedCount && baselineOk; i++)
+            {
+                if (copies[i].A != i + 1) { baselineOk = false; }
+            }
+
+            Check(baselineOk, "T-d2 预算 1 下三个对象基线都建立（轮转覆盖）");
+
+            // 表扰动：每轮注销一个陪跑对象（`List.Remove` ⇒ 其后所有对象下标整体前移）、
+            // 再登记一个新对象（追加到尾部）。游标是按 `_objects` 下标存的，下标位移后若规约规则
+            // 出错（重置为 0 / 停在同一下标），被跟踪对象就会出现永久饥饿。
+            RepObj churn = AddServerObject(rig);
+            DeliverLifecycleToClient(rig, c);
+
+            int[] lag = new int[trackedCount];
+            int[] worstLag = new int[trackedCount];
+
+            for (int round = 0; round < 10; round++)
+            {
+                for (int i = 0; i < trackedCount; i++)
+                {
+                    tracked[i].A = 1000 + round;      // 轮询式：不标脏
+                }
+
+                rig.Sender.UnregisterObject(churn);
+                churn = AddServerObject(rig);
+                DeliverLifecycleToClient(rig, c);
+
+                rig.Sender.Tick();
+                Deliver(rig, c);
+
+                for (int i = 0; i < trackedCount; i++)
+                {
+                    if (copies[i].A == 1000 + round)
+                    {
+                        lag[i] = 0;
+                    }
+                    else
+                    {
+                        lag[i]++;
+                        if (lag[i] > worstLag[i]) { worstLag[i] = lag[i]; }
+                    }
+                }
+            }
+
+            int worst = 0;
+            for (int i = 0; i < trackedCount; i++)
+            {
+                if (worstLag[i] > worst) { worst = worstLag[i]; }
+            }
+
+            Check(worst <= 6,
+                "T-d3 对象表增删（下标整体位移）后无永久饥饿：被跟踪对象最长连续顺延 " + worst
+                + " 轮（预算 1、表长 4..5，实际 " + worstLag[0] + "/" + worstLag[1] + "/" + worstLag[2] + "）");
+
+            for (int round = 0; round < 10; round++)
+            {
+                for (int i = 0; i < trackedCount; i++) { tracked[i].A = 4242; }
+                rig.Sender.Tick();
+                Deliver(rig, c);
+            }
+
+            bool converged = allCopies;
+            for (int i = 0; i < trackedCount && converged; i++)
+            {
+                if (copies[i].A != 4242) { converged = false; }
+            }
+
+            Check(converged, "T-d4 扰动结束后全部被跟踪对象最终收敛（A=4242）");
+        }
+
+        // ------------------------------------------------------------------ T-e
+
+        private static void TestAckLagWithVisibilitySwitch()
+        {
+            PMReplicationDescriptor desc = MakeDescriptor(0x6006u,
+                new PMCond[] { PMCond.None, PMCond.OwnerOnly, PMCond.None, PMCond.None }, null);
+
+            Rig rig = Rig.CreateWithDescriptor(0x6006u, 2, desc, null);
+            Rig.Client fast = rig.Clients[0];
+            Rig.Client slow = rig.Clients[1];
+            uint netId = rig.ServerObj.NetId.Value;
+
+            PMRepViewRole slowRole = PMRepViewRole.Autonomous;
+            rig.Sender.ViewRoleResolver = delegate (PMNetObject o, PMNetConnection conn)
+            {
+                return ReferenceEquals(conn, slow.Conn) ? slowRole : PMRepViewRole.Autonomous;
+            };
+
+            rig.ServerObj.A = 1;
+            rig.ServerObj.B = 5;
+            rig.MarkAllDirty();
+            rig.Sender.Tick();
+            DeliverAll(rig);
+            Check(fast.Obj.B == 5 && slow.Obj.B == 5,
+                "T-e1 两条连接的 owner-only 基线都建立（fast=" + fast.Obj.B + " slow=" + slow.Obj.B + "）");
+
+            // slow 失去可见性；它的 ACK 全程落后（不投递）。
+            slowRole = PMRepViewRole.Simulated;
+            rig.Sender.Tick();
+            Deliver(rig, fast);
+
+            rig.ServerObj.B = 9;
+            rig.ServerObj.MarkPropertyDirty(1);
+            rig.Sender.Tick();
+            Deliver(rig, fast);
+            Check(fast.Obj.B == 9, "T-e2 fast 连接拿到新值（B=" + fast.Obj.B + "）");
+            Check(slow.Obj.B == 5, "T-e3 slow 连接（不可见）没拿到新值（B=" + slow.Obj.B + "）");
+
+            byte[] oldAck = MakeAckMessage(netId, 1L);
+            long staleBefore = rig.Sender.Stats.StaleAckIgnored;
+            rig.Sender.OnMessage(slow.Conn, oldAck, 0, oldAck.Length);
+            Check(rig.Sender.Stats.StaleAckIgnored > staleBefore,
+                "T-e4 落后连接上的旧 ACK 被判过期（不推进确认水位）");
+
+            // 重新可见：slow 的基线仍是 5、值已改成 9、脏位已被 fast 的 ACK 结清
+            // ⇒ 只能靠跃迁补偿把值补上。
+            slowRole = PMRepViewRole.Autonomous;
+            slow.Conn.Sent.Clear();
+            long forceBefore = rig.Sender.Stats.TransitionForceSends;
+            rig.Sender.Tick();
+
+            List<int> slots = SentSlotsFor(slow.Conn, netId, "T-e5");
+            Check(slots.Contains(1),
+                "T-e5 slow 重新可见 ⇒ 强制补发 owner-only 当前值（实际 " + SlotsToString(slots) + "）");
+            Check(rig.Sender.Stats.TransitionForceSends > forceBefore,
+                "T-e6 跃迁补发计数增长（" + forceBefore + " → " + rig.Sender.Stats.TransitionForceSends + "）");
+
+            Deliver(rig, slow);
+            Check(slow.Obj.B == 9, "T-e7 slow 收敛到最新值（B=" + slow.Obj.B + "）");
+            Check(fast.Obj.B == 9, "T-e8 fast 未因 slow 的旧 ACK/落后回退（B=" + fast.Obj.B + "）");
         }
     }
 }

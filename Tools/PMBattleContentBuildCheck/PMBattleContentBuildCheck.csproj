@@ -79,6 +79,8 @@
                                                    Debug/Random/JsonUtility 之外的公共类型；
         · UnityEngine.PhysicsModule.dll         —— Collider/MeshCollider/BoxCollider/Rigidbody（白名单判定）；
         · UnityEngine.AnimationModule.dll       —— Animator/AnimatorControllerParameter(Type)（Speed 参数校验）；
+        · UnityEngine.VehiclesModule.dll        —— WheelCollider（自测里“允许出现但没有字段拷贝实现”的
+                                                    fail-closed 负例；该类型已转发到 VehiclesModule，不引就 CS1069）。
         · UnityEngine.JSONSerializeModule.dll   —— JsonUtility（manifest 序列化）；
         · UnityEngine.SharedInternalsModule.dll —— Unity 内部可见性属性所在程序集（模块引用了它，必须一并给出）；
         · UnityEditor.dll                       —— MenuItem/PrefabUtility/EditorSceneManager/AssetDatabase/
@@ -98,6 +100,10 @@
     </Reference>
     <Reference Include="UnityEngine.AnimationModule">
       <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.VehiclesModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.VehiclesModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.JSONSerializeModule">

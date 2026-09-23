@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -82,6 +82,21 @@ namespace PMNetGen
         /// <summary>把 [PMNetworkObject] 放到 class 之外（struct / interface / record）的类型（规则 1）。</summary>
         public readonly List<string> NonClassNetworkObjectHosts = new List<string>();
 
+        /// <summary>
+        /// **嵌套类型**上的 [PMNetworkObject]。
+        ///
+        /// 扫描器只处理顶层类型（生成物是「顶层 partial class &lt;TypeName&gt;」，无法与嵌套类型合并），
+        /// 因此嵌套类型上的这个标记不会生效。不专门报出来就是
+        /// "写了声明、但完全不参与复制"的静默漏扫（规则 1）。
+        /// </summary>
+        public readonly List<string> NestedNetworkObjectTypes = new List<string>();
+
+        /// <summary>
+        /// **嵌套类型**成员上的 [PMReplicated] / [PMQuantized]（规则 14）。
+        /// 与 <see cref="NestedNetworkObjectTypes"/> 同理：不报就是静默漏扫。
+        /// </summary>
+        public readonly List<string> NestedReplicatedMembers = new List<string>();
+
         /// <summary>类型的修饰符前缀（如 `public sealed `），用于生成 partial 声明时保持可访问性一致。</summary>
         public readonly Dictionary<string, string> TypeModifierPrefix =
             new Dictionary<string, string>(StringComparer.Ordinal);
@@ -106,6 +121,42 @@ namespace PMNetGen
         /// <summary>复制属性没有 set 访问器（生成写入器会编译不过）——生成期告警，不阻断。</summary>
         public readonly List<string> ReplicatedWithoutSetter = new List<string>();
 
+        /// <summary>
+        /// [PMReplicated] 成员的**声明形态事实**（键 = `命名空间.类型名.成员名`）。
+        ///
+        /// **为什么不能只靠 IR**：冻结 IR（<see cref="PMDeclProperty"/>）只有一个 `IsField` 形态位，
+        /// 而自动属性复制（Docs/plans/net-property-authoring-contract.md §1）必须区分
+        /// 「普通实例 auto-property（get;set;，允许访问性不同与初始化器）」与
+        /// 「自定义 getter/setter / 只读 / indexer / virtual / override / abstract / ref-return /
+        /// 显式接口实现」这些**不支持形态**。IR 不许扩字段，因此形态事实走 rawfacts
+        /// （与规则 9 / 规则 7 的语法事实同一处理方式）。
+        ///
+        /// 这份事实同时被两处消费：
+        /// <list type="bullet">
+        ///   <item>DeclValidation 规则 14：把不支持形态变成**生成前的硬错误**；</item>
+        ///   <item>DeclEmitter：为普通实例 auto-property 发射 RawSet/PropertySet/序号常量，
+        ///         并对其余形态 fail-closed 拒绝发射（不产出会静默写错的产物）。</item>
+        /// </list>
+        /// </summary>
+        public readonly Dictionary<string, PMDeclPropertyFact> PropertyFacts =
+            new Dictionary<string, PMDeclPropertyFact>(StringComparer.Ordinal);
+
+        /// <summary>
+        /// [PMReplicated] / [PMQuantized] 被标到**不支持的成员种类**上（event、显式接口 indexer 之外的
+        /// 非常规成员等）。这类成员根本不会进入 IR：若不专门记下来，就会变成
+        /// 「标记了、但完全不参与复制」的静默漏扫（由规则 14 报错）。
+        /// </summary>
+        public readonly List<string> ReplicatedOnUnsupportedMembers = new List<string>();
+
+        /// <summary>
+        /// 只写了 [PMQuantized] 却没有 [PMReplicated] 的成员（键 = `命名空间.类型名.成员名`）。
+        ///
+        /// 量化器只对**已复制**的成员有意义：单独写 [PMQuantized] 不会有任何复制效果。
+        /// 这里只记成告警（不是错误），因为「先写量化器、后补复制」是可能的过渡写法，
+        /// 但它必须是**可见**的，不能静默消失。
+        /// </summary>
+        public readonly List<string> QuantizedWithoutReplicated = new List<string>();
+
         /// <summary>声明了 RPC 属性但所在类不是 [PMNetworkObject]（规则 7 的附带检查）。</summary>
         public readonly List<string> OrphanRpcDeclarations = new List<string>();
 
@@ -125,8 +176,26 @@ namespace PMNetGen
         /// <summary>实际解析的 .cs 文件数。</summary>
         public int ParsedFileCount;
 
-        /// <summary>Roslyn 报出的语法错误条数（只统计，不阻断；声明扫描不需要源码能编译）。</summary>
+        /// <summary>Roslyn 报出的语法错误条数。</summary>
         public int SyntaxErrorCount;
+
+        /// <summary>
+        /// 含语法错误的源文件（`路径（诊断）`）。
+        ///
+        /// 为什么必须记名字而不是只记条数：语法错误会让声明集**不完整**，
+        /// 而不完整的声明集生成的往往是一张「看着正常、实则少类」的注册表；
+        /// `--decl-gen` 一旦把它写出去就会覆盖现有产物。因此这条信息要落到
+        /// `PMDeclModel.Errors`（见 DeclValidation 的扫描完整性门），让生成直接失败。
+        /// </summary>
+        public readonly List<string> SyntaxErrorFiles = new List<string>();
+
+        /// <summary>
+        /// 读取失败的源文件（`路径（异常）`）。
+        ///
+        /// 同样的道理：读不到 = 声明集不完整 ⇒ 拒绝生成/校验，
+        /// **绝不允许**用一份「读不到就跳过」的假空注册表覆盖现有产物。
+        /// </summary>
+        public readonly List<string> ReadFailures = new List<string>();
     }
 
     /// <summary>一条 [PMRepNotify] 声明（规则 5 / 6 的判据）。</summary>
@@ -151,7 +220,7 @@ namespace PMNetGen
         public int Line;
     }
 
-    /// <summary>一条 RPC 声明（规则 8 / 9 的判据）。</summary>
+    /// <summary>一条 RPC 声明（规则 7 / 8 / 9 / 13 的判据）。</summary>
     public sealed class PMDeclRpcFact
     {
         /// <summary>所在类限定名。</summary>
@@ -174,6 +243,215 @@ namespace PMNetGen
 
         /// <summary>声明所在行（诊断用）。</summary>
         public int Line;
+
+        // ---- 以下为「编织器明确拒绝的形态」的语法事实（契约 net-rpc-weaving-contract.md §3）----
+        // 报错判据在 DeclValidation 的规则 7。这些事实之所以要单独带出来，是因为
+        // PMDeclRpc（冻结 IR）没有这些字段，而本轮不允许为改动扩 IR 字段。
+
+        /// <summary>同一个方法带多个 RPC 标记（会生成多个同名 helper ⇒ 直接编译失败）。</summary>
+        public bool MultipleRpcAttributes;
+
+        /// <summary>`virtual`。</summary>
+        public bool IsVirtual;
+
+        /// <summary>`abstract`。</summary>
+        public bool IsAbstract;
+
+        /// <summary>`extern` / native。</summary>
+        public bool IsExtern;
+
+        /// <summary>`async`。</summary>
+        public bool IsAsync;
+
+        /// <summary>泛型方法。</summary>
+        public bool HasTypeParameters;
+
+        /// <summary>有方法体（块体或表达式体）；`void M();` 这类没有体。</summary>
+        public bool HasBody;
+
+        /// <summary>同类内存在同名方法（重载，与编织期同口径）。</summary>
+        public bool HasOverload;
+
+        /// <summary>不支持的形参修饰（`名（ref/out/in/params/default）`）。</summary>
+        public readonly List<string> UnsupportedParamModifiers = new List<string>();
+    }
+
+    /// <summary>
+    /// 一条 `[PMReplicated]` 成员的**声明形态事实**（见 <see cref="PMDeclRawFacts.PropertyFacts"/>）。
+    ///
+    /// 判据全部来自语法层（Roslyn 语法节点 + 修饰符 token），不建 Compilation、不引业务程序集 ——
+    /// 生成期必须在业务编译成功之前就能跑（见本文件头注释）。
+    /// </summary>
+    public sealed class PMDeclPropertyFact
+    {
+        /// <summary>所在类限定名。</summary>
+        public string ClassQualifiedName = string.Empty;
+
+        /// <summary>成员名（indexer 固定为 `this[]`）。</summary>
+        public string MemberName = string.Empty;
+
+        /// <summary>声明类型名（源码书写形式，已去空白）。</summary>
+        public string TypeName = string.Empty;
+
+        /// <summary>是字段（true）还是属性（false）。字段走旧模式，形态检查只对属性生效。</summary>
+        public bool IsField;
+
+        /// <summary>是 indexer（`this[...]`）。</summary>
+        public bool IsIndexer;
+
+        /// <summary>是显式接口实现（`int IFoo.Value { get; set; }`）。</summary>
+        public bool IsExplicitInterface;
+
+        /// <summary>是 ref-return 属性（`ref int X { get; }`）。</summary>
+        public bool IsRefReturn;
+
+        /// <summary>`virtual`。</summary>
+        public bool IsVirtual;
+
+        /// <summary>`override`（含 `sealed override`）。</summary>
+        public bool IsOverride;
+
+        /// <summary>`abstract`。</summary>
+        public bool IsAbstract;
+
+        /// <summary>`static`（规则 3 已报，规则 14 不重复报）。</summary>
+        public bool IsStatic;
+
+        /// <summary>有 get 访问器。</summary>
+        public bool HasGetter;
+
+        /// <summary>有 set（含 init）访问器。</summary>
+        public bool HasSetter;
+
+        /// <summary>get 访问器是自动的（没有体）。</summary>
+        public bool GetterIsAuto;
+
+        /// <summary>set 访问器是自动的（没有体）。</summary>
+        public bool SetterIsAuto;
+
+        /// <summary>有初始化器（`= 100`）。自动属性允许，且不依赖标脏 —— 初始全量由复制层负责。</summary>
+        public bool HasInitializer;
+
+        /// <summary>有表达式体（`=&gt; expr` / `{ get =&gt; expr; }`）。</summary>
+        public bool HasExpressionBody;
+
+        /// <summary>get 访问器的显式可访问性（空串 = 继承属性可访问性）。不同可访问性是**允许**的。</summary>
+        public string GetterAccessibility = string.Empty;
+
+        /// <summary>set 访问器的显式可访问性（空串 = 继承属性可访问性）。不同可访问性是**允许**的。</summary>
+        public string SetterAccessibility = string.Empty;
+
+        /// <summary>声明所在行（诊断用）。</summary>
+        public int Line;
+
+        /// <summary>事实键（与 <see cref="PMDeclRawFacts.PropertyFacts"/> 的键一致）。</summary>
+        public string FactKey
+        {
+            get { return ClassQualifiedName + "." + MemberName; }
+        }
+
+        /// <summary>
+        /// 是否是**受支持的普通实例 auto-property**（get;set;，允许访问性不同与初始化器）。
+        ///
+        /// 这是发射器与校验器共用的**唯一判据**：两处若各算一套，就会出现
+        /// 「校验放行、发射器拒绝」或更糟的「校验放行、发射器静默写错」。
+        /// </summary>
+        public bool IsPlainAutoProperty
+        {
+            get
+            {
+                return !IsField
+                    && !IsIndexer
+                    && !IsExplicitInterface
+                    && !IsRefReturn
+                    && !IsStatic
+                    && !IsVirtual
+                    && !IsOverride
+                    && !IsAbstract
+                    && !HasExpressionBody
+                    && HasGetter
+                    && GetterIsAuto
+                    && HasSetter
+                    && SetterIsAuto;
+            }
+        }
+
+        /// <summary>
+        /// 不支持的形态原因（可读文本，空列表 = 受支持）。
+        ///
+        /// 顺序固定，便于门禁按序断言与报告复核。
+        ///
+        /// “形态本身就不同”的三类（indexer / ref-return / 表达式体）直接短路返回：
+        /// 它们的 AccessorList 根本不存在（indexer 参数列表 / 表达式体）或类型就是引用类型，
+        /// 若继续跑访问器检查会输出“没有 get 访问器 / 只读”这类**误导性**原因，
+        /// 让报错指错方向。
+        /// </summary>
+        public List<string> DescribeUnsupportedShapes()
+        {
+            List<string> reasons = new List<string>();
+
+            // 字段走旧模式（手动 Push/Poll）：它没有“自定义访问器”一说，
+            // 本方法对字段永远返回空，避免被误用。
+            if (IsField)
+            {
+                return reasons;
+            }
+
+            if (IsIndexer)
+            {
+                reasons.Add("indexer（this[...]）不支持：成员名不是合法标识符，无法生成"
+                    + "稳定成员名 / PMGeneratedPropertyIndex / PMNet_Set 访问器");
+                return reasons;
+            }
+
+            if (IsRefReturn)
+            {
+                reasons.Add("ref-return 属性不支持：返回引用无法作为"
+                    + "EqualityComparer&lt;T&gt;.Default 的闭合类型参数，也无法通过 RawSet 存值");
+                return reasons;
+            }
+
+            if (HasExpressionBody)
+            {
+                reasons.Add("表达式体属性（=&gt; expr）不支持：它没有 auto-property 的 backing field");
+                return reasons;
+            }
+
+            if (IsExplicitInterface)
+            {
+                reasons.Add("显式接口实现不支持：成员名带接口前缀，无法生成 PMNet_Set / PMNet_PropertySet / "
+                    + "PMNet_PropertyRawSet 这一组用具名标识符的方法");
+            }
+
+            if (IsVirtual || IsOverride || IsAbstract)
+            {
+                reasons.Add("virtual/override/abstract 属性不支持：编织器不处理虚成员与继承重写"
+                    + "（与 RPC 同一条边界：不猜重写链、不重写所有程序集 stfld）");
+            }
+
+            if (!HasGetter)
+            {
+                reasons.Add("没有 get 访问器：复制层的 Writer 读不到值");
+            }
+            else if (!GetterIsAuto)
+            {
+                reasons.Add("自定义 getter 不支持：自动属性必须由编译器生成访问器"
+                    + "（否则复制层读到的是业务逻辑而不是 backing field）");
+            }
+
+            if (!HasSetter)
+            {
+                reasons.Add("只读（没有 set 访问器）不支持：编织器要改写 setter 才能接管赋值，"
+                    + "没有 setter 就没有可改写点；请改用普通字段或补上 set");
+            }
+            else if (!SetterIsAuto)
+            {
+                reasons.Add("自定义 setter 不支持：编织器无法证明「原始 setter 只是赋 backing field」，"
+                    + "改写它会丢掉业务副作用");
+            }
+
+            return reasons;
+        }
     }
 
     /// <summary>
@@ -417,18 +695,30 @@ namespace PMNetGen
                 }
                 catch (Exception ex)
                 {
-                    model.Warnings.Add("[告警] 读取源文件失败，已跳过：" + path + "（" + ex.Message + "）");
+                    // ★ 读取失败**不能**只当告警跳过：跳过意味着声明集少了一部分，
+                    //   而“少一部分”生成出来的往往是一张看着正常的注册表，
+                    //   `--decl-gen` 会拿它覆盖现有产物。因此记成事实，由扫描完整性门报错。
+                    facts.ReadFailures.Add(path + "（" + ex.Message + "）");
                     continue;
                 }
 
                 SyntaxTree tree = CSharpSyntaxTree.ParseText(text, options, path);
                 SyntaxNode root = tree.GetRoot();
 
-                foreach (Diagnostic d in tree.GetDiagnostics())
+                List<Diagnostic> diagnostics = new List<Diagnostic>(tree.GetDiagnostics());
+                for (int di = 0; di < diagnostics.Count; di++)
                 {
-                    if (d.Severity == DiagnosticSeverity.Error)
+                    Diagnostic d = diagnostics[di];
+                    if (d.Severity != DiagnosticSeverity.Error)
                     {
-                        facts.SyntaxErrorCount++;
+                        continue;
+                    }
+
+                    facts.SyntaxErrorCount++;
+                    if (facts.SyntaxErrorFiles.Count < 8)
+                    {
+                        facts.SyntaxErrorFiles.Add(path + "：" + d.Id + " " + d.GetMessage()
+                            + "（行 " + (d.Location.GetLineSpan().StartLinePosition.Line + 1) + "）");
                     }
                 }
 
@@ -595,6 +885,8 @@ namespace PMNetGen
             public bool IsReadOnly;
             public bool HasSetter = true;
             public bool HasReplicated;
+            public bool HasQuantized;
+            public bool PushBased = true;
             public string ConditionSource;
             public ushort QuantizerId;
             public int Line;
@@ -611,6 +903,35 @@ namespace PMNetGen
             public bool IsStatic;
             public int Line;
             public readonly List<PMDeclParam> Parameters = new List<PMDeclParam>();
+
+            // ---- 编织器（Tools/PMNetWeaver）明确拒绝的方法形态 ----
+            // 这些形态在编织期一定会失败（契约 net-rpc-weaving-contract.md §3），
+            // 但「编译后才发现」意味着生成物已经写出去、业务也已经照着它编译过了。
+            // 因此在声明层就把它们收成事实，由 DeclValidation 的规则 7 在生成前报错。
+
+            /// <summary>方法带多个 RPC 标记（会生成多个同名 helper ⇒ 直接编译失败）。</summary>
+            public bool MultipleRpcAttributes;
+
+            /// <summary>`virtual`（编织器不处理虚方法/网络继承，明确拒绝）。</summary>
+            public bool IsVirtual;
+
+            /// <summary>`abstract`（没有业务体可拆）。</summary>
+            public bool IsAbstract;
+
+            /// <summary>`extern` / native（没有托管业务体可拆）。</summary>
+            public bool IsExtern;
+
+            /// <summary>`async`（状态机会改写方法体，编织器明确拒绝）。</summary>
+            public bool IsAsync;
+
+            /// <summary>泛型方法 `M&lt;T&gt;`。</summary>
+            public bool HasTypeParameters;
+
+            /// <summary>有方法体（块体或表达式体）。`void M();` 这类没有体。</summary>
+            public bool HasBody;
+
+            /// <summary>不支持的形参修饰（`名字（ref/out/in/params/default）`），空 = 全部合法。</summary>
+            public readonly List<string> UnsupportedParamModifiers = new List<string>();
         }
 
         private static void CollectTypes(
@@ -632,8 +953,17 @@ namespace PMNetGen
                 }
 
                 TypeDeclarationSyntax btd = node as TypeDeclarationSyntax;
-                if (btd == null || !IsTopLevel(btd))
+                if (btd == null)
                 {
+                    continue;
+                }
+
+                if (!IsTopLevel(btd))
+                {
+                    // 嵌套类型不参与生成（生成物是「顶层 partial class <TypeName>」，不能与嵌套类型合并），
+                    // 因此它（及其成员）上的网络标记**必须**被报出来：
+                    // 不报就是“写了声明、但完全不参与复制”的静默漏扫。
+                    RecordNestedNetworkDeclaration(facts, btd);
                     continue;
                 }
 
@@ -708,6 +1038,57 @@ namespace PMNetGen
             }
         }
 
+        /// <summary>
+        /// 记下**嵌套类型**上的网络声明。
+        ///
+        /// 为什么单独一类：扫描器只处理顶层类型，这类声明不会进 IR，也就没有后续任何一层会看到它。
+        /// 分成两条事实，是因为它们各归属不同的规则：
+        ///   · 嵌套类型自己带 [PMNetworkObject] ⇒ 规则 1（宿主形态）；
+        ///   · 嵌套类型的成员带 [PMReplicated] / [PMQuantized] ⇒ 规则 14（属性 / 成员形态）。
+        /// </summary>
+        private static void RecordNestedNetworkDeclaration(PMDeclRawFacts facts, TypeDeclarationSyntax nested)
+        {
+            string owner = NestedOwnerName(nested);
+            string qualified = string.IsNullOrEmpty(owner)
+                ? nested.Identifier.Text
+                : owner + "." + nested.Identifier.Text;
+
+            if (HasAttributeInList(nested.AttributeLists, AttrNetworkObject))
+            {
+                facts.NestedNetworkObjectTypes.Add(qualified);
+            }
+
+            for (int i = 0; i < nested.Members.Count; i++)
+            {
+                MemberDeclarationSyntax member = nested.Members[i];
+                bool replicated = HasMemberAttribute(member, AttrReplicated);
+                bool quantized = !replicated && HasMemberAttribute(member, AttrQuantized);
+                if (!replicated && !quantized)
+                {
+                    continue;
+                }
+
+                facts.NestedReplicatedMembers.Add(qualified + "." + MemberDisplayName(member)
+                    + "（" + (replicated ? "[PMReplicated]" : "[PMQuantized]") + "）");
+            }
+        }
+
+        /// <summary>嵌套类型的**包含类型全名**（不含命名空间）；顶层类型返回空串。</summary>
+        private static string NestedOwnerName(SyntaxNode node)
+        {
+            List<string> parts = new List<string>();
+            for (SyntaxNode n = node.Parent; n != null; n = n.Parent)
+            {
+                TypeDeclarationSyntax owner = n as TypeDeclarationSyntax;
+                if (owner != null)
+                {
+                    parts.Insert(0, owner.Identifier.Text);
+                }
+            }
+
+            return string.Join(".", parts.ToArray());
+        }
+
         private static void CollectMembers(
             TypeDeclarationSyntax btd,
             ClassAccumulator acc,
@@ -726,6 +1107,22 @@ namespace PMNetGen
                         if (rec != null)
                         {
                             acc.Properties.Add(rec);
+
+                            // 字段走旧模式（手动 Push/Poll）；仍然记下形态事实，
+                            // 让规则 14 能做「IR 与 facts 一一对应」的反向核对
+                            // （防扫描器与 IR 分叉，也防新成员种类被静默漏扫）。
+                            PMDeclPropertyFact fieldFact = new PMDeclPropertyFact();
+                            fieldFact.ClassQualifiedName = qn;
+                            fieldFact.MemberName = v.Identifier.Text;
+                            fieldFact.TypeName = TypeText(field.Declaration.Type);
+                            fieldFact.IsField = true;
+                            fieldFact.Line = LineOf(v);
+                            facts.PropertyFacts[fieldFact.FactKey] = fieldFact;
+
+                            if (!rec.HasReplicated && rec.HasQuantized)
+                            {
+                                facts.QuantizedWithoutReplicated.Add(qn + "." + rec.MemberName);
+                            }
                         }
                     }
 
@@ -742,10 +1139,38 @@ namespace PMNetGen
                         rec.HasSetter = HasSetter(prop);
                         if (!rec.HasSetter)
                         {
+                            // 保留事实（诊断用）；"只读属性不支持"的硬错误由规则 14 报出。
                             facts.ReplicatedWithoutSetter.Add(qn + "." + prop.Identifier.Text);
                         }
 
                         acc.Properties.Add(rec);
+                        RecordPropertyShapeFact(facts, qn, prop, rec);
+
+                        if (!rec.HasReplicated && rec.HasQuantized)
+                        {
+                            facts.QuantizedWithoutReplicated.Add(qn + "." + rec.MemberName);
+                        }
+                    }
+
+                    continue;
+                }
+
+                // indexer（`this[...]`）在 Roslyn 里不是 PropertyDeclarationSyntax：
+                // 若不专门处理，带 [PMReplicated] 的 indexer 会被**完全静默忽略**
+                // （标记了但完全不参与复制）。这里把它收成形态事实，由规则 14 报错。
+                IndexerDeclarationSyntax indexer = member as IndexerDeclarationSyntax;
+                if (indexer != null)
+                {
+                    if (HasAttributeInList(indexer.AttributeLists, AttrReplicated))
+                    {
+                        PMDeclPropertyFact indexerFact = new PMDeclPropertyFact();
+                        indexerFact.ClassQualifiedName = qn;
+                        indexerFact.MemberName = "this[]";
+                        indexerFact.TypeName = TypeText(indexer.Type);
+                        indexerFact.IsIndexer = true;
+                        indexerFact.IsStatic = HasModifier(indexer.Modifiers, SyntaxKind.StaticKeyword);
+                        indexerFact.Line = LineOf(indexer);
+                        facts.PropertyFacts[indexerFact.FactKey] = indexerFact;
                     }
 
                     continue;
@@ -766,6 +1191,10 @@ namespace PMNetGen
                 MethodDeclarationSyntax method = member as MethodDeclarationSyntax;
                 if (method == null)
                 {
+                    // ★ 其余成员种类（event / delegate 等）上的 [PMReplicated] 不能静默漏扫：
+                    //   它们根本不会被收进 IR，若只靠“找不到就不管”就会变成
+                    //   「标记了、但完全不参与复制」的静默缺陷。
+                    RecordReplicatedOnUnsupportedMember(facts, qn, member);
                     continue;
                 }
 
@@ -776,6 +1205,17 @@ namespace PMNetGen
                 {
                     acc.HasOwnRepListOverride = true;
                 }
+
+                // 一个方法上的**全部** RPC 标记先收集再落一条记录：
+                // 老实现是「每个标记各建一条记录」，于是「一个方法写两个 RPC 标记」会被折叠成
+                // 两条同名记录，最后表现为「同一类内 RpcId 重复」（规则 10）——报的是线协议歧义，
+                // 而不是它真正的原因（会生成两个同名 helper ⇒ 编译失败）。
+                // 现在改成一条记录 + MultipleRpcAttributes 事实，由规则 7 报出真实原因。
+                int rpcAttributes = 0;
+                PMRpcKind rpcKind = PMRpcKind.Server;
+                PMRpcReliability rpcReliability = PMRpcReliability.Unreliable;
+                PMRpcValidator rpcValidatorExplicit = PMRpcValidator.None;
+                bool rpcWithValidationExplicit = false;
 
                 foreach (AttributeListSyntax attrs in method.AttributeLists)
                 {
@@ -798,49 +1238,102 @@ namespace PMNetGen
                         }
                         else if (name == AttrServerRpc || name == AttrClientRpc || name == AttrNetMulticast)
                         {
-                            RpcRecord rec = new RpcRecord();
-                            rec.MethodName = methodName;
-                            rec.Kind = name == AttrServerRpc ? PMRpcKind.Server
+                            rpcAttributes++;
+                            rpcKind = name == AttrServerRpc ? PMRpcKind.Server
                                 : (name == AttrClientRpc ? PMRpcKind.Client : PMRpcKind.Multicast);
-                            rec.ReturnsVoid = TypeText(method.ReturnType) == "void";
-                            rec.IsStatic = HasModifier(method.Modifiers, SyntaxKind.StaticKeyword);
-                            rec.Line = LineOf(method);
-                            rec.Reliability = PMRpcReliability.Unreliable;
 
                             string text;
                             PMRpcReliability rel;
                             if (TryGetNamedArgument(attr, "Reliability", out text)
                                 && TryParseReliability(text, out rel))
                             {
-                                rec.Reliability = rel;
+                                rpcReliability = rel;
                             }
 
                             PMRpcValidator validator;
                             if (TryGetNamedArgument(attr, "Validator", out text)
                                 && TryParseValidator(text, out validator))
                             {
-                                rec.ValidatorExplicit = validator;
+                                rpcValidatorExplicit = validator;
                             }
 
                             bool withValidation;
                             if (TryGetNamedArgument(attr, "WithValidation", out text)
                                 && bool.TryParse(TypeText(text), out withValidation))
                             {
-                                rec.WithValidationExplicit = withValidation;
+                                rpcWithValidationExplicit = withValidation;
                             }
-
-                            foreach (ParameterSyntax p in method.ParameterList.Parameters)
-                            {
-                                PMDeclParam param = new PMDeclParam();
-                                param.Name = p.Identifier.Text;
-                                param.TypeName = p.Type != null ? TypeText(p.Type) : string.Empty;
-                                rec.Parameters.Add(param);
-                            }
-
-                            acc.Rpcs.Add(rec);
                         }
                     }
                 }
+
+                if (rpcAttributes == 0)
+                {
+                    continue;
+                }
+
+                RpcRecord rpcRec = new RpcRecord();
+                rpcRec.MethodName = methodName;
+                rpcRec.Kind = rpcKind;
+                rpcRec.MultipleRpcAttributes = rpcAttributes > 1;
+                rpcRec.Reliability = rpcReliability;
+                rpcRec.ValidatorExplicit = rpcValidatorExplicit;
+                rpcRec.WithValidationExplicit = rpcWithValidationExplicit;
+                rpcRec.ReturnsVoid = TypeText(method.ReturnType) == "void";
+                rpcRec.IsStatic = HasModifier(method.Modifiers, SyntaxKind.StaticKeyword);
+                rpcRec.IsVirtual = HasModifier(method.Modifiers, SyntaxKind.VirtualKeyword);
+                rpcRec.IsAbstract = HasModifier(method.Modifiers, SyntaxKind.AbstractKeyword);
+                rpcRec.IsExtern = HasModifier(method.Modifiers, SyntaxKind.ExternKeyword);
+                rpcRec.IsAsync = HasModifier(method.Modifiers, SyntaxKind.AsyncKeyword);
+                rpcRec.HasTypeParameters = method.TypeParameterList != null;
+                rpcRec.HasBody = method.Body != null || method.ExpressionBody != null;
+                rpcRec.Line = LineOf(method);
+
+                foreach (ParameterSyntax p in method.ParameterList.Parameters)
+                {
+                    PMDeclParam param = new PMDeclParam();
+                    param.Name = p.Identifier.Text;
+                    param.TypeName = p.Type != null ? TypeText(p.Type) : string.Empty;
+                    rpcRec.Parameters.Add(param);
+
+                    string modifiers = null;
+                    foreach (SyntaxToken token in p.Modifiers)
+                    {
+                        string label = null;
+                        switch (token.Kind())
+                        {
+                            case SyntaxKind.RefKeyword:
+                                label = "ref";
+                                break;
+                            case SyntaxKind.OutKeyword:
+                                label = "out";
+                                break;
+                            case SyntaxKind.InKeyword:
+                                label = "in";
+                                break;
+                            case SyntaxKind.ParamsKeyword:
+                                label = "params";
+                                break;
+                        }
+
+                        if (label != null)
+                        {
+                            modifiers = modifiers == null ? label : modifiers + "/" + label;
+                        }
+                    }
+
+                    if (p.Default != null)
+                    {
+                        modifiers = modifiers == null ? "default" : modifiers + "/default";
+                    }
+
+                    if (modifiers != null)
+                    {
+                        rpcRec.UnsupportedParamModifiers.Add(param.Name + "（" + modifiers + "）");
+                    }
+                }
+
+                acc.Rpcs.Add(rpcRec);
             }
         }
 
@@ -854,6 +1347,7 @@ namespace PMNetGen
         {
             bool replicated = false;
             bool quantized = false;
+            bool pushBased = true;
             string conditionSource = null;
             ushort quantizerId = 0;
 
@@ -870,9 +1364,31 @@ namespace PMNetGen
                         {
                             conditionSource = explicitCondition;
                         }
-                        else if (attr.ArgumentList != null && attr.ArgumentList.Arguments.Count > 0)
+                        else if (attr.ArgumentList != null)
                         {
-                            conditionSource = attr.ArgumentList.Arguments[0].ToString();
+                            // 只取**位置实参**作为条件：`[PMReplicated(PushBased = false)]` 里的
+                            // `PushBased = false` 是具名实参（NameEquals），不是条件。
+                            // 若不跳过它，它会被当成"无法解析的条件表达式" → 规则 11 误报。
+                            for (int argIndex = 0; argIndex < attr.ArgumentList.Arguments.Count; argIndex++)
+                            {
+                                AttributeArgumentSyntax argument = attr.ArgumentList.Arguments[argIndex];
+                                if (argument.NameEquals == null && argument.NameColon == null)
+                                {
+                                    conditionSource = argument.ToString();
+                                    break;
+                                }
+                            }
+                        }
+
+                        // PushBased=false = 轮询（Pull）式：由复制层按基線比较决定是否发送。
+                        // 它对**字段与自动属性**都适用（契约 §2：对每个 auto-property P，
+                        // 包括 PushBased=false，都要生成 helper；轮询调度本身是另一组的工作）。
+                        string pushText;
+                        bool parsedPush;
+                        if (TryGetNamedArgument(attr, "PushBased", out pushText)
+                            && bool.TryParse(TypeText(pushText), out parsedPush))
+                        {
+                            pushBased = parsedPush;
                         }
                     }
                     else if (name == AttrQuantized)
@@ -901,10 +1417,235 @@ namespace PMNetGen
             rec.IsReadOnly = HasModifier(modifiers, SyntaxKind.ReadOnlyKeyword)
                              || HasModifier(modifiers, SyntaxKind.ConstKeyword);
             rec.HasReplicated = replicated;
+            rec.HasQuantized = quantized;
+            rec.PushBased = pushBased;
             rec.ConditionSource = conditionSource;
             rec.QuantizerId = quantizerId;
             rec.Line = line;
             return rec;
+        }
+
+        // ------------------------------------------------------------------------------ 声明形态事实
+
+        /// <summary>
+        /// 把 `[PMReplicated]` 属性的声明形态收成事实（规则 14 与发射器共用的**唯一判据**）。
+        ///
+        /// 只看语法（访问器有没有体、有没有读写修饰符、是不是 indexer / ref-return /
+        /// 显式接口实现），不建 Compilation：生成期必须在业务编译成功之前就能跑。
+        /// 代价是拿不到“基类是否把该属性封为 virtual”这类**跨类型**信息；
+        /// 但那类形态在本轮本来就不支持，而“看起来像 auto-property 实际上是重写”的属性
+        /// 已经在源码上写着 override/virtual，语法层看得到。
+        /// </summary>
+        private static void RecordPropertyShapeFact(
+            PMDeclRawFacts facts, string qn, PropertyDeclarationSyntax prop, PropRecord rec)
+        {
+            if (!rec.HasReplicated)
+            {
+                return;
+            }
+
+            PMDeclPropertyFact fact = new PMDeclPropertyFact();
+            fact.ClassQualifiedName = qn;
+            fact.MemberName = prop.Identifier.Text;
+            fact.TypeName = TypeText(prop.Type);
+            fact.IsField = false;
+            fact.IsExplicitInterface = prop.ExplicitInterfaceSpecifier != null;
+            fact.IsRefReturn = prop.Type is RefTypeSyntax;
+            fact.IsVirtual = HasModifier(prop.Modifiers, SyntaxKind.VirtualKeyword);
+            fact.IsOverride = HasModifier(prop.Modifiers, SyntaxKind.OverrideKeyword);
+            fact.IsAbstract = HasModifier(prop.Modifiers, SyntaxKind.AbstractKeyword);
+            fact.IsStatic = HasModifier(prop.Modifiers, SyntaxKind.StaticKeyword);
+            fact.HasInitializer = prop.Initializer != null;
+            fact.HasExpressionBody = prop.ExpressionBody != null;
+            fact.Line = LineOf(prop);
+
+            if (prop.AccessorList != null)
+            {
+                for (int i = 0; i < prop.AccessorList.Accessors.Count; i++)
+                {
+                    AccessorDeclarationSyntax accessor = prop.AccessorList.Accessors[i];
+                    bool isGet = accessor.IsKind(SyntaxKind.GetAccessorDeclaration);
+                    bool isSet = accessor.IsKind(SyntaxKind.SetAccessorDeclaration)
+                                 || accessor.IsKind(SyntaxKind.InitAccessorDeclaration);
+                    if (!isGet && !isSet)
+                    {
+                        continue;
+                    }
+
+                    bool hasBody = accessor.Body != null || accessor.ExpressionBody != null;
+                    string accessibility = AccessorAccessibility(accessor.Modifiers);
+                    if (isGet)
+                    {
+                        fact.HasGetter = true;
+                        fact.GetterIsAuto = !hasBody;
+                        fact.GetterAccessibility = accessibility;
+                    }
+                    else
+                    {
+                        fact.HasSetter = true;
+                        fact.SetterIsAuto = !hasBody;
+                        fact.SetterAccessibility = accessibility;
+                    }
+                }
+            }
+
+            facts.PropertyFacts[fact.FactKey] = fact;
+        }
+
+        /// <summary>访问器的显式可访问性（空串 = 继承属性可访问性）。不同可访问性是**允许**的。</summary>
+        private static string AccessorAccessibility(SyntaxTokenList modifiers)
+        {
+            for (int i = 0; i < modifiers.Count; i++)
+            {
+                switch (modifiers[i].Kind())
+                {
+                    case SyntaxKind.PublicKeyword:
+                        return "public";
+                    case SyntaxKind.PrivateKeyword:
+                        return "private";
+                    case SyntaxKind.ProtectedKeyword:
+                        return "protected";
+                    case SyntaxKind.InternalKeyword:
+                        return "internal";
+                }
+            }
+
+            return string.Empty;
+        }
+
+        /// <summary>属性列表里是否出现指定简单名的 Attribute（与 <see cref="SimpleAttributeName"/> 同口径）。</summary>
+        private static bool HasAttributeInList(SyntaxList<AttributeListSyntax> lists, string simpleName)
+        {
+            for (int i = 0; i < lists.Count; i++)
+            {
+                AttributeListSyntax list = lists[i];
+                for (int k = 0; k < list.Attributes.Count; k++)
+                {
+                    if (string.Equals(SimpleAttributeName(list.Attributes[k]), simpleName, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 成员级属性（不深入访问器 / 方法体）：`AttributeListSyntax` 是成员声明的**直接子节点**，
+        /// 而访问器级属性挂在访问器下面（是孙节点），因此这个口径不会把访问器属性误当成员属性。
+        /// 用“直接子节点”而不是逐个具体成员类型判断，是为了不依赖某个 Roslyn 版本
+        /// 是否把 `AttributeLists` 提到基类上；新成员种类也天然被覆盖到。
+        /// </summary>
+        private static bool HasMemberAttribute(MemberDeclarationSyntax member, string simpleName)
+        {
+            foreach (SyntaxNode child in member.ChildNodes())
+            {
+                AttributeListSyntax list = child as AttributeListSyntax;
+                if (list == null)
+                {
+                    continue;
+                }
+
+                for (int i = 0; i < list.Attributes.Count; i++)
+                {
+                    if (string.Equals(SimpleAttributeName(list.Attributes[i]), simpleName, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 把 `[PMReplicated]` / `[PMQuantized]` 标在**不支持的成员种类**上的情形记成事实。
+        ///
+        /// 为什么必须专门记：这类成员根本不会被收进 IR，也就没有任何后续检查会看到它 ----
+        /// 结果是「源码里写着标记、运行期完全不参与复制」的静默缺陷。
+        /// </summary>
+        private static void RecordReplicatedOnUnsupportedMember(
+            PMDeclRawFacts facts, string qn, MemberDeclarationSyntax member)
+        {
+            bool replicated = HasMemberAttribute(member, AttrReplicated);
+            bool quantized = HasMemberAttribute(member, AttrQuantized);
+            if (!replicated && !quantized)
+            {
+                return;
+            }
+
+            string attribute = replicated ? "[PMReplicated]" : "[PMQuantized]";
+            facts.ReplicatedOnUnsupportedMembers.Add(qn + "." + MemberDisplayName(member)
+                + " ---- " + attribute + " 标在 " + MemberKindName(member) + " 上；"
+                + "该成员种类不参与复制，声明会被完全忽略（不是“暂时不生效”，而是静默不同步）");
+        }
+
+        private static string MemberDisplayName(MemberDeclarationSyntax member)
+        {
+            MethodDeclarationSyntax method = member as MethodDeclarationSyntax;
+            if (method != null)
+            {
+                return method.Identifier.Text;
+            }
+
+            EventDeclarationSyntax evt = member as EventDeclarationSyntax;
+            if (evt != null)
+            {
+                return evt.Identifier.Text;
+            }
+
+            EventFieldDeclarationSyntax evtField = member as EventFieldDeclarationSyntax;
+            if (evtField != null && evtField.Declaration.Variables.Count > 0)
+            {
+                return evtField.Declaration.Variables[0].Identifier.Text;
+            }
+
+            DelegateDeclarationSyntax del = member as DelegateDeclarationSyntax;
+            if (del != null)
+            {
+                return del.Identifier.Text;
+            }
+
+            FieldDeclarationSyntax field = member as FieldDeclarationSyntax;
+            if (field != null && field.Declaration.Variables.Count > 0)
+            {
+                return field.Declaration.Variables[0].Identifier.Text;
+            }
+
+            PropertyDeclarationSyntax prop = member as PropertyDeclarationSyntax;
+            if (prop != null)
+            {
+                return prop.Identifier.Text;
+            }
+
+            IndexerDeclarationSyntax indexer = member as IndexerDeclarationSyntax;
+            if (indexer != null)
+            {
+                return "this[]";
+            }
+
+            return member.Kind().ToString();
+        }
+
+        private static string MemberKindName(MemberDeclarationSyntax member)
+        {
+            if (member is EventDeclarationSyntax)
+            {
+                return "event（显式访问器事件）";
+            }
+
+            if (member is EventFieldDeclarationSyntax)
+            {
+                return "event（字段式事件）";
+            }
+
+            if (member is DelegateDeclarationSyntax)
+            {
+                return "delegate 声明";
+            }
+
+            return member.Kind().ToString();
         }
 
         // ------------------------------------------------------------------------------ 建 IR
@@ -957,7 +1698,7 @@ namespace PMNetGen
                 p.IsField = pr.IsField;
                 p.IsStatic = pr.IsStatic;
                 p.IsReadOnly = pr.IsReadOnly;
-                p.PushBased = true;
+                p.PushBased = pr.PushBased;
                 p.QuantizerId = pr.QuantizerId;
                 p.Line = pr.Line;
 
@@ -1003,6 +1744,30 @@ namespace PMNetGen
                 fact.HasForceValidateCompanion = acc.MethodNames.Contains(rr.MethodName + "_ForceValidate");
                 fact.HasValidateCompanion = acc.MethodNames.Contains(rr.MethodName + "_Validate");
                 fact.Line = rr.Line;
+
+                // 编织器明确拒绝的方法形态（契约 net-rpc-weaving-contract.md §3）：
+                // 在这里把语法事实原样带出去，由规则 7 在生成前报错。
+                fact.MultipleRpcAttributes = rr.MultipleRpcAttributes;
+                fact.IsVirtual = rr.IsVirtual;
+                fact.IsAbstract = rr.IsAbstract;
+                fact.IsExtern = rr.IsExtern;
+                fact.IsAsync = rr.IsAsync;
+                fact.HasTypeParameters = rr.HasTypeParameters;
+                fact.HasBody = rr.HasBody;
+                fact.UnsupportedParamModifiers.AddRange(rr.UnsupportedParamModifiers);
+
+                // 同名重载：编织器数的是「类型里同名方法的个数」（含其它 partial 部分），
+                // 因此这里按累积器的全部方法名计数（与编织期同口径）。
+                int sameName = 0;
+                for (int mi = 0; mi < acc.MethodNames.Count; mi++)
+                {
+                    if (string.Equals(acc.MethodNames[mi], rr.MethodName, StringComparison.Ordinal))
+                    {
+                        sameName++;
+                    }
+                }
+
+                fact.HasOverload = sameName > 1;
                 facts.Rpcs.Add(fact);
 
                 // 生效的校验档位：把"存在 _ForceValidate 同伴"折叠进 IR（契约 §5 规则 8 的第二个放行条件）。

@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-C 客户端候选收集器验收：PMProjectileCandidateCollector 的真实运行测试（net8.0）。
+
+      为什么需要它：
+        「线段 × 目标 Y 轴胶囊的最近距离」「阈值 = 弹半径 + 目标半径 + 0.3m」
+        「impact 取中心线最近点」「owner/origin/self 排除」「帧锚必须是 AuthorityServer」
+        「在途不占去重、发送失败可回滚」「每弹 100 目标、key 1024 的有界性」
+        「停止只允许最后一段」—— 这些性质编译期完全看不出来，运行期又都长得像
+        「偶尔多一次命中 / 偶尔少一次命中」。这里把每一条钉成可执行断言，预期值由独立手算给出。
+
+      直接编**真实实现**，不引 Unity、不引 PMR3（这正是收集器「纯 C#」纪律的验证方式：
+      如果它偷偷依赖了 UnityEngine / PMR3，本工程会直接编不过）：
+        · Client/Assets/Scripts/PMProjectile/PMProjectileContracts.cs（共享只读契约）
+        · Client/Assets/Scripts/PMProjectile/PMProjectileCandidateCollector.cs（本组，被测对象）
+        · Client/Assets/Scripts/PMNet/PMNetIdentity.cs（PMFrameId / PMFrameDomain）
+        · Client/Assets/Scripts/PMMover/PMMoverState.cs（PMVector3）
+
+      诚实边界：本测试只覆盖收集器的判定与去重语义。真实 Unity 宿主接线、真实 PhysX、
+      双端联机属于 C 宿主与 T45（PENDING_USER），本工程不冒充它们已验收。
+
+      运行：dotnet Tools/PMProjectileCandidateTest/bin/Release/net8.0/PMProjectileCandidateTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMProjectileCandidateTest</AssemblyName>
+    <RootNamespace>PMProjectileCandidateTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCandidateCollector.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+  </ItemGroup>
+
+</Project>

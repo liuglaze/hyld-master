@@ -62,7 +62,6 @@ namespace Server
         {
             get; set;
         }
-        public string socketIp { get; private set; }
         public Client(Socket socket, Server server)
         {
             lastPingTime = Tool.PingPongTool.GetTimeStamp();
@@ -70,9 +69,6 @@ namespace Server
             _message = new Message();
             _server = server;
             _socket = socket;
-
-
-            socketIp = _socket.RemoteEndPoint.ToString().Split(':')[0];
 
             // 说明：原先这里会打开一条 MySQL 连接，失败则直接 Close() 并放弃这个客户端。
             // 数据库已按需求移除（账号存在内存库 UserStore 里），因此不再有「连不上库就接入失败」这种状态。
@@ -136,8 +132,7 @@ namespace Server
 
                 byte[] sendbyte = Message.PackData(pack);
                 ByteArray ba = new ByteArray(sendbyte);
-                bool isImportantTcpPack = pack.Actioncode == ActionCode.BattleReview
-                    || pack.Actioncode == ActionCode.UpDateActiveFriendInfo
+                bool isImportantTcpPack = pack.Actioncode == ActionCode.UpDateActiveFriendInfo
                     || pack.Actioncode == ActionCode.AddMatchingPlayer;
                 lock (writeQueue)
                 {
@@ -229,10 +224,10 @@ namespace Server
                 if (_server != null)
                 {
                     _server._controllerManger?.CloseClient(this, UID);
-                    BattleManage.Instance.HandleClientDisconnect(_server, UID);
 
-                    // R3-B：新链（专用服务器）对局不经过 BattleManage，必须单独通知 Lobby 宿主。
-                    // 宿主会**中止**该测试局（不伪造正常胜利）；若该 uid 不在新链对局里则是 no-op。
+                    // 旧战斗链已退役：局内对局由专用服务器（DS）承载，旧 BattleManage 断线通知已删除。
+                    // 这里只通知 Lobby 宿主；宿主会**中止**该对局（不伪造正常胜利），
+                    // 若该 uid 不在对局里则是 no-op。
                     PMNet.Control.PMDsLobbyHost lobbyHost = PMNet.Control.PMDsLobbyHost.Instance;
                     if (lobbyHost != null)
                     {

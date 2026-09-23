@@ -22,6 +22,37 @@
 //     名册槽位 + 英雄移速；Ready 回报的 digest 是本局**实际选定**的那个值。
 //   · 两条路径都**不猜资源是否存在**：正式缺资源就是失败，诊断也不会偷偷用正式资源。
 //
+// R5-C（DS 真实宿主接线，诊断投射物；契约 Docs/plans/net-r5-network-contract.md 末段「C宿主首个可执行入口」）：
+//   本文件是**唯一**被授权的 C 宿主改动面，只做接线，**不改** driver / core / 适配器 / 合同：
+//     · 场景就绪后、连接接入前创建**每会话**的 PMProjectileHistory / PMUnityProjectileMotion /
+//       PMR5ProjectileDriver（History 由本宿主按真实权威运动逐帧填样本，driver 只读）；
+//     · 每个已认证 player 在 OnConnected 里 BindPlayer，断线收尾里 UnbindPlayer（取消预留/退休本地账）；
+//     · 每宿主帧：先 PumpMovement（运动权威）→ 再为所有运动 driver 记一次胶囊历史样本 →
+//       投射物 driver 按**固定 16ms 累加器（单帧最多 8 子步）**推进；零子步也 Pump(0) 排空声明入站；
+//     · 可信授权走私有 IPMR5ProjectileAuthorityPolicy（只认已认证绑定/名册/单调 activation/
+//       200ms 墙钟间隔/未 Freeze 的运动 driver + 共享诊断 spec + DS 权威枪口位置）；
+//       命中过滤走私有 IPMProjectileHitFilter（按名册身份做 self/队内过滤，缺数据一律拒绝）；
+//     · 结算只作**诊断可观察命中计数 + 日志**（非 R6、不扣血，**不接**旧普通攻击/资源/HP）。
+//   本文件是 DS 宿主，因此**不创建任何表现对象**（C2 表现层在 DS 上会显式抛异常）。
+//
+// R6-C（DS 权威战斗接线；契约 Docs/plans/net-r6-combat-contract.md 尾段「C宿主接线冻结」）：
+//   · **只有非 `-server-smoke`（正式玩法）**才建立权威战斗：PMCombatSession(epoch) →
+//     `PMR6CombatDriver.CreateAuthorityPolicy(model, 真实运动位置, () => 本帧墙钟)` → PMR5ProjectileDriver →
+//     PMR6CombatDriver。创建次序冻结在 CreateProjectileWiring 里（policy 必须早于 R5 driver 构造）；
+//   · **smoke 保持原诊断路径**：仍由本宿主订阅 R5 的 Settlement 只做计数/日志（R3 探针自动结果不变）；
+//     正式玩法则**不再订阅**诊断 Settlement、**不做**宿主侧 Drain —— R6 driver 是该会话唯一的结算消费者
+//     （否则「诊断消费者 + R6」双订阅会把同一条结算消费两次）；
+//   · 名册身份（uid/team/hero）只来自引导文件名册（`_rosterTeamByUid` / `_rosterHeroByUid`），
+//     **绝不**把正式内容模式的归一化 teamIndex(formalTeamIndex0/1) 当 team 传给 core；
+//   · 每帧次序：endpoint → movement → **R6.Pump(now)**（先 Tick 回蓝、再处理攻击/授权账）→ R5 全部子步
+//     → **R6.FlushState(now)**（最新 HP/资源/胜负）；三个 core 入口共用**同一个**单调墙钟；
+//   · 死亡由 R6 的 `PlayerDied` 驱动：Freeze 对应 Mover + **立即**补一条 Alive=false 历史
+//     （真实 AuthorityServer 帧 + 真实输入边界）；R5 命中过滤复核 core 的 TeamId/Connected/Dead；
+//   · 终局由 `OutcomeFrozen` 驱动：冻结**全部** Mover，此后 R5 只 `Pump(0)` 排空声明入站、不再推进；
+//   · 断线走 `CombatDriver.UnbindPlayer`（内含 R5 unbind + core.Disconnect ⇒ 结果可出）；
+//     **死亡 ≠ 掉线**：死者仍在线、仍要 ACK 结果，因此死亡路径不 unbind；
+//   · `ResultReadyForLobby` 后**单次** `Lobby.SubmitResult(WinnerTeamId, 冻结摘要)`，既有 ResultAck/Exited 链不变。
+//
 // 语言面：Unity 侧（需要 GameObject/BoxCollider 建场景），但**不使用任何渲染/输入/UI API**。
 
 using System;
@@ -30,9 +61,11 @@ using System.Globalization;
 using System.IO;
 using Logging;
 using PMNet;
+using PMNet.Combat;
 using PMNet.Control;
 using PMNet.Mover;
 using PMNet.Prediction;
+using PMNet.Projectile;
 using PMNet.R3;
 using PMNet.Session;
 using PMNet.Shared;
@@ -434,11 +467,23 @@ namespace PMNet.Unity
         /// </summary>
         public const int MovementWorldVersion = 1;
 
+        /// <summary>
+        /// R5-C 诊断日志节流：历史被拒 / 策略拒绝 / 命中被拒各自最多刷这么多条日志。
+        /// **只影响日志**，计数照常累加（不静默、也不刷屏）。
+        /// </summary>
+        private const long MaxProjectileDiagnosticWarnings = 20;
+
         /// <summary>名册内相邻两行在 Z 轴上的间距（米）。只用于把同队玩家错开，避免重叠。</summary>
         private const float RosterRowSpacingMeters = 1.5f;
 
         /// <summary>出生点距墙中心的水平偏移（米）。墙盒 x∈[-0.5,0.5]，±3 保证在墙外。</summary>
         private const float SpawnLateralOffsetMeters = 3f;
+
+        /// <summary>
+        /// R6-C：正式玩法（非 smoke）的开局等待期限（毫秒）——自场景就绪起算。
+        /// 到点仍缺名册玩家就**明确失败**，绝不伪造一个胜负（smoke 走自己的探针期限，不走本门）。
+        /// </summary>
+        public const int CombatStartDeadlineMs = 30000;
 
         private PMNetLaunchOptions _options;
         private PMDsBootstrappedMatch _boot;
@@ -505,6 +550,12 @@ namespace PMNet.Unity
         /// <summary>uid → 名册队伍号（决定出生的 X 侧）。</summary>
         private readonly Dictionary<int, int> _rosterTeamByUid = new Dictionary<int, int>();
 
+        /// <summary>
+        /// R6-C：uid → 名册英雄编号。core.AddPlayer 的 heroId 必须来自**可信名册**，
+        /// 不能从客户端自报字段采纳（契约：「hero 必须 0..19 不能走共享 Get 兜底」）。
+        /// </summary>
+        private readonly Dictionary<int, int> _rosterHeroByUid = new Dictionary<int, int>();
+
         /// <summary>名册人数（决定 Z 行居中量）。</summary>
         private int _rosterCount;
 
@@ -516,6 +567,111 @@ namespace PMNet.Unity
 
         /// <summary>上一次运动 Pump 的墙钟（毫秒），用于算实际 elapsed。</summary>
         private long _lastMovementPumpMs;
+
+        // ---- R5-C：诊断投射物宿主接线（每会话一份；非 R6 完整玩法） ----
+
+        /// <summary>
+        /// 运动碰撞白名单（与 <see cref="_movementQuery"/> 同一批 Collider）。投射物运动 hook 必须复用
+        /// **同一份现存字段**：诊断 = 本地物理场景里刚建的地板/墙；正式 = <see cref="PMUnityBattleMap.Colliders"/>。
+        /// </summary>
+        private Collider[] _movementAllowlist;
+
+        /// <summary>本会话的目标历史（由本宿主逐帧按真实权威运动填样本；driver 只读）。</summary>
+        private PMProjectileHistory _projectileHistory;
+
+        /// <summary>C1 适配器：真实 Unity PhysX 的投射物运动 hook（绑定隔离物理场景，绝不打默认物理世界）。</summary>
+        private PMUnityProjectileMotion _projectileMotion;
+
+        /// <summary>R5-B2b 会话级投射物网络驱动（上行/下行/运动/结算的唯一出口）。</summary>
+        private PMR5ProjectileDriver _projectileDriver;
+
+        /// <summary>DS 可信授权策略（本文件私有实现；客户端不注入）。</summary>
+        private IPMR5ProjectileAuthorityPolicy _projectilePolicy;
+
+        /// <summary>DS 权威命中过滤（名册身份 self/队内过滤）。</summary>
+        private IPMProjectileHitFilter _projectileHitFilter;
+
+        /// <summary>每 owner 已授权的最大 activationId（单调、不重用；缺项 = 尚未授权过）。</summary>
+        private readonly Dictionary<uint, uint> _projectileLastActivationByOwner = new Dictionary<uint, uint>();
+
+        /// <summary>每 owner 上一次授权开火的墙钟（毫秒），用于 200ms 间隔判定。</summary>
+        private readonly Dictionary<uint, double> _projectileLastFireWallMsByOwner = new Dictionary<uint, double>();
+
+        /// <summary>本帧投射物 Pump 的墙钟（同一 monotonic clock；策略在 Pump 内被回调时需要它）。</summary>
+        private double _projectileWallNowMs;
+
+        /// <summary>固定步长累加器的余量（毫秒）。**不**用大 elapsed 直接放大 dt。</summary>
+        private double _projectileAccumulatorMs;
+
+        /// <summary>上一次投射物 Pump 的墙钟（毫秒）；与运动 Pump 同一时钟口径。</summary>
+        private long _lastProjectilePumpMs;
+
+        /// <summary>诊断可观察：累计已消费的结算条数（≠ 扣血次数）。</summary>
+        private long _diagnosticProjectileSettlementCount;
+
+        /// <summary>诊断可观察：累计已消费的命中条数（settlement.HitCount 之和；≠ 扣血）。</summary>
+        private long _diagnosticProjectileHitCount;
+
+        /// <summary>诊断可观察：策略拒绝次数（身份/名册/Freeze/间隔/单调）。</summary>
+        private long _diagnosticProjectilePolicyRejections;
+
+        /// <summary>诊断可观察：命中过滤拒绝次数（self/队内/缺数据）。</summary>
+        private long _diagnosticProjectileFilterRejections;
+
+        /// <summary>诊断可观察：历史样本记录失败次数（不静默吞）。</summary>
+        private long _diagnosticProjectileHistoryRejects;
+
+        /// <summary>诊断可观察：因累加器上限被丢弃的毫秒数（有界追赶的证据）。</summary>
+        private double _diagnosticProjectileDroppedMs;
+
+        /// <summary>诊断可观察：落在驱动待取缓冲里（订阅者未交付）的结算条数。</summary>
+        private long _diagnosticProjectileUnconsumedSettlements;
+
+        /// <summary>R5-C 复核（F1）：DS 已排空并丢弃的「视图脏增量」条数。DS 没有表现消费者，
+        /// 但驱动的脏通道只有 DrainViewChanges 才清，因此必须每帧显式消费掉（见 DrainDsProjectileViews）。</summary>
+        private long _diagnosticProjectileViewDrains;
+
+        /// <summary>R5-C 复核（F2）：断线时为该副本补写的「不可命中（Alive=false）」历史样本数。</summary>
+        private long _diagnosticProjectileDisconnectSamples;
+
+        /// <summary>R5-C 复核（F8）：结算诊断日志自身抛异常的次数（吞掉它才能保住「一条结算只计一次」）。</summary>
+        private long _diagnosticProjectileSettlementLogFailures;
+
+        // ---- R6-C：正式玩法（非 smoke）权威战斗接线 ----
+
+        /// <summary>
+        /// 本局是否启用权威战斗核心（= 非 `-server-smoke`）。
+        /// smoke 保留 R3 探针自动结果 + R5 诊断计数，**不**建立 PMCombatSession/PMR6CombatDriver，
+        /// 也**不**要求 smoke 脚本懂战斗（否则等于无条件要求 CLI 烟测会打架）。
+        /// </summary>
+        private bool _combatEnabled;
+
+        /// <summary>权威战斗核心（仅正式玩法；smoke 恒为 null）。</summary>
+        private PMCombatSession _combatModel;
+
+        /// <summary>会话级战斗网络驱动（仅正式玩法；smoke 恒为 null）。</summary>
+        private PMR6CombatDriver _combatDriver;
+
+        /// <summary>名册是否已开战（StartMatch 只允许成功一次）。</summary>
+        private bool _combatStarted;
+
+        /// <summary>权威终局是否已冻结（冻结后全部 Mover 停止推进，R5 只 Pump(0) 排入站）。</summary>
+        private bool _combatOutcomeFrozen;
+
+        /// <summary>权威战斗结果是否已提交 Lobby（单次；已提交不重复提交、也不会再走 smoke 提交）。</summary>
+        private bool _combatSubmitted;
+
+        /// <summary>正式玩法开局期限（绝对墙钟毫秒；0 = 尚未起算，即在场景就绪后的第一帧起算）。</summary>
+        private long _combatStartDeadlineMs;
+
+        /// <summary>R6-C 观测：由权威死亡驱动的 Mover 冻结次数（= R6 的 PlayerDied 次数）。</summary>
+        private long _combatDeathsReported;
+
+        /// <summary>R6-C 观测：终局冻结 Mover 的次数（R6 的 OutcomeFrozen 只来一次）。</summary>
+        private long _combatTerminalFreezes;
+
+        /// <summary>R6-C 观测：死亡时**立即**补写的 Alive=false 历史样本数。</summary>
+        private long _combatDeathHistorySamples;
 
         private bool _sceneReady;
         private bool _faulted;
@@ -561,6 +717,48 @@ namespace PMNet.Unity
         /// <summary>已创建的玩家副本数。</summary>
         public int PlayerCount { get { return _playersByUid.Count; } }
 
+        /// <summary>
+        /// R5-C：本会话的会话级投射物驱动（后续测试/诊断用）。未接线或已释放时为 null。
+        /// **只读观察**：写入口全部在宿主内部（上行只经声明 RPC，下行只经生成复制）。
+        /// </summary>
+        public PMR5ProjectileDriver ProjectileDriver { get { return _projectileDriver; } }
+
+        /// <summary>
+        /// R5-C 诊断可观察：累计已消费的**命中条数**（settlement.HitCount 之和）。
+        /// **不是**扣血次数 —— 本批没有 R6 消费者，只有诊断计数与日志（non-gameplay）。
+        /// </summary>
+        public long DiagnosticProjectileHitCount { get { return _diagnosticProjectileHitCount; } }
+
+        /// <summary>R5-C 诊断可观察：累计已消费的结算条数（≠ 扣血次数）。</summary>
+        public long DiagnosticProjectileSettlementCount { get { return _diagnosticProjectileSettlementCount; } }
+
+        // ---- R6-C：公开读视图（供后续测试/诊断使用；写入口全部在宿主内部） ----
+
+        /// <summary>
+        /// R6-C：本会话的权威战斗网络驱动（正式玩法专用）。smoke 或未接线/已释放时为 null。
+        ///
+        /// **只读观察**：上行只经声明 RPC，下行只经生成复制；宿主是它唯一的驱动点。
+        /// </summary>
+        public PMR6CombatDriver CombatDriver { get { return _combatDriver; } }
+
+        /// <summary>R6-C：本局是否启用权威战斗核心（= 非 `-server-smoke`）。</summary>
+        public bool CombatEnabled { get { return _combatEnabled; } }
+
+        /// <summary>R6-C：全名册接入后是否已开战（StartMatch 只成功一次）。</summary>
+        public bool CombatStarted { get { return _combatStarted; } }
+
+        /// <summary>R6-C：权威战斗结果是否已提交 Lobby（单次；不重复提交）。</summary>
+        public bool CombatResultSubmitted { get { return _combatSubmitted; } }
+
+        /// <summary>R6-C：权威终局是否已冻结（此后全部 Mover 停止推进、R5 只 Pump(0)）。</summary>
+        public bool CombatOutcomeFrozen { get { return _combatOutcomeFrozen; } }
+
+        /// <summary>
+        /// R5-C 诊断计数（<see cref="DiagnosticProjectileHitCount"/> / <see cref="DiagnosticProjectileSettlementCount"/>）
+        /// **只在 smoke 有效**：正式玩法由 R6 driver 消费结算、宿主不再订阅也不 Drain，因此这两个值恒为 0。
+        /// </summary>
+        public bool DiagnosticCountersMeaningfulOnlyInSmoke { get { return !_combatEnabled; } }
+
         // =================================================================================
         //  启动
         // =================================================================================
@@ -589,6 +787,10 @@ namespace PMNet.Unity
         {
             error = null;
             _options = options;
+
+            // R6-C：**只有正式玩法**（非 `-server-smoke`）启用权威战斗核心。
+            // smoke 是连通性/探针验收，不是玩法验收：让它去懂战斗只会把烟测变成玩法门槛。
+            _combatEnabled = !options.ServerSmoke;
 
             // 无头进程要求后台运行（与 PMDsHost 的旧路径同一取向）。
             Application.runInBackground = true;
@@ -750,6 +952,9 @@ namespace PMNet.Unity
                 {
                     _rosterRowByUid[roster[i].Identity.Uid] = i;
                     _rosterTeamByUid[roster[i].Identity.Uid] = roster[i].Identity.TeamId;
+                    // R6-C：英雄也来自**同一份可信名册**（core.AddPlayer 的 heroId 必须有真实来源，
+                    // 不能读客户端自报、也不能走 BattleNumericConfig 的共享兜底）。
+                    _rosterHeroByUid[roster[i].Identity.Uid] = roster[i].Identity.HeroId;
                 }
             }
 
@@ -802,6 +1007,9 @@ namespace PMNet.Unity
                 _movementScene = battleMap.Scene;
                 _movementPhysicsScene = battleMap.PhysicsScene;
                 _movementQuery = battleMap.Query;
+
+                // R5-C：投射物运动 hook 用正式地图自己的 Collider 白名单（不碰默认物理世界）。
+                _movementAllowlist = battleMap.Colliders;
 
                 string consistencyError;
                 if (!battleMap.ValidateManifestConsistency(out consistencyError))
@@ -879,6 +1087,9 @@ namespace PMNet.Unity
                     error = "运动碰撞查询构造失败：" + ex.GetType().Name + " " + ex.Message;
                     return false;
                 }
+
+                // R5-C：投射物运动 hook 必须复用**同一批** Collider（诊断 = 刚建在本地物理场景里的地板/墙）。
+                _movementAllowlist = allowlist;
             }
 
             // 7b) 运动碰撞查询：**必须**绑定到隔离物理场景，且 WorldVersion 与本局选定口径一致
@@ -908,6 +1119,16 @@ namespace PMNet.Unity
                 error = "运动碰撞查询未按预期建立（worldVersion=" + _movementQuery.WorldVersion
                         + " 期望=" + _selectedWorldVersion.ToString(CultureInfo.InvariantCulture)
                         + " allowlist=" + _movementQuery.AllowlistCount.ToString(CultureInfo.InvariantCulture) + "）";
+                return false;
+            }
+
+            // 7c) R5-C：投射物接线（History / Motion / Driver）必须在**场景就绪之前、玩家接入之前**建立。
+            //     玩家接入（OnConnected）发生在 _endpoint.Pump 里，而 endpoint 在下面才 OpenServer，
+            //     因此这里建好的 driver 一定早于任何 BindPlayer——否则第一名玩家的上行会被当成「未接线」丢弃。
+            //     失败即启动失败（不回退：诊断探针不可用就不该谎报就绪）。
+            if (!CreateProjectileWiring(out error))
+            {
+                ReleaseProjectileWiring();
                 return false;
             }
 
@@ -1039,6 +1260,12 @@ namespace PMNet.Unity
 
             if (_endpoint == null) { Fail("UDP 端点未建立"); return; }
 
+            // R6-C：本帧**唯一**的单调墙钟。同一个值喂给 R6.Pump / R5.Pump / R6.FlushState
+            // （契约「同一帧所有 core 入口共用同一个 clock」），也是 R6 授权策略的时钟来源。
+            // 必须在 `_endpoint.Pump` **之前**设好：本帧接入的玩家会在握手回调（OnConnected）里
+            // 用它发布初始 combatstate（首个桥 flush 之前）。
+            _projectileWallNowMs = (double)nowMs;
+
             // R4-B（B3）契约：「主线程在 endpoint.Pump 前 Physics.SyncTransforms 一次」。
             // 为什么必须在 Pump **之前**：本帧入站的生命周期/RPC 会触发 Spawn / 入场，
             // 而运动碰撞查询（CapsuleCast 等）读的是 PhysX 的场景级加速结构。
@@ -1050,6 +1277,32 @@ namespace PMNet.Unity
             if (_faulted) { return; }
 
             PumpMovement(nowMs);
+            if (_faulted) { return; }
+
+            // R6-C：战斗命令队列（上行攻击/裁决/结果 + core.Tick 回蓝）必须**先于** R5 的授权/生成处理。
+            // 两重理由：① core 的回蓝只发生在 Tick 里，先 Tick 才能让「刚好回满」的攻击合法；
+            // ② 同一帧到达的「攻击声明 + 逐颗 spawn」必须先把授权账建好，否则生成会被当成未批准。
+            PumpCombatOnce(_projectileWallNowMs);
+            if (_faulted) { return; }
+
+            // R5-C：先记**本帧**真实权威运动样本（在投射物推进之前），再按固定 16ms 累加器推进投射物。
+            // 次序是契约冻结的：历史采样 after PumpMovement / before projectile Pump。
+            PumpProjectiles(nowMs);
+            if (_faulted) { return; }
+
+            // R6-C：结算发生在 R5.Pump 内部（订阅回调），因此状态复制必须在它**之后**：
+            // 本帧的伤害/死亡/胜负与回蓝在同一个 FlushState 里一起发布。
+            FlushCombatOnce(_projectileWallNowMs);
+            if (_faulted) { return; }
+
+            // R6-C：开战门 → 开局期限 → 单次结果提交（smoke 路径全部早退）。
+            TryStartCombatMatch();
+            if (_faulted) { return; }
+
+            CheckCombatStartDeadline(nowMs);
+            if (_faulted) { return; }
+
+            SubmitCombatResultIfReady();
             if (_faulted) { return; }
 
             CheckPlayerDrops();
@@ -1113,6 +1366,13 @@ namespace PMNet.Unity
                 try
                 {
                     driver.Update(elapsedMs);
+
+                    // R6-C：冻结后不得再推进运动。`Freeze()` 只冻结 AP 时间轴与表现，
+                    // **Authority 的 Pump 不看 `_frozen`**（见 PMR4MovementDriver.Freeze/Pump）——
+                    // 因此宿主才是「冻结 Mover」这句话的唯一执行点：死亡者与终局之后都不再步进。
+                    // 仍然调用 Update：入站队列要照常排空（否则冻结副本的待处理载荷会无界堆积）。
+                    if (driver.IsFrozen || (_combatEnabled && _combatModel != null && _combatModel.Ended)) { continue; }
+
                     driver.Pump(elapsedMs, _movementServerFrame, _movementHostTickId);
                 }
                 catch (Exception ex)
@@ -1157,19 +1417,59 @@ namespace PMNet.Unity
                     continue;
                 }
 
-                try
-                {
-                    driver.Freeze();
-                    driver.Dispose();
-                }
+                // F2：先拿断线前最后一份权威事实补一条 Alive=false 样本，**再**释放驱动。
+                // 顺序反了就没得可取（driver 已 Dispose），断线者会留在历史里继续可命中。
+                RecordProjectileDisconnectSample(uid, player, driver);
+
+                try { driver.Freeze(); }
                 catch (Exception ex)
                 {
-                    Warn("断线驱动收尾异常（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "）："
-                         + ex.GetType().Name);
+                    Warn("断线驱动冻结异常（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "）：" + ex.GetType().Name);
+                }
+                // Freeze 失败也必须独立尝试释放，不能跳过 Dispose。
+                try { driver.Dispose(); }
+                catch (Exception ex)
+                {
+                    Warn("断线驱动释放异常（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "）：" + ex.GetType().Name);
                 }
 
                 _driversByUid.Remove(uid);
-                Warn("玩家断线：运动驱动已 Freeze + Dispose（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "）");
+
+                // 断线必须摘掉投射物接缝。R5 的 UnbindPlayer 会取消该 owner 的未消费 NetId 预留、
+                // 丢掉它的入站队列、退休本地账，并销毁它悬空的权威对象；不摘就等于把预留/队列挂到 Dispose。
+                //
+                // R6-C：正式玩法走 `CombatDriver.UnbindPlayer`（它同时做 R5 unbind + `core.Disconnect`）——
+                // 后者保留水位与死亡真值，并在**只剩唯一在线队伍**时判 Forfeit 获胜 ⇒ 结果可出。
+                // 这条路径**只**用于真断线；死亡不是断线，绝不走这里（死者仍要 ACK 结果）。
+                if (_combatEnabled && _combatDriver != null && !_combatDriver.IsDisposed)
+                {
+                    try
+                    {
+                        _combatDriver.UnbindPlayer(player);
+                    }
+                    catch (Exception ex)
+                    {
+                        Fail("断线收尾：战斗接缝摘除失败（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                             + "）：" + ex.GetType().Name + " " + ex.Message);
+                        return;
+                    }
+                }
+                else if (_projectileDriver != null && !_projectileDriver.IsDisposed)
+                {
+                    try
+                    {
+                        _projectileDriver.UnbindPlayer(player);
+                    }
+                    catch (Exception ex)
+                    {
+                        Fail("断线收尾：投射物接缝摘除失败（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                             + "）：" + ex.GetType().Name + " " + ex.Message);
+                        return;
+                    }
+                }
+
+                Warn("玩家断线：已尝试冻结和释放运动驱动、投射物接缝已摘（异常见前述日志）（uid="
+                     + uid.ToString(CultureInfo.InvariantCulture) + "）");
             }
         }
 
@@ -1454,6 +1754,24 @@ namespace PMNet.Unity
                 return;
             }
 
+            // 接缝绑定：正式玩法走 R6 战斗驱动（内含 core.AddPlayer + R5 绑定）；smoke 保持 R5 诊断绑定。
+            if (_combatEnabled)
+            {
+                string combatError;
+                if (!AttachCombatPlayer(uid, player, out combatError))
+                {
+                    Fail("战斗接线失败（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "）：" + combatError);
+                    return;
+                }
+            }
+            else if (_projectileDriver == null || !_projectileDriver.BindPlayer(player))
+            {
+                // R5-C：每个**已认证** player 创建即绑定投射物接缝。
+                // 回调携带 player 身份，因此上行 owner 只认 player.NetId，绝不采信 payload 自报。
+                Fail("投射物驱动绑定失败（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "）");
+                return;
+            }
+
             Info("玩家副本已创建 uid=" + uid.ToString(CultureInfo.InvariantCulture)
                  + " playerId=" + connection.Identity.PlayerId.ToString(CultureInfo.InvariantCulture)
                  + " netId=" + player.NetId.Value.ToString(CultureInfo.InvariantCulture)
@@ -1514,6 +1832,476 @@ namespace PMNet.Unity
             return "(" + state.Position.X.ToString("0.###", CultureInfo.InvariantCulture)
                    + "," + state.Position.Y.ToString("0.###", CultureInfo.InvariantCulture)
                    + "," + state.Position.Z.ToString("0.###", CultureInfo.InvariantCulture) + ")";
+        }
+
+        // =================================================================================
+        //  R6-C：正式玩法（非 smoke）权威战斗接线
+        // =================================================================================
+
+        /// <summary>
+        /// 正式玩法：把一名**已认证**玩家接进权威战斗（core.AddPlayer + 接缝绑定），并在首个生命周期
+        /// flush 之前发布初始战斗状态。
+        ///
+        /// 身份只来自引导文件名册：uid/teamId/heroId 三者都取自 `_roster*`。
+        /// **绝不**把正式内容模式的归一化 teamIndex（formalTeamIndex0/1）当 team 传给 core ——
+        /// 那是出生几何用的索引，不是名册里真实的 TeamId；混用会让 core 的敌我判定与客户端不一致。
+        /// </summary>
+        private bool AttachCombatPlayer(int uid, PMR3Player player, out string error)
+        {
+            error = null;
+
+            if (_combatDriver == null || _combatModel == null)
+            {
+                error = "权威战斗驱动/核心未建立";
+                return false;
+            }
+
+            int teamId;
+            if (!_rosterTeamByUid.TryGetValue(uid, out teamId))
+            {
+                error = "uid=" + uid.ToString(CultureInfo.InvariantCulture) + " 不在引导文件名册内（无 TeamId 来源）";
+                return false;
+            }
+
+            int heroId;
+            if (!_rosterHeroByUid.TryGetValue(uid, out heroId))
+            {
+                error = "uid=" + uid.ToString(CultureInfo.InvariantCulture) + " 不在引导文件名册内（无 HeroId 来源）";
+                return false;
+            }
+
+            if (teamId <= 0)
+            {
+                error = "名册 TeamId 非法（" + teamId.ToString(CultureInfo.InvariantCulture)
+                        + "）：core 要求正数真实队伍号";
+                return false;
+            }
+
+            if (!_combatDriver.AddPlayer(player, uid, teamId, heroId))
+            {
+                error = "CombatDriver.AddPlayer 失败（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                        + " team=" + teamId.ToString(CultureInfo.InvariantCulture)
+                        + " hero=" + heroId.ToString(CultureInfo.InvariantCulture) + "）";
+                return false;
+            }
+
+            // 契约：「场景/actor 初始 combatstate 必须在首个 flush 前发布」。
+            // 理由与运动初值完全同一条：本回调由 `_endpoint.Pump` 的握手接纳段调用，而桥的
+            // Update/生命周期派发在那之后 —— 此刻写下的 9 条战斗复制值会随 Create 记录一同到达客户端；
+            // 否则客户端会先拿到 hero/team/HP 全 0 的对象（等于身份未就绪就允许开火）。
+            _combatDriver.FlushState(_projectileWallNowMs);
+            if (FaultHostIfCombatDriverFaulted("OnConnected(初始发布)"))
+            {
+                error = "初始 combatstate 发布后驱动 fault：" + _combatDriver.FaultError;
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 正式玩法的开战门：**全部期望名册**都已连接就绪且已接进战斗（core 名册齐 + 运动 driver 就绪）
+        /// 才 `StartMatch`，且只成功一次。
+        ///
+        /// 为什么不按「已有多少人」开局：core 的 StartMatch 要求人数与名册完全一致且每一名成员在线未死；
+        /// 提前开局会让「名册还没接完就先按已有玩家判 forfeit」变成真实的提前终局。
+        /// </summary>
+        private void TryStartCombatMatch()
+        {
+            if (!_combatEnabled || _combatStarted || _faulted) { return; }
+            if (_combatDriver == null || _combatDriver.IsDisposed || _combatModel == null) { return; }
+            if (_expectedUids.Count == 0 || _playersByUid.Count != _expectedUids.Count) { return; }
+
+            foreach (KeyValuePair<int, PMR3Player> kv in _playersByUid)
+            {
+                PMR3Player member = kv.Value;
+                if (member == null) { return; }
+                if (member.OwnerConnection == null || !member.OwnerConnection.IsReady) { return; }
+                if (!_combatDriver.IsPlayerBound(member)) { return; }
+                if (_combatModel.GetPlayer(member.NetId.Value) == null) { return; }
+
+                PMR4MovementDriver driver;
+                if (!_driversByUid.TryGetValue(kv.Key, out driver) || driver == null || driver.IsDisposed)
+                {
+                    return;
+                }
+            }
+
+            if (!_combatDriver.StartMatch(_expectedUids.Count))
+            {
+                Fail("正式玩法 StartMatch 失败（名册 " + _expectedUids.Count.ToString(CultureInfo.InvariantCulture)
+                     + " 人全部就绪却开不了战：core 名册人数/在线态不一致）");
+                return;
+            }
+
+            _combatStarted = true;
+            Info("R6-C 权威战斗已开战：名册 " + _expectedUids.Count.ToString(CultureInfo.InvariantCulture)
+                 + " 人全部接入（uid/team/hero 全部来自引导文件名册）");
+        }
+
+        /// <summary>
+        /// 正式玩法开局期限：自场景就绪（本宿主第一帧，Initialize 已把 `_sceneReady` 置位）起
+        /// <see cref="CombatStartDeadlineMs"/> 内仍未开战 ⇒ **明确失败**。
+        /// 刻意不伪造胜负（不为某一队发一个「胜利」）；smoke 不走本门。
+        /// </summary>
+        private void CheckCombatStartDeadline(long nowMs)
+        {
+            if (!_combatEnabled || _combatStarted || _faulted) { return; }
+
+            if (_combatStartDeadlineMs == 0L)
+            {
+                _combatStartDeadlineMs = nowMs + (long)CombatStartDeadlineMs;
+            }
+
+            if (nowMs < _combatStartDeadlineMs) { return; }
+
+            Fail("正式玩法开局超时（" + CombatStartDeadlineMs.ToString(CultureInfo.InvariantCulture)
+                 + "ms，自场景就绪起）：名册 " + _expectedUids.Count.ToString(CultureInfo.InvariantCulture)
+                 + " 人，已接入 " + _playersByUid.Count.ToString(CultureInfo.InvariantCulture) + " 人");
+        }
+
+        /// <summary>
+        /// R6-C：宿主每帧驱动战斗驱动（**必须先于 R5.Pump**）。
+        /// 驱动内部次序：推进权威时钟（回蓝）→ 处理上行攻击/裁决/结果命令队列（授权账先于生成）→ Drain 兜底。
+        /// </summary>
+        private void PumpCombatOnce(double nowMs)
+        {
+            if (_combatDriver == null || _combatDriver.IsDisposed) { return; }
+            if (FaultHostIfCombatDriverFaulted("Pump(入口)")) { return; }
+
+            try
+            {
+                _combatDriver.Pump(nowMs);
+            }
+            catch (Exception ex)
+            {
+                Fail("战斗驱动异常（Pump）：" + ex.GetType().Name + " " + ex.Message);
+                return;
+            }
+
+            FaultHostIfCombatDriverFaulted("Pump");
+        }
+
+        /// <summary>
+        /// R6-C：宿主每帧把权威战斗状态复制出去（**必须晚于 R5.Pump**）——这样本帧结算产生的
+        /// HP/死亡/胜负与随墙钟变化的回蓝在**同一个** FlushState 里一起发布。
+        /// </summary>
+        private void FlushCombatOnce(double nowMs)
+        {
+            if (_combatDriver == null || _combatDriver.IsDisposed) { return; }
+            if (FaultHostIfCombatDriverFaulted("FlushState(入口)")) { return; }
+
+            try
+            {
+                _combatDriver.FlushState(nowMs);
+            }
+            catch (Exception ex)
+            {
+                Fail("战斗驱动异常（FlushState）：" + ex.GetType().Name + " " + ex.Message);
+                return;
+            }
+
+            FaultHostIfCombatDriverFaulted("FlushState");
+        }
+
+        /// <summary>
+        /// R6-C：战斗驱动一旦进入会话失败态 ⇒ **立刻** Fail 整个宿主（不吞、不继续）。
+        ///
+        /// 返回 true = 「宿主已因此 Fail」。失败原因包括发送失败/队列溢出/结算应用异常/结果冲突 ——
+        /// 这些情况下数据已经不可信，只 log 仍继续跑等于把一个坏会话当好的用。
+        /// </summary>
+        private bool FaultHostIfCombatDriverFaulted(string where)
+        {
+            if (_combatDriver == null || !_combatDriver.IsFaulted) { return false; }
+
+            Fail("战斗驱动会话失败（" + where + "：" + _combatDriver.FaultReason + "）：" + _combatDriver.FaultError);
+            return true;
+        }
+
+        /// <summary>
+        /// R6-C：权威死亡（R6 的 `PlayerDied`，每名玩家每会话只来一次）。
+        ///
+        /// 两件事必须同时发生，顺序也是冻结的：
+        ///   ① 用**最后一份权威事实**补一条 Alive=false 历史样本（真实 AuthorityServer 帧 +
+        ///      该副本真实输入边界）—— 历史没有「按目标移除」，不补的话死亡者还会被旧帧锚当可命中目标；
+        ///   ② `MovementDriver.Freeze()`：死亡后不得再推进运动（`Freeze` 只冻结 AP 时间轴/表现，
+        ///      Authority 的 Pump 不看 `_frozen`，所以 PumpMovement 里冻结者不再被 Pump）。
+        ///
+        /// **死亡 ≠ 掉线**：本方法**不**摘接缝、**不** unbind —— 死者仍在名册与连接上，
+        /// 终局结果仍要等它的 ResultAck 才闭环（判据混用会让战斗少一个 ACK 等待者而提前就绪）。
+        /// </summary>
+        private void OnCombatPlayerDied(PMR3Player player)
+        {
+            if (player == null || _disposed) { return; }
+
+            int uid = player.Uid;
+
+            // 两条**必达**不变量：① 历史立刻补 Alive=false（否则死者还会被旧帧锚当可命中目标）；
+            // ② 该副本的 Mover 真的不再推进。任一条没做到 ⇒ 本局的死亡真值已与运动/命中集合不同步，
+            // 只能**整体失败**，绝不能只 Warn 后继续跑（那等于把坏会话当好的用、日志还谎报成功）。
+            //
+            // 为什么必须**自己**判定而不能靠「抛异常让驱动发现」：R6 驱动对订阅者异常是**逐订阅者隔离**
+            // （只计数 + 告警，权威状态不受影响），异常逃出去就是被吞掉；而那个告警出口
+            // （`PMR3Player.CombatWarn`）在本宿主未接线，等于无人知晓 —— 正是「假成功」。
+            // 这里也只 Fault、**不**重放任何结算：重放等于为一次回调/日志异常重复伤害。
+            string failure = null;
+
+            PMR4MovementDriver driver;
+            if (_driversByUid.TryGetValue(uid, out driver) && driver != null && !driver.IsDisposed)
+            {
+                if (RecordProjectileUnavailableSample(uid, player, driver, false))
+                {
+                    _combatDeathHistorySamples++;
+                }
+                else
+                {
+                    failure = "历史 Alive=false 样本未写入";
+                }
+
+                try
+                {
+                    driver.Freeze();
+                    if (!driver.IsFrozen) { failure = CombineDeathFailure(failure, "Freeze 未生效"); }
+                }
+                catch (Exception ex)
+                {
+                    failure = CombineDeathFailure(failure, "Freeze 抛异常 " + ex.GetType().Name);
+                }
+            }
+
+            // 没有运动 driver 时两种情况都已由别的路径覆盖：断线收尾已写过 Alive=false 并 Dispose 过它；
+            // 且 core 的结算会跳过非 Connected 目标 ⇒ 走不到「无 driver 的死亡」。因此这里不算失败。
+
+            _combatDeathsReported++;
+
+            if (failure != null)
+            {
+                Fail("权威死亡收尾失败（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "）：" + failure
+                     + "；history 与 movement 已不同步，拒绝假成功");
+                return;
+            }
+
+            // 日志放在状态收尾**之后**：日志自身抛异常不得被当成状态失败（更不得触发重放/重复伤害）。
+            Info("R6-C 权威死亡：uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                 + " netId=" + player.NetId.Value.ToString(CultureInfo.InvariantCulture)
+                 + " 的 Mover 已 Freeze、历史已补 Alive=false（仍在线上，仍需 ACK 结果）");
+        }
+
+        /// <summary>合成死亡收尾的两条并列失败原因（null 安全；只用于故障文本）。</summary>
+        private static string CombineDeathFailure(string existing, string addition)
+        {
+            return existing == null ? addition : existing + "；" + addition;
+        }
+
+        /// <summary>
+        /// R6-C：权威终局（R6 的 `OutcomeFrozen`，只来一次）。冻结**全部**运动驱动；
+        /// 之后 <see cref="PumpProjectiles"/> 只走 `Pump(0)` 排空声明入站，不再推进任何运动子步。
+        /// </summary>
+        private void OnCombatOutcomeFrozen(uint outcomeId, int winnerTeamId)
+        {
+            _combatOutcomeFrozen = true;
+            _combatTerminalFreezes++;
+
+            int frozen = 0;
+            List<int> uids = new List<int>(_driversByUid.Keys);
+            for (int i = 0; i < uids.Count; i++)
+            {
+                PMR4MovementDriver driver;
+                if (!_driversByUid.TryGetValue(uids[i], out driver) || driver == null || driver.IsDisposed)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    driver.Freeze();
+                    frozen++;
+                }
+                catch (Exception ex)
+                {
+                    Warn("终局冻结运动驱动异常（uid=" + uids[i].ToString(CultureInfo.InvariantCulture) + "）："
+                         + ex.GetType().Name);
+                }
+            }
+
+            Info("R6-C 权威终局：outcome=" + outcomeId.ToString(CultureInfo.InvariantCulture)
+                 + " winner=" + winnerTeamId.ToString(CultureInfo.InvariantCulture)
+                 + "（名册原始 TeamId）已冻结 " + frozen.ToString(CultureInfo.InvariantCulture)
+                 + " 个 Mover；此后 R5 仅 step0 排入站");
+        }
+
+        /// <summary>
+        /// R6-C：`ResultReadyForLobby` 后**单次**提交 Lobby（winner 用冻结的名册原始 TeamId、摘要用冻结副本）。
+        /// 既有 ResultAck → Exited 闭环不变；smoke 路径完全不经过这里（也不会重复提交）。
+        /// </summary>
+        private void SubmitCombatResultIfReady()
+        {
+            if (!_combatEnabled || _combatSubmitted || _faulted) { return; }
+            if (_combatDriver == null || _combatDriver.IsDisposed || _lobby == null) { return; }
+            if (!_combatDriver.ResultReadyForLobby) { return; }
+
+            if (_lobby.HasResult)
+            {
+                // Lobby 侧已经有结果（幂等重入/重复帧）：不再提交第二次。
+                _combatSubmitted = true;
+                return;
+            }
+
+            byte[] summary = _combatDriver.ResultSummary;
+            if (summary == null || summary.Length == 0)
+            {
+                Fail("权威战斗结果摘要为空，拒绝向 Lobby 提交");
+                return;
+            }
+
+            string error;
+            if (!_lobby.SubmitResult(_combatDriver.WinnerTeamId, summary, out error))
+            {
+                Fail("提交权威战斗结果失败：" + error);
+                return;
+            }
+
+            _combatSubmitted = true;
+            Info("R6-C 已提交权威战斗结果：winner=" + _combatDriver.WinnerTeamId.ToString(CultureInfo.InvariantCulture)
+                 + "（名册原始 TeamId）outcome=" + _combatDriver.FrozenOutcomeId.ToString(CultureInfo.InvariantCulture)
+                 + " reason=" + _combatDriver.FrozenEndReason.ToString()
+                 + " summary=" + summary.Length.ToString(CultureInfo.InvariantCulture)
+                 + "B 已确认 owner=" + _combatDriver.ResultAckCount.ToString(CultureInfo.InvariantCulture)
+                 + "（摘要已冻结，不因断线/重复结算改变）");
+        }
+
+        /// <summary>
+        /// R6-C 授权策略的**真实位置**来源（`PMCombatTryGetOwnerPosition`）：
+        /// 只认「core 说这名 owner 仍在册且 Connected 未死」+「本局确有它的运动 driver 且未 Freeze/未释放」
+        /// +「权威位置有限」。任一不成立即返回 false ⇒ 策略拒绝授权（fail closed），
+        /// 绝不拿 0 向量去生成一颗弹。
+        /// </summary>
+        private bool TryGetCombatOwnerPosition(PMR3Player player, out PMVector3 position)
+        {
+            position = PMVector3.Zero;
+
+            if (player == null || !player.NetId.IsValid || player.NetId.Value == 0u) { return false; }
+
+            if (_combatModel != null)
+            {
+                PMCombatPlayerSnapshot snapshot = _combatModel.GetPlayer(player.NetId.Value);
+                if (snapshot == null || !snapshot.Connected || snapshot.Dead) { return false; }
+            }
+
+            PMR4MovementDriver driver;
+            if (!_driversByUid.TryGetValue(player.Uid, out driver) || driver == null || driver.IsDisposed)
+            {
+                return false;
+            }
+
+            if (driver.IsFrozen) { return false; }
+
+            PMMoverSyncState sync = driver.GetAuthoritativeSync();
+            if (!sync.Position.IsFinite) { return false; }
+
+            position = sync.Position;
+            return true;
+        }
+
+        /// <summary>
+        /// R6-C 授权策略的墙钟：**本帧唯一的 Pump 墙钟**（<see cref="_projectileWallNowMs"/>）。
+        ///
+        /// 为什么必须是这个值：R6 契约要求「同一帧所有 core 入口共用同一个单调 clock」，而策略是在
+        /// `R5.Pump` 内被回调的 —— 它必须与 R6.Pump / R6.FlushState 拿到的是同一个 `now`。
+        /// 也正因为如此，策略**不读** UnityEngine.Time（R6 驱动引擎无关的硬约束：位置与时钟都由宿主注入）。
+        /// </summary>
+        private double GetCombatPumpWallNowMs()
+        {
+            return _projectileWallNowMs;
+        }
+
+        /// <summary>
+        /// R6-C 权威命中过滤：**只用 core 的真实队伍与存活事实**（不用出生几何的归一化 teamIndex）。
+        ///
+        /// 与诊断过滤的差别（这正是 R6-C 要换掉它的原因）：
+        ///   · 队伍来自 <see cref="PMCombatSession"/> 名册（真实 TeamId），因此「正式模式 teamIndex 0/1」
+        ///     不会与 core 的 TeamId 冲突；
+        ///   · 存活/连接来自 core（`Connected &amp;&amp; !Dead`），与 `ApplySettlement` 的判据同源；
+        ///   · 身份不在 core 名册（未知 netId）⇒ 拒绝（fail closed）。
+        /// </summary>
+        private bool AcceptCombatHit(PMProjectileKey projectile, PMProjectileTargetSample target,
+                                     PMVector3 sanitizedImpact)
+        {
+            if (_combatModel == null) { return RejectProjectileHit("权威战斗核心未建立"); }
+
+            PMCombatPlayerSnapshot owner = _combatModel.GetPlayer(projectile.OwnerNetId);
+            PMCombatPlayerSnapshot victim = _combatModel.GetPlayer(target.NetId);
+
+            if (owner == null || victim == null)
+            {
+                return RejectProjectileHit("身份不在权威战斗名册（owner="
+                    + projectile.OwnerNetId.ToString(CultureInfo.InvariantCulture) + " target="
+                    + target.NetId.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            if (owner.NetId == victim.NetId)
+            {
+                return RejectProjectileHit("self 命中（netId="
+                    + owner.NetId.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            if (!owner.Connected || owner.Dead)
+            {
+                return RejectProjectileHit("owner 不可用（connected=" + (owner.Connected ? 1 : 0)
+                                           + " dead=" + (owner.Dead ? 1 : 0) + "）");
+            }
+
+            if (!victim.Connected || victim.Dead)
+            {
+                return RejectProjectileHit("target 不可用（connected=" + (victim.Connected ? 1 : 0)
+                                           + " dead=" + (victim.Dead ? 1 : 0) + "）");
+            }
+
+            if (owner.TeamId == victim.TeamId)
+            {
+                return RejectProjectileHit("同队命中（真实 TeamId="
+                    + owner.TeamId.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            return true;
+        }
+
+        /// <summary>R6-C 权威命中过滤器：把宿主的 core 判定接到 R5 的注入面（driver 只见接口）。</summary>
+        private sealed class CombatModelHitFilter : IPMProjectileHitFilter
+        {
+            private readonly PMDsSessionHost _host;
+
+            public CombatModelHitFilter(PMDsSessionHost host)
+            {
+                _host = host;
+            }
+
+            public bool Accept(PMProjectileKey projectile, PMProjectileTargetSample target,
+                               PMVector3 sanitizedImpact)
+            {
+                return _host.AcceptCombatHit(projectile, target, sanitizedImpact);
+            }
+        }
+
+        /// <summary>R6-C 单行诊断摘要（进 <see cref="Describe"/> 与心跳日志）。</summary>
+        private string DescribeCombatWiring()
+        {
+            if (!_combatEnabled) { return "disabled(smoke)"; }
+            if (_combatDriver == null) { return "<none>"; }
+
+            return "started=" + (_combatStarted ? 1 : 0)
+                   + " frozen=" + (_combatOutcomeFrozen ? 1 : 0)
+                   + " submitted=" + (_combatSubmitted ? 1 : 0)
+                   + " outcome=" + _combatDriver.FrozenOutcomeId.ToString(CultureInfo.InvariantCulture)
+                   + " winner=" + _combatDriver.WinnerTeamId.ToString(CultureInfo.InvariantCulture)
+                   + " acks=" + _combatDriver.ResultAckCount.ToString(CultureInfo.InvariantCulture)
+                   + " ready=" + (_combatDriver.ResultReadyForLobby ? 1 : 0)
+                   + " applied=" + _combatDriver.SettlementsApplied.ToString(CultureInfo.InvariantCulture)
+                   + " rejected=" + _combatDriver.SettlementsRejected.ToString(CultureInfo.InvariantCulture)
+                   + " deaths=" + _combatDeathsReported.ToString(CultureInfo.InvariantCulture)
+                   + " deathSamples=" + _combatDeathHistorySamples.ToString(CultureInfo.InvariantCulture)
+                   + " terminalFreezes=" + _combatTerminalFreezes.ToString(CultureInfo.InvariantCulture)
+                   + " faulted=" + (_combatDriver.IsFaulted ? _combatDriver.FaultReason.ToString() : "<none>");
         }
 
         private void OnEndpointFailed(string reason)
@@ -1686,6 +2474,14 @@ namespace PMNet.Unity
                 _endpoint = null;
             }
 
+            // R5-C：投射物接线的释放次序（契约：Driver → Motion → 地图）：
+            //   · Driver.Dispose 取消全部未消费 NetId 预留、销毁本会话权威对象（走桥 ⇒ 必须先于
+            //     _bridge.Dispose）、并摘掉本 world 的事件订阅；**不留**悬空预留/事件；
+            //   · Motion.Dispose 释放查询缓冲与停止标记表（不持有 GameObject）；
+            //   · 地图/场景对象的释放仍在下面（本接线只持 Collider 引用副本，不持场景所有权）。
+            //   放在 Detach 之前是刻意的：让释放发生在「世界/桥仍然完整接线」的稳态下。
+            ReleaseProjectileWiring();
+
             PMR3Runtime.PlayerSpawned -= OnPlayerSpawned;
             if (_world != null)
             {
@@ -1757,9 +2553,950 @@ namespace PMNet.Unity
             _formalSlotByUid.Clear();
             _formalTeamIndexByUid.Clear();
             _formalMaxSpeedByUid.Clear();
+            _rosterHeroByUid.Clear();
 
             _playersByUid.Clear();
             _world = null;
+        }
+
+        // =================================================================================
+        //  R5-C：诊断投射物接线（History / Motion / Driver / 可信策略 / 身份过滤）
+        // =================================================================================
+
+        /// <summary>
+        /// 建立本会话的投射物接线。**必须在场景就绪之前、任何 player 接入之前**调用。
+        ///
+        /// 依赖的每一件东西都是**现存字段**，不另造第二套：
+        ///   · 物理场景 = <see cref="_movementPhysicsScene"/>（本地物理场景，已校验 != 默认物理世界）；
+        ///   · 白名单   = <see cref="_movementAllowlist"/>（诊断 = 本地场景地板/墙；正式 = 正式地图 Collider）；
+        ///   · 层掩码   = <see cref="_movementQuery"/>.LayerMask（与运动查询同口径）。
+        /// 任何一项不成立即失败：**不**退回默认物理世界，也**不**用空白名单冒充「无阻挡」。
+        /// </summary>
+        private bool CreateProjectileWiring(out string error)
+        {
+            error = null;
+
+            if (!_movementPhysicsScene.IsValid() || _movementPhysicsScene.Equals(Physics.defaultPhysicsScene))
+            {
+                error = "投射物运动 hook 需要独立的本地物理场景（当前无效或等于 Physics.defaultPhysicsScene）";
+                return false;
+            }
+
+            if (_movementQuery == null)
+            {
+                error = "运动碰撞查询未建立，无法取得同口径层掩码";
+                return false;
+            }
+
+            if (_movementAllowlist == null || _movementAllowlist.Length == 0)
+            {
+                error = "投射物运动白名单为空（拒绝以空白名单冒充无障碍）";
+                return false;
+            }
+
+            // epoch 已在 Initialize 校验非 0；history 与 driver 都固定本会话 epoch。
+            _projectileHistory = new PMProjectileHistory(_boot.Epoch);
+
+            try
+            {
+                _projectileMotion = new PMUnityProjectileMotion(_movementPhysicsScene, _movementAllowlist,
+                                                               _movementQuery.LayerMask);
+            }
+            catch (Exception ex)
+            {
+                error = "投射物运动适配器构造失败：" + ex.GetType().Name + " " + ex.Message;
+                // F5：每条失败路径都自清理（幂等），不让半成品接线悬空到 Dispose/调用方。
+                ReleaseProjectileWiring();
+                return false;
+            }
+
+            // R6-C：创建次序冻结 —— 正式玩法必须**先有 core**，再由 core 造出授权策略（policy 是 R5 的
+            // 构造参数），最后才能建 R5 driver；smoke 保持原来的诊断策略/过滤。
+            if (_combatEnabled)
+            {
+                try
+                {
+                    _combatModel = new PMCombatSession(_boot.Epoch);
+                }
+                catch (Exception ex)
+                {
+                    error = "权威战斗核心构造失败：" + ex.GetType().Name + " " + ex.Message;
+                    ReleaseProjectileWiring();
+                    return false;
+                }
+
+                try
+                {
+                    // 策略的每一处信息都来自 core + 宿主真实运动位置 + 宿主墙钟；
+                    // 客户端自报的 spec/伤害/位置**一律不采信**（payload 里根本没有 spec 面）。
+                    _projectilePolicy = PMR6CombatDriver.CreateAuthorityPolicy(
+                        _combatModel, TryGetCombatOwnerPosition, GetCombatPumpWallNowMs);
+                    _projectileHitFilter = new CombatModelHitFilter(this);
+                }
+                catch (Exception ex)
+                {
+                    error = "权威授权策略构造失败：" + ex.GetType().Name + " " + ex.Message;
+                    ReleaseProjectileWiring();
+                    return false;
+                }
+            }
+            else
+            {
+                _projectilePolicy = new DiagnosticProjectileAuthorityPolicy(this);
+                _projectileHitFilter = new RosterIdentityHitFilter(this);
+            }
+
+            try
+            {
+                _projectileDriver = new PMR5ProjectileDriver(_world, _bridge, _boot.Epoch, _projectileHistory,
+                                                            _projectilePolicy, _projectileMotion, _projectileHitFilter);
+            }
+            catch (Exception ex)
+            {
+                error = "投射物驱动构造失败：" + ex.GetType().Name + " " + ex.Message;
+                ReleaseProjectileWiring();
+                return false;
+            }
+
+            if (_combatEnabled)
+            {
+                try
+                {
+                    // R6 driver 在本会话里是 R5 Settlement 的**唯一**消费者（它在构造里订阅自己那一份）。
+                    _combatDriver = new PMR6CombatDriver(_world, _bridge, _boot.Epoch, _projectileDriver, _combatModel);
+                }
+                catch (Exception ex)
+                {
+                    error = "战斗网络驱动构造失败：" + ex.GetType().Name + " " + ex.Message;
+                    ReleaseProjectileWiring();
+                    return false;
+                }
+
+                _combatDriver.PlayerDied += OnCombatPlayerDied;
+                _combatDriver.OutcomeFrozen += OnCombatOutcomeFrozen;
+            }
+            else
+            {
+                // 结算出口：订阅 = 唯一消费者（smoke 只记诊断计数/日志，不扣血）。
+                // 正式玩法**不**在这里订阅：R6 driver 已是唯一消费者，再订一次就是「同一条结算双消费」。
+                _projectileDriver.Settlement += OnProjectileSettlement;
+            }
+
+            if (_projectileDriver.HostMotion == null || _projectileDriver.History == null
+                || _projectileDriver.Policy == null)
+            {
+                error = "投射物驱动接线不完整（hostMotion / history / policy 至少一项未注入）";
+                // F5：本分支下 driver 已构造且已订阅，必须在此处自行释放（幂等：调用方/Dispose 再调无害）。
+                ReleaseProjectileWiring();
+                return false;
+            }
+
+            Info("R5-C 诊断投射物接线：隔离物理场景="
+                 + (_movementScene.IsValid() ? _movementScene.name : "<none>")
+                 + " isDefaultWorld=" + _movementPhysicsScene.Equals(Physics.defaultPhysicsScene)
+                 + " 白名单Collider=" + _projectileMotion.AllowlistCount.ToString(CultureInfo.InvariantCulture)
+                 + " layerMask=0x" + _movementQuery.LayerMask.ToString("X8", CultureInfo.InvariantCulture)
+                 + " epoch=" + _boot.Epoch.ToString(CultureInfo.InvariantCulture)
+                 + " 步长=" + PMProjectileDiagnosticConfig.StepMs.ToString(CultureInfo.InvariantCulture) + "ms"
+                 + " 单帧最多=" + PMProjectileDiagnosticConfig.MaxStepsPerPump.ToString(CultureInfo.InvariantCulture) + "步"
+                 + " 开火间隔=" + PMProjectileDiagnosticConfig.FireIntervalMs.ToString(CultureInfo.InvariantCulture) + "ms"
+                 + " 枪口偏移=" + PMProjectileDiagnosticConfig.MuzzleOffsetM.ToString("0.###", CultureInfo.InvariantCulture) + "m");
+            if (_combatEnabled)
+            {
+                Info("R6-C 权威战斗接线：PMCombatSession(epoch=" + _boot.Epoch.ToString(CultureInfo.InvariantCulture)
+                     + ") → CreateAuthorityPolicy(model, 真实运动位置, 本帧墙钟) → R5(policy) → PMR6CombatDriver；"
+                     + "R5 Settlement 的**唯一**消费者是 R6 driver（宿主不再订阅诊断结算、也不做宿主侧 Drain）。");
+                Info("R6-C 权威战斗口径：名册 uid/team/hero 全部来自引导文件名册（team 用**原始 TeamId**，"
+                     + "不用 formalTeamIndex0/1）；History.Alive = core.Connected && !Dead（未知=false）；"
+                     + "命中过滤按 core 真实 TeamId/存活；死亡 Freeze 对应 Mover 并立即补 Alive=false；"
+                     + "终局冻结全部 Mover 且 R5 只 Pump(0) 排入站。");
+            }
+            else
+            {
+                Info("R5-C 声明：这是**诊断投射物探针**（非英雄普通攻击/大招/资源校验，非 R6 伤害）；"
+                     + "结算只记可观察命中计数与日志，不扣血、不消费旧 CommandManger/BattleManger/旧 shell。"
+                     + "（smoke 路径；正式玩法改走 R6-C 权威战斗接线）");
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 释放投射物接线（幂等、可被失败路径调用）。次序固定：**CombatDriver → R5 Driver → Motion**。
+        /// **不**触碰地图/场景对象（那是宿主原有的释放职责，且在更后面）。
+        ///
+        /// 为什么战斗驱动在最前：它是 R5 的消费者（订阅 + 持有 R5 引用），必须先摘掉自己那一份，
+        /// 否则 R5 Dispose 之后它仍会通过订阅/引用触达已释放对象。
+        /// </summary>
+        private void ReleaseProjectileWiring()
+        {
+            // R6-C：释放次序冻结 —— **先**摘掉战斗驱动（含它自己那一份 R5 Settlement 订阅 + 本地账），
+            // **再**释放 R5，最后释放运动 hook。反序会让战斗驱动继续持有已释放的 R5 引用。
+            if (_combatDriver != null)
+            {
+                try
+                {
+                    _combatDriver.PlayerDied -= OnCombatPlayerDied;
+                    _combatDriver.OutcomeFrozen -= OnCombatOutcomeFrozen;
+                }
+                catch (Exception ex) { Error("解除战斗驱动事件订阅异常：" + ex.GetType().Name); }
+
+                try { _combatDriver.Dispose(); }
+                catch (Exception ex) { Error("释放战斗驱动异常：" + ex.GetType().Name + " " + ex.Message); }
+
+                _combatDriver = null;
+            }
+
+            // 核心不是 IDisposable（纯数据 + 本地账），只放引用即可；下一局会是新对象（epoch 不复用）。
+            _combatModel = null;
+
+            if (_projectileDriver != null)
+            {
+                try { _projectileDriver.Settlement -= OnProjectileSettlement; }
+                catch (Exception ex) { Error("解除投射物结算订阅异常：" + ex.GetType().Name); }
+
+                try { _projectileDriver.Dispose(); }
+                catch (Exception ex) { Error("释放投射物驱动异常：" + ex.GetType().Name + " " + ex.Message); }
+
+                _projectileDriver = null;
+            }
+
+            if (_projectileMotion != null)
+            {
+                try { _projectileMotion.Dispose(); }
+                catch (Exception ex) { Error("释放投射物运动适配器异常：" + ex.GetType().Name + " " + ex.Message); }
+
+                _projectileMotion = null;
+            }
+
+            _projectileHistory = null;
+            _projectilePolicy = null;
+            _projectileHitFilter = null;
+            _movementAllowlist = null;
+            _projectileLastActivationByOwner.Clear();
+            _projectileLastFireWallMsByOwner.Clear();
+
+            _projectileAccumulatorMs = 0.0;
+            _lastProjectilePumpMs = 0L;
+        }
+
+        /// <summary>
+        /// 每宿主帧推进投射物。次序（契约冻结）：
+        ///   ① 为**所有**运动 driver 记一次本帧权威胶囊样本（after PumpMovement / before 投射物推进）；
+        ///   ② 固定 16ms 累加器推进（单帧最多 <see cref="PMProjectileDiagnosticConfig.MaxStepsPerPump"/> 子步），
+        ///      **绝不用大 elapsed 直接放大 dt**；剩余累积量钳到单帧上限（有界追赶，丢弃量计数）；
+        ///   ③ 零子步时仍 Pump(0)：把本帧到达的声明入站（上行生成/命中、下行裁决）排空，不让裁决压到下一帧。
+        /// 暂停/断线/故障：断线与故障的清理在 <see cref="PruneDisconnectedDrivers"/> / <see cref="Fail"/> 路径上，
+        /// 不在这里伪造推进；长时间停滞后由 ② 的上限钳制，不会一次性补上巨大 dt。
+        /// </summary>
+        private void PumpProjectiles(long nowMs)
+        {
+            if (_projectileDriver == null || _projectileDriver.IsDisposed) { return; }
+
+            // F7：驱动已经是会话失败态（例：下行裁决 RPC 发送失败）⇒ 立刻 Fail **整个宿主**。
+            // 这里（而不是只在 PumpProjectileOnce 里）再查一次，是为了让「任何非本轮投射物 Pump
+            // 路径造成的驱动 fault」也不会被当成没发生过继续跑。
+            if (FaultHostIfProjectileDriverFaulted("PumpProjectiles")) { return; }
+
+            double elapsedMs = 0.0;
+            if (_lastProjectilePumpMs != 0L && nowMs > _lastProjectilePumpMs)
+            {
+                elapsedMs = (double)(nowMs - _lastProjectilePumpMs);
+            }
+
+            _lastProjectilePumpMs = nowMs;
+            _projectileWallNowMs = (double)nowMs;
+
+            // ① 历史：必须在本帧投射物推进之前写入（否则本帧命中验证读到的是上一帧的位置）。
+            RecordProjectileHistory(_projectileWallNowMs);
+
+            // R6-C 终局：只 `Pump(0)` 排空声明入站，**不再推进任何运动子步**（契约「R5 仅 step0 排入站」）。
+            // 理由：终局后新命中不可能产生结算（core 已 MatchEnded），继续推进只会让冻结前的弹继续走、
+            // 继续消耗 CPU 与视图脏量，还会在下行制造无意义的裁决包。
+            if (_combatOutcomeFrozen)
+            {
+                _projectileAccumulatorMs = 0.0;
+                if (!PumpProjectileOnce(0)) { return; }
+                DrainDsProjectileViews();
+                return;
+            }
+
+            // ② 固定步长累加器的推进口径：elapsed **只在本帧累加一次**，每个子步恰好扣掉一个
+            //    stepMs，因此一帧的真实推进量 ≈ elapsed（不双计，也不用大 elapsed 直接放大 dt）。
+            //    循环中一旦宿主已失效立刻中止：不再做任何剩余子步（避免失败后继续驱动驱动）。
+            int stepMs = PMProjectileDiagnosticConfig.StepMs;
+            int maxSteps = PMProjectileDiagnosticConfig.MaxStepsPerPump;
+
+            _projectileAccumulatorMs += elapsedMs;
+
+            int steps = 0;
+            while (_projectileAccumulatorMs >= (double)stepMs && steps < maxSteps)
+            {
+                if (_faulted) { return; }
+                if (!PumpProjectileOnce(stepMs)) { return; }
+                _projectileAccumulatorMs -= (double)stepMs;
+                steps++;
+            }
+
+            double capMs = (double)stepMs * (double)maxSteps;
+            if (_projectileAccumulatorMs > capMs)
+            {
+                _diagnosticProjectileDroppedMs += _projectileAccumulatorMs - capMs;
+                _projectileAccumulatorMs = capMs;
+            }
+
+            // ③ 零子步也要排空声明入站（stepMs=0 不推进运动）。
+            if (steps == 0)
+            {
+                if (!PumpProjectileOnce(0)) { return; }
+            }
+
+            // R6-C：正式玩法的结算消费者是 R6 driver（它自己在 Pump 里做 Drain 兜底）。
+            // 宿主若也在这里 Drain，就是让同一条结算从两个入口被消费 —— 双 Drain 会毁掉伤害归属
+            //（谁扣的血、谁判的死都不可判定）。因此诊断 Drain **只在 smoke** 生效。
+            if (!_combatEnabled)
+            {
+                DrainDiagnosticSettlementBuffer();
+            }
+
+            // F1：DS **不消费表现**，但驱动的视图脏通道只有 DrainViewChanges 才清。
+            // 不排空就会一路堆到驱动的 MaxDirtyViews(4096) 才整体作废自清（该诊断量也会失真）。
+            DrainDsProjectileViews();
+        }
+
+        /// <summary>一次投射物 Pump；任何异常 / 驱动 fault 都走宿主 Fail（不吞、不继续）。</summary>
+        private bool PumpProjectileOnce(int stepMs)
+        {
+            try
+            {
+                _projectileDriver.Pump(_projectileWallNowMs, stepMs);
+            }
+            catch (Exception ex)
+            {
+                Fail("投射物驱动异常（stepMs=" + stepMs.ToString(CultureInfo.InvariantCulture) + "）："
+                     + ex.GetType().Name + " " + ex.Message);
+                return false;
+            }
+
+            return !FaultHostIfProjectileDriverFaulted("PumpProjectileOnce");
+        }
+
+        /// <summary>
+        /// F7：驱动已处于会话失败态 ⇒ **立刻 Fail 整个宿主**（不吞、不继续）。
+        ///
+        /// 返回 true = 「宿主已因此 Fail」，调用方据此中止本帧剩余工作。
+        /// 语义边界：驱动 Fault 的原因包括发送失败 / 队列溢出 / Coordinator faulted，
+        /// 这些都不能只 log 仍继续（那些情况实际上就是「数据已经不可信」）。
+        /// </summary>
+        private bool FaultHostIfProjectileDriverFaulted(string where)
+        {
+            if (_projectileDriver == null || !_projectileDriver.IsFaulted) { return false; }
+
+            Fail("投射物驱动会话失败（" + where + "：" + _projectileDriver.FaultReason + "）："
+                 + _projectileDriver.FaultError);
+            return true;
+        }
+
+        /// <summary>
+        /// 为**所有**运动 driver 记一条本帧权威胶囊样本。七元组全部取真实来源：
+        ///   Epoch/NetId/StreamVersion = 会话 epoch / 该副本 NetId / 运动 driver 的流代次；
+        ///   ServerFrame   = 本宿主自己决定的 AuthorityServer 帧（<see cref="_movementServerFrame"/>）；
+        ///   OutputFrame   = 运动 driver 的权威输出边界（Authority 角色 ⇒ Input 域）；
+        ///   TotalSimTimeMs= 运动 driver 的权威累计仿真时间；WorldTimeMs = **同一** monotonic 墙钟（= Pump 用值）；
+        ///   Position      = 权威 SyncState 位置；胶囊尺寸 = PMMoverDefaults × Sync.Scale（有效缩放）。
+        /// 记录失败**不静默吞**：计数 + 限流告警（历史是命中验证的唯一位置来源，缺它必须看得见）。
+        /// </summary>
+        private void RecordProjectileHistory(double worldNowMs)
+        {
+            if (_projectileHistory == null || _driversByUid.Count == 0) { return; }
+
+            List<int> uids = new List<int>(_driversByUid.Keys);
+            for (int i = 0; i < uids.Count; i++)
+            {
+                int uid = uids[i];
+
+                PMR4MovementDriver driver;
+                if (!_driversByUid.TryGetValue(uid, out driver) || driver == null || driver.IsDisposed) { continue; }
+
+                PMR3Player player;
+                if (!_playersByUid.TryGetValue(uid, out player) || player == null || !player.NetId.IsValid) { continue; }
+
+                PMMoverSyncState sync = driver.GetAuthoritativeSync();
+                float scale = sync.Scale;
+                if (float.IsNaN(scale) || float.IsInfinity(scale) || scale <= 0f)
+                {
+                    RejectProjectileHistory("uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                        + " 的 Sync.Scale 非法（" + scale.ToString("R", CultureInfo.InvariantCulture) + "）");
+                    continue;
+                }
+
+                PMProjectileTargetSample sample = new PMProjectileTargetSample();
+                sample.Epoch = _boot.Epoch;
+                sample.NetId = player.NetId.Value;
+                sample.StreamVersion = driver.StreamVersion;
+                sample.ServerFrame = _movementServerFrame;
+                sample.OutputFrame = driver.OutputBoundary;
+                // F3 复核：AuthorityTotalSimTimeMs 是**只读**观察量，无输入帧（占位步 StepMs==0）不推进它。
+                // 历史 Record 只要求「同 stream 内不回退」（相等合法），帧锚新鲜度也按仿真时间算，
+                // 因此取它就是正确口径；契约明令禁止用「帧号 × 16ms」换算代替它。
+                sample.TotalSimTimeMs = driver.AuthorityTotalSimTimeMs;
+                sample.WorldTimeMs = worldNowMs;
+                sample.Position = sync.Position;
+                sample.RadiusM = PMMoverDefaults.CapsuleRadiusMeters * scale;
+                sample.HalfHeightM = PMMoverDefaults.CapsuleHalfHeightMeters * scale;
+                // 没有传送判定源：恒 false，**不伪造**未观测的事实（见报告诚实边界）。
+                sample.Teleported = false;
+
+                // R6-C：正式玩法的 Alive 来自**权威战斗核心**（Connected && !Dead；未知 netId ⇒ false），
+                // 因此死亡/断线者立刻退出可命中集合。smoke 没有权威生命值系统，沿用恒 true 的诊断口径
+                //（那里「命中」只是诊断计数，不产生伤害）。
+                if (_combatEnabled)
+                {
+                    PMCombatPlayerSnapshot combat = _combatModel != null
+                        ? _combatModel.GetPlayer(player.NetId.Value)
+                        : null;
+                    sample.Alive = combat != null && combat.Connected && !combat.Dead;
+                }
+                else
+                {
+                    sample.Alive = true;
+                }
+
+                string rejectReason;
+                if (!_projectileHistory.Record(sample, out rejectReason))
+                {
+                    RejectProjectileHistory("uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                        + " 样本被拒：" + rejectReason);
+                }
+            }
+        }
+
+        private void RejectProjectileHistory(string reason)
+        {
+            _diagnosticProjectileHistoryRejects++;
+            if (_diagnosticProjectileHistoryRejects <= MaxProjectileDiagnosticWarnings)
+            {
+                Warn("R5-C 历史采样（第 " + _diagnosticProjectileHistoryRejects.ToString(CultureInfo.InvariantCulture)
+                     + " 次）：" + reason);
+            }
+        }
+
+        /// <summary>
+        /// **smoke 路径**的结算出口（诊断）：累计可观察命中计数 + 日志。
+        /// **不扣血、不写 HP/Mana/SuperEnergy、不接旧普通攻击/资源系统**。
+        ///
+        /// R6-C：本订阅**只在 smoke** 建立。正式玩法由 `PMR6CombatDriver` 消费结算
+        ///（它才是该会话的唯一消费者），宿主的这两个诊断计数因此恒为 0
+        ///（见 <see cref="DiagnosticCountersMeaningfulOnlyInSmoke"/>）。
+        /// </summary>
+        private void OnProjectileSettlement(PMProjectileSettlement settlement)
+        {
+            _diagnosticProjectileSettlementCount++;
+            _diagnosticProjectileHitCount += settlement.HitCount;
+
+            // F8 复核：**一条结算只能计一次**。
+            // 驱动把「订阅者抛异常」当成本次未交付，会把同一条结算转进有界待取缓冲，
+            // 而本宿主的兜底排空又会在那里再计一次 —— 那就是「事件 + drain 双重计数」。
+            // 计数在日志之前完成，因此只要日志自身不把异常抛回驱动，双重计数就不可能出现。
+            try
+            {
+                LogProjectileSettlement(settlement);
+            }
+            catch (Exception ex)
+            {
+                _diagnosticProjectileSettlementLogFailures++;
+                if (_diagnosticProjectileSettlementLogFailures <= MaxProjectileDiagnosticWarnings)
+                {
+                    Warn("R5-C 结算诊断日志抛出异常（第 "
+                         + _diagnosticProjectileSettlementLogFailures.ToString(CultureInfo.InvariantCulture)
+                         + " 次，已吞掉以保证计数只发生一次）：" + ex.GetType().Name + " " + ex.Message);
+                }
+            }
+        }
+
+        /// <summary>结算的诊断日志（与计数分离：它抛异常不得影响「一条结算只计一次」的不变式）。</summary>
+        private void LogProjectileSettlement(PMProjectileSettlement settlement)
+        {
+            Info("R5-C 诊断结算（non-gameplay，不扣血）：key=" + DescribeProjectileKey(settlement.Key)
+                 + " activation=" + settlement.ActivationId.ToString(CultureInfo.InvariantCulture)
+                 + " authority=" + settlement.AuthorityNetId.ToString(CultureInfo.InvariantCulture)
+                 + " origin=" + settlement.Origin
+                 + " stopOnHit=" + (settlement.StopOnHit ? 1 : 0)
+                 + " hits=" + settlement.HitCount.ToString(CultureInfo.InvariantCulture)
+                 + "（累计命中=" + _diagnosticProjectileHitCount.ToString(CultureInfo.InvariantCulture) + "）");
+
+            if (settlement.Hits == null) { return; }
+
+            for (int i = 0; i < settlement.Hits.Length; i++)
+            {
+                Info("R5-C 诊断结算目标#" + i.ToString(CultureInfo.InvariantCulture)
+                     + " netId=" + settlement.Hits[i].TargetNetId.ToString(CultureInfo.InvariantCulture)
+                     + " stream=" + settlement.Hits[i].TargetStreamVersion.ToString(CultureInfo.InvariantCulture)
+                     + " 还原=" + settlement.Hits[i].Resolution
+                     + " impact=(" + settlement.Hits[i].ImpactPoint.X.ToString("0.###", CultureInfo.InvariantCulture)
+                     + "," + settlement.Hits[i].ImpactPoint.Y.ToString("0.###", CultureInfo.InvariantCulture)
+                     + "," + settlement.Hits[i].ImpactPoint.Z.ToString("0.###", CultureInfo.InvariantCulture) + ")");
+            }
+        }
+
+        /// <summary>
+        /// 兜底排空驱动的**待取结算缓冲**：正常情况下（订阅生效且订阅者不抛）它恒为空；
+        /// 一旦有内容，说明订阅者**确实没交付**（例如未订阅），必须显式看见并继续计数，
+        /// 绝不静默丢真实伤害。
+        ///
+        /// F8：本路径与事件路径**不会**重复计同一条 —— 驱动的交付是「事件 XOR 待取缓冲」，
+        /// 而本宿主的订阅者已保证不抛异常（见 <see cref="OnProjectileSettlement"/>），
+        /// 因此驱动不会把已交付的条目再入缓冲。
+        /// </summary>
+        private void DrainDiagnosticSettlementBuffer()
+        {
+            if (_projectileDriver == null || _projectileDriver.IsDisposed) { return; }
+            if (_projectileDriver.PendingSettlementCount <= 0) { return; }
+
+            PMProjectileSettlement[] buffered;
+            int drained = _projectileDriver.DrainSettlements(PMR5ProjectileDriver.MaxApplyPerPump, out buffered);
+            for (int i = 0; i < drained; i++)
+            {
+                _diagnosticProjectileUnconsumedSettlements++;
+                Warn("R5-C 结算未经订阅交付而进入待取缓冲（第 "
+                     + _diagnosticProjectileUnconsumedSettlements.ToString(CultureInfo.InvariantCulture)
+                     + " 条）：已按诊断口径消费并计数，绝不丢。");
+                OnProjectileSettlement(buffered[i]);
+            }
+        }
+
+        /// <summary>
+        /// F1：DS **必须**周期性排空驱动的视图脏增量，即使它不消费表现。
+        ///
+        /// 为什么：`PMR5ProjectileDriver.RebuildViews` 每帧把新增/变化/移除的 key 标脏，
+        /// 而 `_dirtyViewOrder` / `_dirtyViewSet` **只有** `DrainViewChanges` 才清。
+        /// DS 上没有 C 表现消费者，不排空就会一路堆到驱动的 `MaxDirtyViews`(4096) 才整体作废自清，
+        /// 该诊断量（`ViewDirtyOverflows`）也会跟着失真；对 DS 而言那是纯浪费。
+        ///
+        /// 上界：驱动自身保证脏集合 ≤ MaxDirtyViews，因此「取空」本身是有界的；
+        /// 排空量 = 本帧真实脏数（DS 是唯一消费者 ⇒ 不会与任何其它消费者抢）。
+        /// 丢弃是**正确**的语义：DS 禁止创建表现对象（C2 在 DS 上会显式抛）。
+        /// </summary>
+        private void DrainDsProjectileViews()
+        {
+            if (_projectileDriver == null || _projectileDriver.IsDisposed) { return; }
+
+            PMR5ProjectileView[] changes;
+            int drained = _projectileDriver.DrainViewChanges(PMR5ProjectileDriver.MaxDirtyViews, out changes);
+            if (drained > 0) { _diagnosticProjectileViewDrains += drained; }
+        }
+
+        /// <summary>
+        /// F2 / R6-C：断线时用「断线前最后一份权威事实」补一条 <c>Alive=false</c> 的历史样本。
+        /// 实际写入在 <see cref="RecordProjectileUnavailableSample"/>（与 R6-C 的权威死亡共用同一条口径）。
+        /// </summary>
+        private void RecordProjectileDisconnectSample(int uid, PMR3Player player, PMR4MovementDriver driver)
+        {
+            if (RecordProjectileUnavailableSample(uid, player, driver, true))
+            {
+                _diagnosticProjectileDisconnectSamples++;
+            }
+        }
+
+        /// <summary>
+        /// 补一条 <c>Alive=false</c>（**不可命中**）的历史样本。断线（<paramref name="disconnect"/>=true）与
+        /// R6-C 权威死亡（false）共用：两者要求逐条相同 —— 用「最后一份权威事实 + 真实 AuthorityServer 帧 +
+        /// 该副本真实输入边界」把目标**立刻**标成不可命中，区别只在归属计数。
+        ///
+        /// 为什么必须补：历史没有「按目标移除」的 API（也不应该由宿主伪造一套），
+        /// 不补的话该副本留在历史里的最后一条样本仍是 <c>Alive=true</c>，会被旧帧锚继续当作可命中目标。
+        /// 补样本用的是同一 AuthorityServer 帧 + 同一 OutputFrame ⇒ 走历史 Record 的「同帧取最后输出」分支，
+        /// 把本帧那条样本覆盖为不可命中；之后样本自然随保留窗口过期。
+        /// 另有一道**实时**兜底：正式玩法由 core 的 Connected/Dead 与 R5 命中过滤复核（见 AcceptCombatHit）。
+        /// </summary>
+        /// <returns>样本是否真的写入成功（失败原因由 <see cref="RejectProjectileHistory"/> 记账）。</returns>
+        private bool RecordProjectileUnavailableSample(int uid, PMR3Player player, PMR4MovementDriver driver,
+                                                       bool disconnect)
+        {
+            if (_projectileHistory == null || player == null || driver == null) { return false; }
+            if (!player.NetId.IsValid || player.NetId.Value == 0u) { return false; }
+            if (driver.StreamVersion == 0u) { return false; }
+            if (_movementServerFrame.Domain != PMFrameDomain.AuthorityServer) { return false; }
+
+            PMMoverSyncState sync = driver.GetAuthoritativeSync();
+            float scale = sync.Scale;
+            if (float.IsNaN(scale) || float.IsInfinity(scale) || scale <= 0f) { return false; }
+
+            PMProjectileTargetSample sample = new PMProjectileTargetSample();
+            sample.Epoch = _boot.Epoch;
+            sample.NetId = player.NetId.Value;
+            sample.StreamVersion = driver.StreamVersion;
+            sample.ServerFrame = _movementServerFrame;
+            sample.OutputFrame = driver.OutputBoundary;
+            sample.TotalSimTimeMs = driver.AuthorityTotalSimTimeMs;
+            sample.WorldTimeMs = _projectileWallNowMs;
+            sample.Position = sync.Position;
+            sample.RadiusM = PMMoverDefaults.CapsuleRadiusMeters * scale;
+            sample.HalfHeightM = PMMoverDefaults.CapsuleHalfHeightMeters * scale;
+            sample.Teleported = false;
+            sample.Alive = false;   // ← 断线/死亡 = 不可命中
+
+            string rejectReason;
+            if (!_projectileHistory.Record(sample, out rejectReason))
+            {
+                RejectProjectileHistory((disconnect ? "断线样本" : "死亡样本")
+                                        + "被拒（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                                        + "）：" + rejectReason);
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// F2：该 uid 当前是不是「可被命中的权威目标」——连接就绪 + 运动 driver 存活且未 Freeze。
+        /// 历史样本的 Alive 只反映**采样那一刻**的事实，断线后旧帧锚仍可能解析到活样本，
+        /// 所以命中过滤必须拿实时连接事实兜底（缺数据 fail closed）。
+        /// </summary>
+        private bool IsProjectileTargetAuthoritative(int uid)
+        {
+            PMR3Player player;
+            if (!_playersByUid.TryGetValue(uid, out player) || player == null) { return false; }
+            if (player.OwnerConnection == null || !player.OwnerConnection.IsReady) { return false; }
+
+            PMR4MovementDriver driver;
+            if (!_driversByUid.TryGetValue(uid, out driver) || driver == null || driver.IsDisposed) { return false; }
+
+            return !driver.IsFrozen;
+        }
+
+        // ---------------------------------------------------------------- F6：上行重复意图
+        //
+        // F6（同一 activation 的重传不得反向撤销已确认弹）的**根治点已收口到 driver**
+        //（PMR5ProjectileDriver.HandleServerSpawn 的「已受理 key 无副作用幂等门」），
+        // 因此这里**不再**需要宿主侧装饰器去改写 player.ProjectileDriver：
+        //   · 装饰器会破坏驱动的 UnbindPlayer/Dispose 身份判定（ReferenceEquals 只认自己的适配器）；
+        //   · 「完全相同指纹 + 32 条环」只是窗口假设，驱动侧用**自己的登记事实**收口才是通用幂等。
+        // 保留本注释以说明这里为什么是空的（不要再装回去）。
+
+        /// <summary>
+        /// 可信授权（由 <see cref="DiagnosticProjectileAuthorityPolicy"/> 回调）。
+        /// 只认 DS 自己知道的事实：已认证绑定、名册、单调 activation、200ms 间隔、未 Freeze 的运动 driver，
+        /// 以及 DS 自己的权威位置；trustedSpec 来自共享诊断工厂（上行根本没有 spec 面可以伪造）。
+        ///
+        /// 返回 false = 本次不予授权（driver 会取消预留并向 owner 下行 Rejected）。
+        /// </summary>
+        private bool TryAuthorizeDiagnosticSpawn(PMR3Player player, PMProjectileSpawnIntent intent,
+            out PMProjectileSpec trustedSpec, out PMVector3 ownerPosition,
+            out PMActivationResult verdict, out string error)
+        {
+            trustedSpec = null;
+            ownerPosition = PMVector3.Zero;
+            verdict = PMActivationResult.Rejected;
+            error = null;
+
+            if (player == null || intent == null)
+            {
+                error = "player/intent 为 null";
+                return RejectProjectileRequest(error);
+            }
+
+            if (!player.NetId.IsValid || player.NetId.Value == 0u)
+            {
+                error = "player NetId 无效";
+                return RejectProjectileRequest(error);
+            }
+
+            int uid = player.Uid;
+            if (uid <= 0 || !_expectedUids.Contains(uid))
+            {
+                error = "uid=" + uid.ToString(CultureInfo.InvariantCulture) + " 不在本局名册内（无名册不授权）";
+                return RejectProjectileRequest(error);
+            }
+
+            // 已认证绑定：本副本必须真的挂在投射物驱动接缝上。
+            if (_projectileDriver == null || !_projectileDriver.IsPlayerBound(player))
+            {
+                error = "uid=" + uid.ToString(CultureInfo.InvariantCulture) + " 未绑定投射物驱动接缝";
+                return RejectProjectileRequest(error);
+            }
+
+            PMTransportConnection ownerConnection = player.OwnerConnection as PMTransportConnection;
+            if (ownerConnection == null || !ownerConnection.IsReady)
+            {
+                error = "uid=" + uid.ToString(CultureInfo.InvariantCulture) + " 的 owner 连接未就绪";
+                return RejectProjectileRequest(error);
+            }
+
+            uint ownerNetId = player.NetId.Value;
+
+            // activation：单 owner 单调且**不重用**（重放/回退一律拒）。
+            // 拒绝是终态，不会把已 Confirmed 的 legacy id 覆成 Rejected（协调器 AlreadyTerminal 保护）。
+            uint lastActivation;
+            if (_projectileLastActivationByOwner.TryGetValue(ownerNetId, out lastActivation)
+                && intent.ActivationId <= lastActivation)
+            {
+                error = "activationId=" + intent.ActivationId.ToString(CultureInfo.InvariantCulture)
+                        + " 非单调（本 owner 已授权到 " + lastActivation.ToString(CultureInfo.InvariantCulture) + "）";
+                return RejectProjectileRequest(error);
+            }
+
+            // 200ms 墙钟间隔（时钟 = 本帧投射物 Pump 的 wallNowMs，与驱动同一 monotonic 口径）。
+            double lastFireWall;
+            if (_projectileLastFireWallMsByOwner.TryGetValue(ownerNetId, out lastFireWall))
+            {
+                if (_projectileWallNowMs < lastFireWall)
+                {
+                    error = "墙钟倒退（now=" + _projectileWallNowMs.ToString("0.###", CultureInfo.InvariantCulture)
+                            + " last=" + lastFireWall.ToString("0.###", CultureInfo.InvariantCulture) + "）";
+                    return RejectProjectileRequest(error);
+                }
+
+                if (_projectileWallNowMs - lastFireWall < (double)PMProjectileDiagnosticConfig.FireIntervalMs)
+                {
+                    error = "开火间隔不足 " + PMProjectileDiagnosticConfig.FireIntervalMs.ToString(CultureInfo.InvariantCulture)
+                            + "ms（实际 " + (_projectileWallNowMs - lastFireWall).ToString("0.###", CultureInfo.InvariantCulture) + "ms）";
+                    return RejectProjectileRequest(error);
+                }
+            }
+
+            // 已存在运动 driver 且未 Freeze/未释放：没有它就没有权威位置，也就没有权威枪口。
+            PMR4MovementDriver driver;
+            if (!_driversByUid.TryGetValue(uid, out driver) || driver == null || driver.IsDisposed)
+            {
+                error = "uid=" + uid.ToString(CultureInfo.InvariantCulture) + " 缺少运动 driver";
+                return RejectProjectileRequest(error);
+            }
+
+            if (driver.IsFrozen)
+            {
+                error = "uid=" + uid.ToString(CultureInfo.InvariantCulture) + " 的运动 driver 已 Freeze（拒绝授权）";
+                return RejectProjectileRequest(error);
+            }
+
+            PMMoverSyncState sync = driver.GetAuthoritativeSync();
+            if (!sync.Position.IsFinite
+                || float.IsNaN(sync.YawDegrees) || float.IsInfinity(sync.YawDegrees))
+            {
+                error = "权威位置/朝向非有限";
+                return RejectProjectileRequest(error);
+            }
+
+            // 共享只读诊断 spec 工厂：**每次都给新实例**，且上行 payload 根本表达不了 spec。
+            PMProjectileSpec spec = PMProjectileDiagnosticConfig.CreateSpec();
+            if (spec == null)
+            {
+                error = "诊断 spec 工厂返回 null";
+                return RejectProjectileRequest(error);
+            }
+
+            // DS 权威枪口 = 权威位置 + 权威朝向 * 共享枪口偏移（客户端自报的位置/朝向只用于入队断言）。
+            float yawRadians = sync.YawDegrees * ((float)Math.PI / 180f);
+            PMVector3 forward = new PMVector3((float)Math.Sin(yawRadians), 0f, (float)Math.Cos(yawRadians));
+            PMVector3 muzzle = sync.Position + forward * PMProjectileDiagnosticConfig.MuzzleOffsetM;
+            if (!muzzle.IsFinite)
+            {
+                error = "DS 枪口位置非有限";
+                return RejectProjectileRequest(error);
+            }
+
+            // 记账（单调 + 间隔）后放行：拒绝路径**不**写账，因此拒绝不会占用配额。
+            _projectileLastActivationByOwner[ownerNetId] = intent.ActivationId;
+            _projectileLastFireWallMsByOwner[ownerNetId] = _projectileWallNowMs;
+
+            trustedSpec = spec;
+            ownerPosition = muzzle;
+            // 本批不接资源/HP 门，因此立即确认（可靠激活路径完整，但 Pending/显式 ResolveActivation 未被本宿主使用）。
+            verdict = PMActivationResult.Confirmed;
+            return true;
+        }
+
+        /// <summary>记一次策略拒绝并返回 false（调用点写作 <c>return RejectProjectileRequest(error);</c>）。</summary>
+        private bool RejectProjectileRequest(string error)
+        {
+            _diagnosticProjectilePolicyRejections++;
+            if (_diagnosticProjectilePolicyRejections <= MaxProjectileDiagnosticWarnings)
+            {
+                Warn("R5-C 拒绝授权（第 " + _diagnosticProjectilePolicyRejections.ToString(CultureInfo.InvariantCulture)
+                     + " 次）：" + error);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 权威命中过滤：**self / 同队**必须拒（名册身份解析不出来也拒，fail closed）。
+        /// 身份只从 DS 名册与已创建副本的 NetId 反查，绝不用上行自报字段。
+        /// </summary>
+        private bool AcceptDiagnosticHit(PMProjectileKey projectile, PMProjectileTargetSample target,
+                                         PMVector3 sanitizedImpact)
+        {
+            int ownerUid;
+            int targetUid;
+            int ownerTeam;
+            int targetTeam;
+
+            if (!TryResolveUidByNetId(projectile.OwnerNetId, out ownerUid)
+                || !TryResolveUidByNetId(target.NetId, out targetUid)
+                || !TryResolveAuthoritativeTeam(ownerUid, out ownerTeam)
+                || !TryResolveAuthoritativeTeam(targetUid, out targetTeam))
+            {
+                return RejectProjectileHit("身份不可解析（owner="
+                    + projectile.OwnerNetId.ToString(CultureInfo.InvariantCulture) + " target="
+                    + target.NetId.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            if (ownerUid == targetUid)
+            {
+                return RejectProjectileHit("self 命中（uid=" + ownerUid.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            // F2：断线/已 Freeze 的副本不得再被命中。历史里的 Alive 只是采样那一刻的事实，
+            // 断线后旧帧锚仍可能解析到活样本，因此这里拿**实时**连接事实兜底（fail closed）。
+            if (!IsProjectileTargetAuthoritative(ownerUid))
+            {
+                return RejectProjectileHit("owner 已断线/无可信运动 driver（uid="
+                    + ownerUid.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            if (!IsProjectileTargetAuthoritative(targetUid))
+            {
+                return RejectProjectileHit("target 已断线/无可信运动 driver（uid="
+                    + targetUid.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            if (ownerTeam == targetTeam)
+            {
+                return RejectProjectileHit("同队命中（team=" + ownerTeam.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+
+            return true;
+        }
+
+        private bool RejectProjectileHit(string reason)
+        {
+            _diagnosticProjectileFilterRejections++;
+            if (_diagnosticProjectileFilterRejections <= MaxProjectileDiagnosticWarnings)
+            {
+                Warn("R5-C 拒绝命中（第 " + _diagnosticProjectileFilterRejections.ToString(CultureInfo.InvariantCulture)
+                     + " 次）：" + reason);
+            }
+
+            return false;
+        }
+
+        /// <summary>副本 NetId → uid（只在本局**已创建**的权威副本里反查）。</summary>
+        private bool TryResolveUidByNetId(uint netId, out int uid)
+        {
+            uid = 0;
+            if (netId == 0u) { return false; }
+
+            foreach (KeyValuePair<int, PMR3Player> kv in _playersByUid)
+            {
+                if (kv.Value != null && kv.Value.NetId.IsValid && kv.Value.NetId.Value == netId)
+                {
+                    uid = kv.Key;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 权威队伍身份（**只用于 self/同队过滤**，不参与任何伤害/判定）。
+        ///
+        ///   · 正式内容：用已校验的名册队伍索引（<see cref="_formalTeamIndexByUid"/>，TeamId 2 → 0 / 1 → 1）；
+        ///   · 诊断场景：名册 TeamId 为 1/2 时直接用；否则退到**与出生侧同一条规则**（名册行奇偶）——
+        ///     这条规则本来就是本宿主给诊断模式定侧的依据（见 <see cref="BuildSpawnSync"/>），
+        ///     因此不是「凭空分队」，而是复用同一份名册事实。
+        /// 任一侧解析不出来 ⇒ 返回 false（调用方拒绝命中）。
+        /// </summary>
+        private bool TryResolveAuthoritativeTeam(int uid, out int team)
+        {
+            team = 0;
+
+            if (_contentFormal)
+            {
+                return _formalTeamIndexByUid.TryGetValue(uid, out team);
+            }
+
+            int rosterTeam;
+            if (!_rosterTeamByUid.TryGetValue(uid, out rosterTeam)) { return false; }
+
+            if (rosterTeam == 1 || rosterTeam == 2)
+            {
+                team = rosterTeam;
+                return true;
+            }
+
+            int row;
+            if (!_rosterRowByUid.TryGetValue(uid, out row)) { return false; }
+
+            team = (row % 2 == 0) ? 1 : 2;   // 与 BuildSpawnSync 的出生侧规则逐字一致
+            return true;
+        }
+
+        /// <summary>私有可信授权策略：把宿主的判定接到 driver 的注入面（driver 只见接口，反向依赖为零）。</summary>
+        private sealed class DiagnosticProjectileAuthorityPolicy : IPMR5ProjectileAuthorityPolicy
+        {
+            private readonly PMDsSessionHost _host;
+
+            public DiagnosticProjectileAuthorityPolicy(PMDsSessionHost host)
+            {
+                _host = host;
+            }
+
+            public bool TryAuthorizeSpawn(PMR3Player player, PMProjectileSpawnIntent intent,
+                out PMProjectileSpec trustedSpec, out PMVector3 ownerPosition,
+                out PMActivationResult verdict, out string error)
+            {
+                return _host.TryAuthorizeDiagnosticSpawn(player, intent, out trustedSpec, out ownerPosition,
+                                                        out verdict, out error);
+            }
+        }
+
+        /// <summary>私有权威命中过滤：按 DS 名册身份做 self/同队过滤（缺数据 fail closed）。</summary>
+        private sealed class RosterIdentityHitFilter : IPMProjectileHitFilter
+        {
+            private readonly PMDsSessionHost _host;
+
+            public RosterIdentityHitFilter(PMDsSessionHost host)
+            {
+                _host = host;
+            }
+
+            public bool Accept(PMProjectileKey projectile, PMProjectileTargetSample target,
+                               PMVector3 sanitizedImpact)
+            {
+                return _host.AcceptDiagnosticHit(projectile, target, sanitizedImpact);
+            }
+        }
+
+        /// <summary>投射物接线的单行诊断摘要（进 <see cref="Describe"/>）。</summary>
+        private string DescribeProjectileWiring()
+        {
+            if (_projectileDriver == null) { return "<none>"; }
+
+            return "faulted=" + (_projectileDriver.IsFaulted ? _projectileDriver.FaultReason.ToString() : "<none>")
+                   + " bound=" + _projectileDriver.BoundPlayerCount.ToString(CultureInfo.InvariantCulture)
+                   + " authority=" + _projectileDriver.AuthorityObjectCount.ToString(CultureInfo.InvariantCulture)
+                   + " reserved=" + _projectileDriver.ReservationCount.ToString(CultureInfo.InvariantCulture)
+                   + " views=" + _projectileDriver.ViewCount.ToString(CultureInfo.InvariantCulture)
+                   + " historyTargets=" + (_projectileHistory != null ? _projectileHistory.TargetCount : 0).ToString(CultureInfo.InvariantCulture)
+                   + " historyRejects=" + _diagnosticProjectileHistoryRejects.ToString(CultureInfo.InvariantCulture)
+                   + " policyRejects=" + _diagnosticProjectilePolicyRejections.ToString(CultureInfo.InvariantCulture)
+                   + " filterRejects=" + _diagnosticProjectileFilterRejections.ToString(CultureInfo.InvariantCulture)
+                   + " settlements=" + _diagnosticProjectileSettlementCount.ToString(CultureInfo.InvariantCulture)
+                   + " hits=" + _diagnosticProjectileHitCount.ToString(CultureInfo.InvariantCulture)
+                   + " droppedMs=" + _diagnosticProjectileDroppedMs.ToString("0.###", CultureInfo.InvariantCulture)
+                   + " viewDrains=" + _diagnosticProjectileViewDrains.ToString(CultureInfo.InvariantCulture)
+                   + " disconnectSamples=" + _diagnosticProjectileDisconnectSamples.ToString(CultureInfo.InvariantCulture)
+                   + " settlementLogFailures=" + _diagnosticProjectileSettlementLogFailures.ToString(CultureInfo.InvariantCulture)
+                   + " unconsumedSettlements=" + _diagnosticProjectileUnconsumedSettlements.ToString(CultureInfo.InvariantCulture);
+        }
+
+        private static string DescribeProjectileKey(PMProjectileKey key)
+        {
+            return "e" + key.Epoch.ToString(CultureInfo.InvariantCulture)
+                   + "/o" + key.OwnerNetId.ToString(CultureInfo.InvariantCulture)
+                   + "/p" + key.ProjectileId.ToString(CultureInfo.InvariantCulture)
+                   + "/" + key.Origin;
         }
 
         // =================================================================================
@@ -1777,6 +3514,7 @@ namespace PMNet.Unity
                  + " udpIn=" + _endpoint.DatagramsReceived.ToString(CultureInfo.InvariantCulture)
                  + " udpOut=" + _endpoint.DatagramsSent.ToString(CultureInfo.InvariantCulture)
                  + " unbound=" + _endpoint.DroppedUnboundDatagrams.ToString(CultureInfo.InvariantCulture)
+                 + " | combat=" + DescribeCombatWiring()
                  + " | " + (_lobby != null ? _lobby.Describe() : "lobby=<none>"));
 
             HYLDDebug.FlushTrace();
@@ -1846,6 +3584,8 @@ namespace PMNet.Unity
                    + "/" + _expectedUids.Count.ToString(CultureInfo.InvariantCulture)
                    + " movementDrivers=" + _driversByUid.Count.ToString(CultureInfo.InvariantCulture)
                    + " hostTick=" + _movementHostTickId.ToString(CultureInfo.InvariantCulture)
+                   + " projectile=" + DescribeProjectileWiring()
+                   + " combat=" + DescribeCombatWiring()
                    + " fault=" + (_faulted ? _faultReason : "<none>");
         }
     }

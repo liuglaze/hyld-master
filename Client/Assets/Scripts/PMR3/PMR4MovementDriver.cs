@@ -900,7 +900,7 @@ namespace PMNet.R3
                     return false;
                 }
 
-                _player.PMNet_ClientMovementResyncV1(resyncPayload);
+                _player.ClientMovementResyncV1(resyncPayload);
             }
 
             _player.PublishMovementSnapshot(payload);
@@ -1052,7 +1052,7 @@ namespace PMNet.R3
                 return false;
             }
 
-            _player.PMNet_ServerMovementInputV1(payload);
+            _player.ServerMovementInputV1(payload);
             return true;
         }
 
@@ -1394,7 +1394,7 @@ namespace PMNet.R3
                     _epoch, _instanceId, _streamVersion, _authorityEventSequence, slice);
 
                 // 可靠 RPC（owner-only）：事件必须独立于快照确认游标到达。
-                _player.PMNet_ClientMovementEventsV1(payload);
+                _player.ClientMovementEventsV1(payload);
                 EventPayloadsSent++;
 
                 offset += take;
@@ -2148,7 +2148,7 @@ namespace PMNet.R3
 
             _resyncRequestInFlight = true;
             ResyncRequestsSent++;
-            _player.PMNet_ServerMovementResyncV1(_streamVersion);
+            _player.ServerMovementResyncV1(_streamVersion);
             _player.WarnMovement("[PMR4MovementDriver] AP 请求重同步："
                                  + (reason == null ? "(no reason)" : reason));
         }

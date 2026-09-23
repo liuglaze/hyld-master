@@ -1,0 +1,46 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      RPC 编织便利层的**纯 BCL 回归**（不需要 Unity、不调用任何 Unity native）。
+
+      为什么需要它（与 Tools/PMNetWeavingEditorCheck 的分工）：
+        · PMNetWeavingEditorCheck 用**真实 Unity 2019.4 DLL** 编译，证明"接口/签名存在且用法正确"，
+          但它只能证明"编得过"，证明不了"行为对不对"；
+        · 本工程把 `PMNetToolProcess.cs`（外部工具执行器）与 `PMNetWeavingPolicy.cs`（纯决策策略）
+          链接进来**真实执行**：受控子进程的参数往返、超 64 KiB 无换行输出、非 0 退出、
+          不存在的可执行文件、并发拒绝、超时后复用、孙进程继承管道不无限挂；
+          以及 Player 目标策略、工具输入内容指纹、契约探针、decl-check 退出码归类。
+        · 两者都不启动 Unity；Editor 回调时序 / Player 管线位置 / IL2CPP 运行仍是 PENDING_USER。
+
+      链接同一份源码（不是复制）：这里验证的就是编辑器里实际加载的那两个文件。
+
+      运行：dotnet build Tools/PMNetWeavingEditorTest -c Release
+            dotnet Tools/PMNetWeavingEditorTest/bin/Release/net8.0/PMNetWeavingEditorTest.dll [repo 参数: repo <仓库根>]
+      退出码：0 = 全部通过；1 = 有失败。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMNetWeavingEditorTest</AssemblyName>
+    <RootNamespace>PMNetWeavingEditorTest</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      被测的**真实源码**（精确到文件）：
+        · PMNetToolProcess.cs   —— 外部工具执行器（超时/并发/分块有界读取与排空/只杀自己的子进程）
+        · PMNetWeavingPolicy.cs —— 纯 BCL 决策策略（文件名匹配、Player 目标、工具输入内容指纹、契约探针）
+      它们刻意不含 Unity API，因此这份链接能成立 —— 这本身就是"策略与宿主解耦"的证据。
+    -->
+    <Compile Include="..\..\Client\Assets\Editor\PMNetWeaving\PMNetToolProcess.cs" LinkBase="PMNetWeaving" />
+    <Compile Include="..\..\Client\Assets\Editor\PMNetWeaving\PMNetWeavingPolicy.cs" LinkBase="PMNetWeaving" />
+  </ItemGroup>
+
+</Project>

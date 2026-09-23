@@ -141,6 +141,8 @@ namespace PMNet.Generated
             entries[0] = global::PMNetE2E.E2eReplicated.PMNet_BuildEntry(); // E2eReplicated（ClassId=2761782480）
             entries[1] = global::PMNetE2E.E2eScoreboard.PMNet_BuildEntry(); // E2eScoreboard（ClassId=2767219303）
 
+            // ★ 顺序是契约的一部分：先把**每个类**的 BuildEntry 求值完（其中含 RPC 的类会在入口调 PMNet_RequireRpcWeave），再统一 RegisterClass。
+            // 这样未编织程序集（或某个 RPC 类未编织）会在**任何** RegisterClass 之前抛出，不会出现「非 RPC 类先登记成功、后一个 RPC 类才发现未 weave」的半注册状态。
             for (int i = 0; i < entries.Length; i++)
             {
                 PMNet.PMNetRegistry.RegisterClass(entries[i]);

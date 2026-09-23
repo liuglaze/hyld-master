@@ -2,9 +2,11 @@
 
 > 记录客户端与服务端之间需要双方对齐的协议字段、同步语义、约定变更。
 
+> **当前接口：旧联网战斗链已删除。** 大厅仅剩7个message/7个enum的protobuf；局内只走PMNet声明RPC/复制与UnityDS。Request7/8、Action31..41、MainPack13/15已reserved。下方早期BattleInfo/SavedMove/回放章节仅为历史记录，不得据此复活旧协议。当前部署/接口见Client/Assets/Docs/ForServer.md、Server/AGENTS.md及主计划末尾旧链退役交付段。
+
 ---
 
-## 0. 当前 BattleInfo 单包结构（battle-protocol-split，2026-06）
+## 0. 历史 BattleInfo 单包结构（已退役，非当前接口）
 
 - **外层不变**：战斗 UDP 仍然通过一个 `MainPack` 收发，`RequestCode.Battle` + 原有 `ActionCode` 不变，战斗载荷仍在 `MainPack.battleInfo`。
 - **BattleInfo 当前结构**：
@@ -638,3 +640,42 @@ DS Ready/Heartbeat现在有Lobby签名Heartbeat应答；DS每5s发送，Lobby最
 
 PMR3Player新增声明式输入RPC、完整Sync/Aux快照属性、可靠事件/重同步RPC；协议摘要改变，Lobby/客户端/DS必须同版本。局内AP预测、DS主线程预算模拟、SP只插值。输入流重置代次隔离旧包；事件按可靠到达顺序与状态确认边界消费。上行不允许直接指定可信传送/速度/参数。
 两宿主使用独立PhysicsScene内同布局floor/wall、WorldVersion=1，出生墙外x±3。新链WASD/Space输入与简单胶囊表现已接；旧战斗切换仍由HYLD_PMNET_DS=1控制，本轮未执行R6全业务退役。验证入口为Play模式Tools/PMR4/验证 Unity 碰撞适配（真实 PhysX），后续重新Build HyldDS；net8回环门禁不代表PhysX运行通过。状态唯一源见Docs/plans/net-architecture-migration.md P4B1–P4B6。
+
+
+## R5 新PMNet投射物网络链（代码已接线，实机集中后置）
+- 新链沿HYLD_PMNET_DS=1/PMDS1，旧BattleInfo路径不参与同一对局。现为F键单发诊断弹，不是所有英雄普通/大招；伤害/资源/死亡/胜负接R6，目前只记DS诊断命中计数。
+- PMR3Player新增Reliable+ForceValidate ServerProjectileSpawnV1=21590、ServerProjectileHitV1=33011；owner-only ClientProjectileDecisionV1=38620。归属来自认证player，client上行不带trustedSpec/权威NetId。命中每RPC<=48目标，每弹总5次，byte[]上限4096。
+- PMR5Projectile ClassId227098277，属性_projectileSnapshotV1=6683，状态经生成复制；World先预留不可跨World消费的令牌，Confirmed才完整初值+Create，Rejected/TTL/断开取消预留。
+- owner假弹接管只能在真实镜像存在时发生，沿用本地最新时基；已结束迟到镜像不复活。DS停止保墓碑，超窗不接受命中。重复已受理Spawn不能重跑policy或反向Rejected撤销合法弹。
+- ProtocolHash变为0x43DD5A42（原0xDDC346C5），必须Lobby/Unity DS/客户端同版本，用户之前的包不能混用。当前不要求用户分批重打，集中实机验收时再统一构建。
+- 自动门禁详情/唯一状态源见Docs/plans/net-architecture-migration.md末R5-B2/C交付段；不把编译/Transport字节链等价于真实Unity物理和双客户端T45。
+
+
+## R6-A/B/C 首批正式直线战斗同步（代码交付，实机待验）
+- 常规PMDS1新局已从诊断计数替换成DS权威PMCombatSession；ServerSmoke保留诊断Probe路径。首批17英雄normal直线/5super直线，抛物线及无配置super明确拒，不偷偷换普通攻击。两端同一WeaponPlanner，不再旧客户端Total多画与DS PerShot不一致。
+- PMR3Player共12属性，其中新增CombatHeroId/TeamId/Hp/MaxHp/Dead/MatchEnded/WinnerTeamId公共，CombatMana/SuperEnergy OwnerOnly。客户端不写权威值。
+- 新RPC：ServerCombatAttackV1=42343，ServerCombatResultAckV1=50908，ClientCombatAttackResultV1=44706，ClientCombatMatchResultV1=39181，均Reliable且两Server入口ForceValidate+真实owner检查。Attack先于同activation所有R5 Spawn提交/处理，单次扣费，重复不翻判。全部旧ID不变，ProtocolHash=0xE6130FAA，必须最终同版本构建。
+- F普通/G大招，Mana90/energy200，正常耗蓝/分段回蓝、满能量大招、damage/2回能；现阶段firstkill结束（沿旧服规则），断线不再固定队伍1赢。DS锁结果后可靠下发并等待owner ACK或5s宽限，再Lobby.SubmitResult走既有Ack/Exited。客户端只接受经driver验证保存的terminal结果，正常关闭不误报Fail。
+- 客户端只读HUD显示HP/资源/真实拒绝理由和结果；特殊技能/道具/美术/摇杆/回放/旧链退出及实机仍后置，未伪造BattleReview。唯一状态与命令见主计划R6交付段。
+
+
+## 旧战斗运行链与协议实际删除
+- Server旧战斗8源码、Client旧同步/预测15源码、早期DS router2源码及对应meta已删除；匹配只新DS，HYLD_PMNET_DS旧开关无效，客户端只PMDS1，DS必须bootstrap，缺配置不回退。
+- proto从21 message/9 enum收缩为7/7，旧14消息和MoveType/AttackType删除；幸存大厅字段/枚举号原值不变，旧号/名reserved。4生成产物由真实protoc3.11.1+PMNetGen重生成，不手工删类；旧proto副本删除。
+- 旧BattleReview本地落盘/分发、ClearSence远端加载握手删除；加载面板保GUID作为纯本地UI，异步场景加载不等已不存在的服务端。
+- 4份旧测试/试玩资产精确移除两个已删组件的挂载，正式HYLDGame源、Remake Player与PMNet三产物哈希未变。其余素材绑定脚本/数据/第三方保留，不声称OldScripts目录全空。
+- Server/run_lobby.bat已改仓库相对本地开发默认配置，显式环境优先；--check-only只校路径不启动、不验证包新鲜。集中联调前必须重建Lobby/DS/Client，gitignored的旧DS包仍可能含退役分支，不能用旧包验删除。
+- 编译与自动回归结果见主计划；PMLegacyRetirementTest防旧类/协议/GUID复活。无提交、当前index未暂存本次改动。
+
+
+## RPC作者接口：单方法标记 + 编译后自动拆体
+业务直接写`[PMServerRpc(...)] public void ServerAttack(...) { ... }`并调用`player.ServerAttack(...)`。
+生成器产私有发送helper/接收器，PMNetWeaver自动把函数体搬到PMNet_RpcBody_*并改普通入口；不需Implementation/#if声明区/PMNet_调用前缀。
+既有13RPC/ID锁/参数布局/ProtocolHash0xE6130FAA不变；网络Validate与ForceValidate、归属校验及属性复制不改。
+.NET自动生成/编织已在真实沙盒冷/增量构建验证；Editor独立程序集自动化与Player脚本DLL阶段接线已编译，但真实Unity/IL2CPP仍后置，不能拿旧DS包验当前代码。
+
+
+## 复制属性自然C#接口（当前）
+PMReplicated auto-property支持普通赋值自动Push：只变化且Authority才标脏；客户端写本地副本不获得上行权威。
+Reader直接RawSet，复制层统一OnRep。Pure-property类与RPC类共用编织guard；现有PMR3Player12/PMR5Projectile1成员改同名自动属性，13属性/13RPC/协议0xE6130FAA与ID锁不变。
+PushBased=false现在真正进入轮询；不可见baseline/force/dirty不长期占预算、loss在预算顺延前记录、每连接轮转保证推进。数组同引用原地修改仍需手动Mark或Poll，不扩FastArray。

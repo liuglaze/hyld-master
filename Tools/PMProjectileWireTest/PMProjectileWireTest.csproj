@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><LangVersion>7.3</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems><ImplicitUsings>disable</ImplicitUsings><Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../Client/Assets/Scripts/PMProjectile/*.cs" />
+    <Compile Include="../../Client/Assets/Scripts/PMMover/PMMoverState.cs" />
+    <Compile Include="../../Client/Assets/Scripts/PMNet/PMNetIdentity.cs" />
+    <Compile Include="../../Client/Assets/Scripts/PMNet/PMNetRole.cs" />
+    <Compile Include="../../Client/Assets/Scripts/PMNet/PMNetReader.cs" />
+    <Compile Include="../../Client/Assets/Scripts/PMNet/PMNetWriter.cs" />
+    <Compile Include="../../Client/Assets/Scripts/PMNet/PMWireType.cs" />
+  </ItemGroup>
+</Project>

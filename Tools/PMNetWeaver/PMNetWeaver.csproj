@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      RPC 自然 C# 接口 / IL 编织工具（P1）。
+
+      职责：把「带 PMS*Rpc 标记的普通方法（直接写业务）」编译产物拆成
+        [公开入口 M] → (callspace) → [私有 PMNet_<M> 发送 helper] → 本地执行 [私有业务体 PMNet_RpcBody_<M>]
+      并为「收包 helper 的唯一业务调用」改指到同一份私有业务体，从而：
+        - 业务写普通名（`player.ServerAttack(...)`）也走网络入口；
+        - 收包路径不递归回自身；
+        - 只有结构完整验证的编织器才把 stamp 从 0 改成 1（未编织程序集在 new/注册处被 guard 拒绝）。
+
+      契约：Docs/plans/net-rpc-weaving-contract.md（唯一新冻结接口）。
+      本工程**只是工具**：Mono.Cecil 仅在此依赖，不进 Unity runtime / 不进游戏程序集。
+
+      离线可还原：Mono.Cecil 0.11.6 与仓库其它工具一致（见主计划 §9.5 的离线还原约束）。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>PMNetWeaver</AssemblyName>
+    <RootNamespace>PMNetWeaver</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mono.Cecil" Version="0.11.6" />
+  </ItemGroup>
+
+</Project>

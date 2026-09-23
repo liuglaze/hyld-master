@@ -5,6 +5,10 @@ package SocketProto;
 
 enum RequestCode
 {
+    // E1 旧战斗链退役：号码与名字保留占位，不可重用。
+    reserved 7, 8;
+    reserved "Battle", "ClearSence";
+
     RequestNone=0;
     User=1;
     Room=2;
@@ -12,12 +16,18 @@ enum RequestCode
     FriendRoom=4;
     PingPong=5;
     Matching=6;
-    Battle=7;
-    ClearSence=8;
 }
 
 enum ActionCode
 {
+    // E1 旧战斗链退役：31..41 为已删除的旧战斗/清场/回放/NetSim 动作，
+    // 号码与名字保留占位，不可重用（30 = StartEnterBattle 为大厅匹配所需，保留）。
+    reserved 31 to 41;
+    reserved "BattleReady", "BattleStart", "BattlePushDowmAllFrameOpeartions",
+        "BattlePushDowmPlayerOpeartions", "ClientSendClearSenceReady", "AllClearSenceReady",
+        "ClientSendGameOver", "BattlePushDowmGameOver", "BattleReview",
+        "BattlePushDownHitEvents", "BattleSetNetSimConfig";
+
     ActionNone=0;
     Logon=1;
     Login=2;
@@ -49,17 +59,6 @@ enum ActionCode
     AddMatchingPlayer=28;
     RemoveMatchingPlayer=29;
     StartEnterBattle=30;
-    BattleReady=31;
-    BattleStart=32;
-    BattlePushDowmAllFrameOpeartions=33;
-    BattlePushDowmPlayerOpeartions=34;
-    ClientSendClearSenceReady=35;
-    AllClearSenceReady=36;
-    ClientSendGameOver=37;
-    BattlePushDowmGameOver=38;
-    BattleReview=39;
-    BattlePushDownHitEvents=40;
-    BattleSetNetSimConfig=41;
 }
 
 enum ReturnCode
@@ -119,20 +118,12 @@ enum FightPattern
     Sheji=1;
 }
 
-enum MoveType
-{
-    NewMove=0;
-    OldMove=1;
-}
-
-enum AttackType
-{
-    Normal=0;
-    Super=1;
-}
-
 message MainPack
 {
+    // E1 旧战斗链退役：13 = battleInfo、15 = battle_net_sim_config，号码与名字保留占位。
+    reserved 13, 15;
+    reserved "battleInfo", "battle_net_sim_config";
+
     RequestCode requestcode=1;
     ActionCode actioncode=2;
     ReturnCode returncode=3;
@@ -145,9 +136,7 @@ message MainPack
     repeated PlayerPack playerspack=10;
     ChatPack chatpack=11;
     repeated BattlePlayerPack battleplayerpack=12;
-    BattleInfo battleInfo=13;
     int64 timestamp=14;
-    BattleNetSimConfig battle_net_sim_config=15;
     // 请求关联 ID（计划 P1 / B3）。
     // 0 表示非请求（服务端主动推送、广播、多播）；非 0 时回包会原样带回，
     // 供客户端做「回包匹配 + 超时重试去重」。这是 proto3 追加字段，旧端不受影响。
@@ -185,15 +174,6 @@ message BattlePlayerPack
     int32 battleid=6;
 }
 
-message BattleRoomPack
-{
-    string roomid=1;
-    int32 maxnum=2;
-    int32 curnum=3;
-    FightPattern fightpattern=4;
-    repeated BattlePlayerPack battleplayerpack=5;
-}
-
 message FriendRoomPack
 {
     string roomid=1;
@@ -212,141 +192,3 @@ message PlayerPack
     FightPattern fightpattern=6;
 }
 
-message BattleInfo
-{
-    int32 server_frame=1;
-    int32 rand_seed=2;
-    repeated BattlePlayerPack battle_users=3;
-    BattleClientInput client_input=10;
-    BattleServerUpdate server_update=20;
-}
-
-message BattleNetSimConfig
-{
-    int32 battle_player_id=1;
-    float drop_rate=2;
-    int32 delay_min_ms=3;
-    int32 delay_max_ms=4;
-}
-
-message BattleClientInput
-{
-    int32 battle_player_id=1;
-    int32 client_tick=2;
-    int32 acked_server_frame=3;
-    int32 rtt_ms=4;
-    repeated ClientMove moves=10;
-    repeated ClientAttack attacks=11;
-}
-
-message BattleServerUpdate
-{
-    repeated BattleFrame frames=1;
-    MoveAckResult move_ack=2;
-    repeated HitEvent hit_events=3;
-    int32 state_base_frame=4;
-    repeated AttackAck attack_acks=5;
-}
-
-message BattleFrame
-{
-    int32 server_frame=1;
-    repeated PlayerFrameInput player_inputs=2;
-    repeated AuthoritativePlayerState player_states=3;
-}
-
-message PlayerFrameInput
-{
-    int32 battle_player_id=1;
-    float move_x=2;
-    float move_y=3;
-    repeated ServerAttack attacks=4;
-}
-
-message ClientAttack
-{
-    int32 attack_id=1;
-    int32 attack_move_frame=2;
-    float toward_x=3;
-    float toward_y=4;
-    AttackType attack_type=5;
-}
-
-message ServerAttack
-{
-    int32 attack_id=1;
-    int32 attacker_battle_player_id=2;
-    int32 attack_move_frame=3;
-    int32 spawn_server_frame=4;
-    float toward_x=5;
-    float toward_y=6;
-    float spawn_pos_x=7;
-    float spawn_pos_y=8;
-    float spawn_pos_z=9;
-    AttackType attack_type=10;
-}
-
-message ClientMove
-{
-    int32 move_frame=1;
-    float move_x=2;
-    float move_y=3;
-    float predicted_pos_x=4;
-    float predicted_pos_y=5;
-    float predicted_pos_z=6;
-    MoveType move_type=7;
-    float predicted_vel_x=8;
-    float predicted_vel_y=9;
-    float predicted_vel_z=10;
-}
-
-message MoveAckResult
-{
-    int32 battle_id=1;
-    int32 acked_move_frame=2;
-    bool ack_good_move=3;
-    float correct_pos_x=4;
-    float correct_pos_y=5;
-    float correct_pos_z=6;
-    int32 frame_discrepancy=7;
-    bool resolving_frame_discrepancy=8;
-    float correct_vel_x=9;
-    float correct_vel_y=10;
-    float correct_vel_z=11;
-}
-
-message HitEvent
-{
-    int32 attack_id=1;
-    int32 attacker_battle_id=2;
-    int32 victim_battle_id=3;
-    int32 damage=4;
-    int32 hit_frame_id=5;
-    float hit_pos_x=6;
-    float hit_pos_y=7;
-    float hit_pos_z=8;
-    bool is_kill=9;
-}
-
-message AttackAck
-{
-    int32 battle_player_id=1;
-    int32 attack_id=2;
-    bool accepted=3;
-    int32 mana_after=4;
-    string reject_reason=5;
-    int32 super_energy_after=6;
-}
-
-message AuthoritativePlayerState
-{
-    int32 battle_id=1;
-    float pos_x=2;
-    float pos_y=3;
-    float pos_z=4;
-    int32 hp=5;
-    bool is_dead=6;
-    uint32 state_mask=7;
-    int32 mana=8;
-    int32 super_energy=9;
-}

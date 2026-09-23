@@ -14,14 +14,18 @@ namespace PMDeclCheck
     /// <summary>
     /// R2 声明门禁（契约：Docs/plans/net-r2-codegen-contract.md）。
     ///
-    /// 它断言四类东西：
+    /// 它断言五类东西：
     /// <list type="number">
     ///   <item>**正向**：夹具能扫出类/属性/RPC，且零错误（绝不允许"0 个文件被扫描"也算通过）；</item>
     ///   <item>**负向**：契约 §5 的 12 条规则**逐条**都有非法输入被真的抓到，
     ///         并打印每条规则的实际命中次数（含"源码夹具"与"注入模型"两个来源的拆分）；</item>
     ///   <item>**不变性**：契约 §2.3 的三条 —— 重排不变、二次生成零 diff、改名显式；</item>
     ///   <item>**产物保真**：生成物里嵌的 ID 与 IR 一致、RegisterAll 显式列出每个类且不扫反射、
-    ///         并且生成物与 PMNet 运行时**一起真的能编译**（C# 7.3 + netstandard2.0）。</item>
+    ///         并且生成物与 PMNet 运行时**一起真的能编译**（C# 7.3 + netstandard2.0）；</item>
+    ///   <item>**编织前置条件**：生成物必须是冻结格式 v1（private 发送 helper、版本/守卫 /
+    ///         实例 gate、BuildEntry 首句 Require、注册表两阶段），且扫描完整性门
+    ///         与规则 7 的“编织器不支持形态”逐项命中。
+    ///         这一组与 Tools/PMNetWeaverTest 互补：它看**文本形状**，编织测试看**真实 IL**。</item>
     /// </list>
     ///
     /// 临时工作区：`%TEMP%/PMDeclCheck`。每次运行先整块删除再重建，
@@ -117,6 +121,21 @@ namespace PMDeclCheck
 
             Section("12. RV5/RV6 生成分支：数组快照 / 入队前长度门 / 原生 Validate / 发射器 fail-closed");
             CheckRpcBranchCoverage(good);
+
+            Section("13. 冻结编织格式 v1：private 发送 helper / 版本 / Require / 实例 gate / BuildEntry 首句");
+            CheckFrozenWeaveFormat(good);
+
+            Section("14. 扫描完整性门：读取失败 / 语法错误不得产出假空注册表覆盖现有产物");
+            CheckScanIntegrityGate();
+
+            Section("15. 规则 7 补充：编织器不支持的方法形态逐项命中（Bad.cs）");
+            CheckWeaverUnsupportedShapes(badPath);
+
+            Section("16. 自动属性复制：helper 形态 / 字段兼容 / Reader 不回环 / 规则 14");
+            CheckAutoPropertyGeneration(good, badPath);
+
+            Section("17. 自动属性生成物在真实 C# 7.3 下可编译（新声明集的沙盒）");
+            CheckAutoPropertySandboxCompiles();
 
             return Summary();
         }
@@ -815,7 +834,7 @@ namespace PMDeclCheck
                 "未列出 " + notListed + " 个" + (firstNotListed != null ? "（首个 " + firstNotListed + "）" : string.Empty));
             Check("产物不含反射扫描（D-R0-48 / T40：运行不扫反射）", reflectionTokens == 0,
                 firstReflection ?? "未发现 System.Reflection / Activator / GetTypes / typeof 等记号");
-            Check("产物的 BCL 用法限于白名单（System.FormatException）", badSystemUsage == 0,
+            Check("产物的 BCL 用法限于白名单（System.FormatException / System.InvalidOperationException）", badSystemUsage == 0,
                 firstBadSystem ?? "无其它 System.* 用法");
         }
 
@@ -855,6 +874,26 @@ namespace PMDeclCheck
                 string tail = line.Substring(at + "System.".Length);
                 if (tail.StartsWith("FormatException", StringComparison.Ordinal))
                 {
+                    // 数组越界时抛。
+                    continue;
+                }
+
+                if (tail.StartsWith("InvalidOperationException", StringComparison.Ordinal))
+                {
+                    // 编制版本门（PMNet_RequireRpcWeave）在未编织时抛。
+                    // 这是冻结契约（net-rpc-weaving-contract.md §2）指定的异常类型，
+                    // 是生成物必须发射的一段代码，因此也属于白名单。
+                    continue;
+                }
+
+                if (tail.StartsWith("Collections.Generic.EqualityComparer", StringComparison.Ordinal))
+                {
+                    // 自动属性赋值 helper 的变化判定：
+                    // `!System.Collections.Generic.EqualityComparer<T>.Default.Equals(this.P, value)`。
+                    // 契约（net-property-authoring-contract.md §1）把变化判定钉为**编译期闭合**的
+                    // EqualityComparer<T>.Default（不是运行期反射扫描），T 就是属性类型。
+                    // 刻意写全限定名而不是依赖源文件的 using：生成的 partial 必须在任何
+                    // 业务源文件（含零 using 的文件）里都能编译。
                     continue;
                 }
 
@@ -1197,6 +1236,1059 @@ namespace PMDeclCheck
         private static string Detail(bool ok, string whenMissing)
         {
             return ok ? "已确认" : whenMissing;
+        }
+
+        // =================================================================================
+        //  13. 冻结编织格式 v1（生成物文本形状）
+        // =================================================================================
+
+        /// <summary>
+        /// 断言生成物已经是冻结格式 v1（契约 net-rpc-weaving-contract.md §2）。
+        ///
+        /// 为什么这一组必须在**生成器门禁**里：`Tools/PMNetWeaverTest` 已经有同一组断言，
+        /// 但它是拿真实生成物去**编译+编织**（依赖 dotnet build 与独立输出）。
+        /// 生成器自身的门禁必须能单独、廉价地拦住“发射器回退成 public 发送 helper /
+        /// 漏发版本门 / 守卫没读版本 / BuildEntry 没调守卫”这几类改动 ----
+        /// 否则这类回退只会在编织阶段（且只有真正跑过编织测试时）才暴露。
+        ///
+        /// 模板与 `Tools/PMNetWeaverTest/Fixture.GeneratedGuard.cs` 曾经手写的临时 partial
+        /// **逐字一致**；现在那段临时代码已删除，生成物本身就是模板。
+        /// </summary>
+        private static void CheckFrozenWeaveFormat(PMDeclScanResult scan)
+        {
+            List<PMGeneratedFile> files = PMDeclEmitter.EmitAll(scan.Model, scan.Facts);
+
+            string player = FindGenerated(files, "PMNet.PMNetFixtures.FixturePlayer.g.cs");
+            Check("找到 FixturePlayer 产物（编织格式的载体）", player != null,
+                "期望 PMNet.PMNetFixtures.FixturePlayer.g.cs");
+            if (player == null)
+            {
+                return;
+            }
+
+            string text = player.Replace("\r\n", "\n");
+
+            // --- 1. 发送 helper 必须 private（契约 §2 冻结格式；编织器会明确拒绝 public）---
+            Check("发送 helper 是 private（契约 §2：业务不再调用 PMNet_<M>，改调普通名 M）",
+                text.IndexOf("private void PMNet_Fire(int p0, float p1)", StringComparison.Ordinal) >= 0,
+                Detail(text.IndexOf("private void PMNet_Fire(int p0, float p1)", StringComparison.Ordinal) >= 0,
+                    "产物里找不到 private void PMNet_Fire(int p0, float p1)"));
+            Check("发送 helper 不再是 public",
+                text.IndexOf("public void PMNet_Fire(", StringComparison.Ordinal) < 0
+                && text.IndexOf("public void PMNet_Teleport(", StringComparison.Ordinal) < 0
+                && text.IndexOf("public void PMNet_PushValues(", StringComparison.Ordinal) < 0,
+                Detail(text.IndexOf("public void PMNet_Fire(", StringComparison.Ordinal) < 0,
+                    "产物里仍存在 public void PMNet_<M>（编织器会明确拒绝）"));
+
+            // --- 2. 版本方法：编译前必须返回 0（编制器改写它才是 1）---
+            bool versionShape = text.IndexOf("internal static int PMNet_GetRpcWeaveVersion()\n        {\n            return 0;\n        }",
+                StringComparison.Ordinal) >= 0;
+            Check("存在 PMNet_GetRpcWeaveVersion() 且编译前返回 0", versionShape,
+                Detail(versionShape, "产物里找不到「internal static int PMNet_GetRpcWeaveVersion() { return 0; }」"));
+
+            // --- 3. 守卫：真的读版本，且抛明确异常 ---
+            bool requireReadsVersion = text.IndexOf("private static int PMNet_RequireRpcWeave()", StringComparison.Ordinal) >= 0
+                && text.IndexOf("if (PMNet_GetRpcWeaveVersion() != 1)", StringComparison.Ordinal) >= 0;
+            Check("PMNet_RequireRpcWeave() 真的读取版本方法（防「假 guard 恒返回 1」）",
+                requireReadsVersion,
+                Detail(requireReadsVersion, "守卫没有读取 PMNet_GetRpcWeaveVersion()，或守卫本身缺失"));
+            bool throwsInvalidOp = text.IndexOf("throw new System.InvalidOperationException(", StringComparison.Ordinal) >= 0;
+            Check("PMNet_RequireRpcWeave() 未编织时抛 System.InvalidOperationException",
+                throwsInvalidOp,
+                Detail(throwsInvalidOp, "产物里找不到 throw new System.InvalidOperationException("));
+
+            // --- 4. 实例 gate：未编织时 new 也被拒（不只靠注册路径）---
+            bool gateField = text.IndexOf("private readonly int PMNet_rpcWeaveGate = PMNet_RequireRpcWeave();",
+                StringComparison.Ordinal) >= 0;
+            Check("实例 readonly gate 字段初始化调用 Require（正常 new 也被拒）", gateField,
+                Detail(gateField, "产物里找不到 private readonly int PMNet_rpcWeaveGate = PMNet_RequireRpcWeave();"));
+
+            // --- 5. PMNet_BuildEntry 的**第一条语句**是 Require ---
+            bool entryFirstStatement = text.IndexOf(PMDeclEmitterBuildEntryAnchor, StringComparison.Ordinal) >= 0;
+            Check("PMNet_BuildEntry 的第一条语句是 PMNet_RequireRpcWeave();", entryFirstStatement,
+                Detail(entryFirstStatement, "产物里找不到「PMNet_BuildEntry() { 换行 + Require」的冻结形态"));
+
+            // --- 6. 非「需编织」类不得带版本门（否则 BuildEntry 调不到 guard ⇒ 直接编译失败）---
+            //     需编织 = 含 RPC **或**含自动属性（自动属性开工后的语义扩展）。
+            string[] noRpcFiles = new string[]
+            {
+                "PMNet.PMNetFixtures.FixtureHud.g.cs",
+                "PMNet.PMNetFixtures.FixturePinned.g.cs",
+                "PMNet.PMNetFixtures.FixtureController.g.cs",
+            };
+
+            int noRpcChecked = 0;
+            int noRpcViolations = 0;
+            string firstViolation = null;
+            for (int i = 0; i < noRpcFiles.Length; i++)
+            {
+                string content = FindGenerated(files, noRpcFiles[i]);
+                if (content == null)
+                {
+                    continue;
+                }
+
+                noRpcChecked++;
+                if (content.IndexOf("PMNet_GetRpcWeaveVersion", StringComparison.Ordinal) >= 0
+                    || content.IndexOf("PMNet_rpcWeaveGate", StringComparison.Ordinal) >= 0
+                    || content.IndexOf("PMNet_RequireRpcWeave();", StringComparison.Ordinal) >= 0)
+                {
+                    noRpcViolations++;
+                    if (firstViolation == null)
+                    {
+                        firstViolation = noRpcFiles[i];
+                    }
+                }
+            }
+
+            Check("纯字段且无 RPC 的类不发射版本门（发射器按「有 RPC 或 有自动属性」区分）",
+                noRpcChecked >= 3 && noRpcViolations == 0,
+                "检查 " + noRpcChecked + " 个非需编织产物，越界 " + noRpcViolations + " 个"
+                + (firstViolation != null ? "（首个 " + firstViolation + "）" : string.Empty));
+
+            // 反向对照：**纯自动属性零 RPC** 的类必须带版本门。
+            // 否则未编织程序集里那个“抛异常的 RawSet 桩”会一直躺在编译产物里，
+            // 而 new 与注册都不会拒绝它 —— 正是本契约要堵的漏编织缺口。
+            string autoOnly = FindGenerated(files, "PMNet.PMNetFixtures.FixtureAutoPropOnly.g.cs");
+            bool autoOnlyGuarded = autoOnly != null
+                && autoOnly.IndexOf("internal static int PMNet_GetRpcWeaveVersion()", StringComparison.Ordinal) >= 0
+                && autoOnly.IndexOf("private readonly int PMNet_rpcWeaveGate = PMNet_RequireRpcWeave();",
+                    StringComparison.Ordinal) >= 0
+                && autoOnly.IndexOf(PMDeclEmitterBuildEntryAnchor, StringComparison.Ordinal) >= 0;
+            Check("纯自动属性零 RPC 的类也发射既有编织门（版本/实例 gate/BuildEntry 首句）",
+                autoOnlyGuarded,
+                Detail(autoOnlyGuarded,
+                    autoOnly == null
+                        ? "找不到 PMNet.PMNetFixtures.FixtureAutoPropOnly.g.cs"
+                        : "该产物缺少版本方法 / 实例 gate / BuildEntry 首句 Require"));
+
+            // --- 7. 注册表：先求值全部 BuildEntry，再 RegisterClass（不在任何 RegisterClass 前预检就会半注册）---
+            string registry = FindGenerated(files, PMDeclEmitter.RegistryFileName);
+            Check("找到注册表产物", registry != null, PMDeclEmitter.RegistryFileName);
+            if (registry == null)
+            {
+                return;
+            }
+
+            int lastBuildEntry = registry.LastIndexOf(".PMNet_BuildEntry();", StringComparison.Ordinal);
+            int firstRegister = registry.IndexOf("RegisterClass(", StringComparison.Ordinal);
+
+            Check("注册表：全部 BuildEntry 求值都在第一个 RegisterClass 之前（先预检再登记，不会半注册）",
+                lastBuildEntry >= 0 && firstRegister > lastBuildEntry,
+                "最后 BuildEntry 位置 " + lastBuildEntry + " / 第一个 RegisterClass 位置 " + firstRegister);
+
+            int buildEntryCalls = CountOccurrences(registry, ".PMNet_BuildEntry();");
+            Check("注册表显式列出每个类（BuildEntry 数 == 类数）",
+                buildEntryCalls == scan.Model.Classes.Count,
+                "BuildEntry " + buildEntryCalls + " 次 / 类 " + scan.Model.Classes.Count + " 个");
+        }
+
+        /// <summary>PMNet_BuildEntry 的冻结形态锚点（与 PMNetWeaverTest 的编织器预检同口径）。</summary>
+        private const string PMDeclEmitterBuildEntryAnchor =
+            "internal static PMNet.PMNetClassEntry PMNet_BuildEntry()\n        {\n            PMNet_RequireRpcWeave();";
+
+        private static string FindGenerated(List<PMGeneratedFile> files, string fileName)
+        {
+            for (int i = 0; i < files.Count; i++)
+            {
+                if (string.Equals(files[i].FileName, fileName, StringComparison.Ordinal))
+                {
+                    return files[i].Content;
+                }
+            }
+
+            return null;
+        }
+
+        private static int CountOccurrences(string text, string value)
+        {
+            int count = 0;
+            int index = 0;
+            while (true)
+            {
+                index = text.IndexOf(value, index, StringComparison.Ordinal);
+                if (index < 0)
+                {
+                    return count;
+                }
+
+                count++;
+                index += value.Length;
+            }
+        }
+
+        // =================================================================================
+        //  14. 扫描完整性门（读取失败 / 语法错误）
+        // =================================================================================
+
+        /// <summary>
+        /// 验证「不完整的扫描结果绝不允许被写成产物」。
+        ///
+        /// 两个来源：
+        ///   1. 读取失败（以前是“告警 + 跳过”，于是声明集静默少一部分）；
+        ///   2. 语法错误（以前只计数，同样不影响写盘）。
+        /// 两种情形下的 `--decl-gen` 都会写出**整套**产物（含注册表），因此必须硬失效。
+        ///
+        /// 真实沙箱：`%TEMP%/PMDeclCheck/integrity/**`，不写仓库。
+        /// </summary>
+        private static void CheckScanIntegrityGate()
+        {
+            // --- (a) 注入事实：读取失败 ---
+            PMDeclModel model = new PMDeclModel();
+            PMDeclRawFacts facts = new PMDeclRawFacts();
+            facts.ReadFailures.Add("sim-read.cs（模拟读取失败）");
+            PMDeclValidation.Validate(model, facts);
+
+            Check("读取失败被升级为声明错误（不再是只能跳过的告警）",
+                HasError(model.Errors, "扫描完整性") && HasError(model.Errors, "读取源文件失败"),
+                model.Errors.Count > 0 ? model.Errors[0] : "<无错误>");
+
+            bool threw = false;
+            string thrown = null;
+            try
+            {
+                PMDeclEmitter.EmitAll(new PMDeclModel(), facts);
+            }
+            catch (Exception ex)
+            {
+                threw = true;
+                thrown = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            Check("发射器 fail-closed：读取失败时 EmitAll 抛异常（不产出假空注册表）", threw,
+                threw ? "已确认：" + thrown : "EmitAll 没有抛异常，读取失败时仍会产出产物");
+
+            // --- (b) 注入事实：语法错误 ---
+            PMDeclModel syntaxModel = new PMDeclModel();
+            PMDeclRawFacts syntaxFacts = new PMDeclRawFacts();
+            syntaxFacts.SyntaxErrorCount = 3;
+            syntaxFacts.SyntaxErrorFiles.Add("sim-syntax.cs：CS1002（行 12）");
+            PMDeclValidation.Validate(syntaxModel, syntaxFacts);
+
+            Check("语法错误被升级为声明错误",
+                HasError(syntaxModel.Errors, "扫描完整性") && HasError(syntaxModel.Errors, "语法错误"),
+                syntaxModel.Errors.Count > 0 ? syntaxModel.Errors[0] : "<无错误>");
+
+            bool syntaxThrew = false;
+            string syntaxThrown = null;
+            try
+            {
+                PMDeclEmitter.EmitAll(new PMDeclModel(), syntaxFacts);
+            }
+            catch (Exception ex)
+            {
+                syntaxThrew = true;
+                syntaxThrown = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            Check("发射器 fail-closed：语法错误时 EmitAll 抛异常（不产出假空注册表）", syntaxThrew,
+                syntaxThrew ? "已确认：" + syntaxThrown : "EmitAll 没有抛异常，语法错误时仍会产出产物");
+
+            // --- (c) 真实沙箱：扫一个语法错的源文件 ---
+            string integrityDir = Path.Combine(_temp, "integrity");
+            Directory.CreateDirectory(integrityDir);
+            string brokenPath = Path.Combine(integrityDir, "Broken.cs");
+            File.WriteAllText(brokenPath,
+                "namespace Broken\n{\n    public class C\n    {\n        public void M() { int x = ; }\n    }\n}\n",
+                new UTF8Encoding(false));
+
+            PMDeclScanResult scanned = SafeScan(new List<string> { brokenPath }, new PMIdLock());
+            Check("真实沙箱：语法错的源文件被扫出语法错误",
+                scanned != null && scanned.Facts.SyntaxErrorCount > 0,
+                scanned == null ? "<扫描失败>" : ("SyntaxErrorCount=" + scanned.Facts.SyntaxErrorCount));
+
+            bool scannedBlocked = scanned != null && HasError(scanned.Model.Errors, "扫描完整性");
+            Check("真实沙箱：语法错误的扫描结果带扫描完整性错误（阻断生成）", scannedBlocked,
+                scanned != null && scanned.Model.Errors.Count > 0 ? scanned.Model.Errors[0] : "<无错误>");
+
+            if (scanned != null)
+            {
+                bool sandboxThrew = false;
+                string sandboxThrown = null;
+                try
+                {
+                    PMDeclEmitter.EmitAll(scanned.Model, scanned.Facts);
+                }
+                catch (Exception ex)
+                {
+                    sandboxThrew = true;
+                    sandboxThrown = ex.GetType().Name + ": " + ex.Message;
+                }
+
+                Check("真实沙箱：语法错误的扫描结果不能发射产物", sandboxThrew,
+                    sandboxThrew ? "已确认：" + sandboxThrown : "EmitAll 仍然发射了产物");
+            }
+
+            Console.WriteLine("      沙箱目录：" + integrityDir);
+
+            // --- (d) 读取失败的真实路径（Windows：用 FileShare.None 独占锁住源文件）---
+            if (Environment.OSVersion.Platform != PlatformID.Win32NT)
+            {
+                Console.WriteLine("      [NOTE] 非 Windows：跳过 FileShare.None 独占锁读取失败用例"
+                    + "（该文件共享语义是 Windows 特有的，本仓库与门禁均为 Windows 环境）。");
+                return;
+            }
+
+            string lockedPath = Path.Combine(integrityDir, "Locked.cs");
+            File.WriteAllText(lockedPath,
+                "namespace Locked\n{\n    [PMNet.PMNetworkObject]\n    public partial class L : PMNet.PMNetObject { }\n}\n",
+                new UTF8Encoding(false));
+
+            using (FileStream exclusive = new FileStream(lockedPath, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                PMDeclScanResult locked = SafeScan(new List<string> { lockedPath }, new PMIdLock());
+                Check("真实沙箱：独占锁住的源文件被记为读取失败",
+                    locked != null && locked.Facts.ReadFailures.Count > 0,
+                    locked == null ? "<扫描失败>" : ("ReadFailures=" + locked.Facts.ReadFailures.Count));
+
+                bool lockedBlocked = locked != null && HasError(locked.Model.Errors, "扫描完整性");
+                Check("真实沙箱：读取失败的扫描结果带扫描完整性错误（阻断生成）", lockedBlocked,
+                    locked != null && locked.Model.Errors.Count > 0 ? locked.Model.Errors[0] : "<无错误>");
+            }
+        }
+
+        private static bool HasError(List<string> errors, string keyword)
+        {
+            for (int i = 0; i < errors.Count; i++)
+            {
+                if (errors[i] != null && errors[i].IndexOf(keyword, StringComparison.Ordinal) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // =================================================================================
+        //  15. 规则 7 补充：编织器不支持的方法形态
+        // =================================================================================
+
+        /// <summary>
+        /// 逐项断言“编织器明确拒绝的形态”在**声明期**就被抓到。
+        ///
+        /// 判据是**逐条关键词**而不是“规则 7 命中数 > 0”：
+        /// 规则 7 本来就有 static / 非 void 两个老用例，如果只数条数，
+        /// 新增的八项即使一项不生效也会因为老用例而变绿。
+        /// </summary>
+        private static void CheckWeaverUnsupportedShapes(string badPath)
+        {
+            PMDeclScanResult bad = SafeScan(new List<string> { badPath }, new PMIdLock());
+            if (bad == null)
+            {
+                Check("规则 7 补充用例可扫描", false, badPath);
+                return;
+            }
+
+            string[] keywords = new string[]
+            {
+                "不得有同名重载",
+                "不得带多个 RPC 标记",
+                "不得是 virtual",
+                "不得是 abstract",
+                "不得是 extern/native",
+                "不得是 async",
+                "不得是泛型方法",
+                "必须有方法体",
+                "形参不支持",
+            };
+
+            for (int i = 0; i < keywords.Length; i++)
+            {
+                Check("规则 7 命中：" + keywords[i], HasError(bad.Model.Errors, keywords[i]),
+                    Detail(HasError(bad.Model.Errors, keywords[i]),
+                        "Bad.cs 的错误里没有含「" + keywords[i] + "」的条目（该形态未被拦下）"));
+            }
+
+            // 负向对照：这九项必须**全部**来自规则 7（不能是别的规则凑出来的）。
+            int rule7 = 0;
+            for (int i = 0; i < bad.Model.Errors.Count; i++)
+            {
+                string e = bad.Model.Errors[i];
+                if (e != null && e.StartsWith("[规则 7] ", StringComparison.Ordinal))
+                {
+                    rule7++;
+                }
+            }
+
+            Check("规则 7（含补充形态）至少命中 10 条（老 2 条 + 新 8 条以上）", rule7 >= 10,
+                "规则 7 命中 " + rule7 + " 条");
+
+            // 参数修饰的五个形态各自至少一条（ref/out/in/params/default）。
+            string[] modifiers = new string[] { "（ref）", "（out）", "（in）", "（params）", "（default）" };
+            for (int i = 0; i < modifiers.Length; i++)
+            {
+                Check("规则 7 命中形参修饰：" + modifiers[i], HasError(bad.Model.Errors, modifiers[i]),
+                    Detail(HasError(bad.Model.Errors, modifiers[i]),
+                        "Bad.cs 的错误里没有形参修饰「" + modifiers[i] + "」"));
+            }
+        }
+
+        // =================================================================================
+        //  16. 自动属性复制（契约 net-property-authoring-contract.md）
+        // =================================================================================
+
+        /// <summary>
+        /// 自动属性复制的生成物门禁。
+        ///
+        /// 与「冻结编织格式」那一节的分工：那一节看 **RPC 侧**的形状，本节点看 **属性侧**：
+        ///   · 三个成员是否按契约 §2 发射（槽位常量 / RawSet 抛异常桩 / PropertySet 冻结语义）；
+        ///   · 旧 public PMNet_Set&lt;P&gt; 对自动属性是否**仅转发赋值**（不重复标脏），
+        ///     对字段是否**仍带标脏**（字段兼容不得回退）；
+        ///   · 生成物的收包 Reader 是否只走 RawSet（**不回环**，不得走 setter / PropertySet）；
+        ///   · PushBased=false 的 helper 是否不读 HasAuthority、不标脏；
+        ///   · 发射器在不支持形态上是否 fail-closed；
+        ///   · 规则 14 的每一种不支持形态是否真的被拦下（逐关键词 + 逐属性名）。
+        ///
+        /// 为什么不只看文本存在性：这一组每个断言都钉在**具体属性**的产物片段上，
+        /// 避免“另一个属性凑合命中”造成假绿。
+        /// </summary>
+        private static void CheckAutoPropertyGeneration(PMDeclScanResult scan, string badPath)
+        {
+            List<PMGeneratedFile> files = PMDeclEmitter.EmitAll(scan.Model, scan.Facts);
+
+            PMDeclClass pure = FindClass(scan.Model, "PMNetFixtures.FixtureAutoPropOnly");
+            PMDeclClass mixed = FindClass(scan.Model, "PMNetFixtures.FixtureAutoPropMixed");
+            PMDeclClass player = FindClass(scan.Model, "PMNetFixtures.FixturePlayer");
+
+            Check("找到纯自动属性类 FixtureAutoPropOnly", pure != null, "PMNetFixtures.FixtureAutoPropOnly");
+            Check("找到自动属性 + RPC 混合类 FixtureAutoPropMixed", mixed != null, "PMNetFixtures.FixtureAutoPropMixed");
+            Check("找到字段旧模式类 FixturePlayer", player != null, "PMNetFixtures.FixturePlayer");
+            if (pure == null || mixed == null || player == null)
+            {
+                return;
+            }
+
+            string pureText = FindGenerated(files, PMDeclEmitter.FileNameFor(pure));
+            string mixedText = FindGenerated(files, PMDeclEmitter.FileNameFor(mixed));
+            string playerText = FindGenerated(files, PMDeclEmitter.FileNameFor(player));
+
+            Check("纯自动属性类产物存在", pureText != null, PMDeclEmitter.FileNameFor(pure));
+            Check("混合类产物存在", mixedText != null, PMDeclEmitter.FileNameFor(mixed));
+            Check("字段旧模式类产物存在", playerText != null, PMDeclEmitter.FileNameFor(player));
+            if (pureText == null || mixedText == null || playerText == null)
+            {
+                return;
+            }
+
+            int pureBase = IndexBaseOf(scan.Facts, pure);
+
+            // ---- 1. 槽位常量（冻结接口第一项）----
+            int hpSlot = PropertyIndexValue(pure, pureBase, "Hp");
+            int armorSlot = PropertyIndexValue(pure, pureBase, "Armor");
+            int pingSlot = PropertyIndexValue(pure, pureBase, "PingMs");
+
+            Check("自动属性发射 public const int PMGeneratedPropertyIndex_<P>（值 = indexBase + 槽位）",
+                hpSlot >= 0
+                && HasTrimmedLine(pureText, "public const int PMGeneratedPropertyIndex_Hp = " + hpSlot + ";")
+                && HasTrimmedLine(pureText, "public const int PMGeneratedPropertyIndex_Armor = " + armorSlot + ";"),
+                "期望 PMGeneratedPropertyIndex_Hp = " + hpSlot + "、PMGeneratedPropertyIndex_Armor = " + armorSlot);
+
+            Check("每个自动属性都有槽位常量（无遗漏）",
+                CountAutoPropertiesMissingIndexConst(pure, pureText, pureBase) == 0,
+                "缺失 " + CountAutoPropertiesMissingIndexConst(pure, pureText, pureBase) + " 个");
+
+            // ---- 2. RawSet 抛异常桩（编织点）----
+            string rawStub = ExtractMethodText(pureText, "private void PMNet_PropertyRawSet_Hp(int value)");
+            bool rawStubOk = rawStub != null
+                && HasTrimmedLine(rawStub,
+                    "throw new System.InvalidOperationException(\"PMNet property has not been woven\");")
+                && CountStatementLines(rawStub) == 1;
+            Check("RawSet 是「抛 System.InvalidOperationException 的未编织桩」（且桩体只有一条语句）",
+                rawStubOk,
+                Detail(rawStubOk,
+                    rawStub == null
+                        ? "找不到 private void PMNet_PropertyRawSet_Hp(int value)"
+                        : "桩体不是「单条 throw 语句」（语句行数 " + CountStatementLines(rawStub) + "）"));
+
+            // ---- 3. PropertySet 冻结语义（changed / RawSet / Authority / 标脏）----
+            string hpSet = ExtractMethodText(pureText, "private void PMNet_PropertySet_Hp(int value)");
+            Check("PropertySet 存在", hpSet != null, "private void PMNet_PropertySet_Hp(int value)");
+            if (hpSet != null)
+            {
+                Check("PropertySet：变化判定用编译期闭合的 EqualityComparer<int>.Default",
+                    HasTrimmedLine(hpSet,
+                        "bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this.Hp, value);"),
+                    Detail(HasTrimmedLine(hpSet,
+                        "bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this.Hp, value);"),
+                        "找不到冻结的 changed 行"));
+
+                Check("PropertySet：总是存入新值（RawSet(value) 无条件在分支外）",
+                    HasTrimmedLine(hpSet, "PMNet_PropertyRawSet_Hp(value);"),
+                    Detail(HasTrimmedLine(hpSet, "PMNet_PropertyRawSet_Hp(value);"),
+                        "找不到无条件的 PMNet_PropertyRawSet_Hp(value);"));
+
+                Check("PropertySet：仅 PushBased=true 且 changed && HasAuthority 才标脏（本属性自己的槽位）",
+                    HasTrimmedLine(hpSet, "if (pmChanged && HasAuthority)")
+                    && HasTrimmedLine(hpSet, "MarkPropertyDirty(PMGeneratedPropertyIndex_Hp);"),
+                    Detail(HasTrimmedLine(hpSet, "if (pmChanged && HasAuthority)")
+                        && HasTrimmedLine(hpSet, "MarkPropertyDirty(PMGeneratedPropertyIndex_Hp);"),
+                        "找不到 `if (pmChanged && HasAuthority)` 或本属性的槽位标脏"));
+            }
+
+            // ---- 3b. PushBased=false：不读 HasAuthority、不标脏 ----
+            string pollSet = ExtractMethodText(pureText, "private void PMNet_PropertySet_PingMs(uint value)");
+            Check("PushBased=false 的 PropertySet 存在", pollSet != null,
+                "private void PMNet_PropertySet_PingMs(uint value)");
+            if (pollSet != null)
+            {
+                bool pollClean = !pollSet.Contains("HasAuthority")
+                    && pollSet.IndexOf("MarkPropertyDirty", StringComparison.Ordinal) < 0;
+                Check("PushBased=false：完全不读 HasAuthority / 不标脏（编织器逐条核对）",
+                    pollClean,
+                    Detail(pollClean, "PushBased=false 的 helper 里出现了 HasAuthority 或 MarkPropertyDirty"));
+
+                bool pollKeepsChangedAndRawSet =
+                    HasTrimmedLine(pollSet,
+                        "bool pmChanged = !System.Collections.Generic.EqualityComparer<uint>.Default.Equals(this.PingMs, value);")
+                    && HasTrimmedLine(pollSet, "PMNet_PropertyRawSet_PingMs(value);");
+                Check("PushBased=false：仍发射 changed + RawSet 两行（契约 §2）",
+                    pollKeepsChangedAndRawSet,
+                    Detail(pollKeepsChangedAndRawSet, "PushBased=false 的 helper 缺少 changed 或 RawSet"));
+            }
+
+            // ---- 4. 旧 public PMNet_Set<P>：自动属性仅转发赋值，不重复标脏 ----
+            string hpLegacySet = ExtractMethodText(pureText, "public void PMNet_SetHp(int value)");
+            Check("PMNet_SetHp 对自动属性仅普通赋值（不重复 MarkPropertyDirty）",
+                hpLegacySet != null && HasTrimmedLine(hpLegacySet, "Hp = value;")
+                && hpLegacySet.IndexOf("MarkPropertyDirty", StringComparison.Ordinal) < 0,
+                Detail(hpLegacySet != null && HasTrimmedLine(hpLegacySet, "Hp = value;")
+                       && hpLegacySet.IndexOf("MarkPropertyDirty", StringComparison.Ordinal) < 0,
+                    hpLegacySet == null ? "找不到 PMNet_SetHp" : "PMNet_SetHp 里仍带 MarkPropertyDirty 或没有赋值"));
+
+            // ---- 5. 字段兼容：旧模式一字不改 ----
+            int playerBase = IndexBaseOf(scan.Facts, player);
+            int hpFieldSlot = PropertyIndexValue(player, playerBase, "_hp");
+            string fieldLegacySet = ExtractMethodText(playerText, "public void PMNet_Set_hp(int value)");
+            bool fieldLegacyOk = fieldLegacySet != null && HasTrimmedLine(fieldLegacySet, "_hp = value;")
+                && HasTrimmedLine(fieldLegacySet, "MarkPropertyDirty(" + hpFieldSlot + ");");
+            Check("字段旧模式：PMNet_Set_hp 仍赋值 + MarkPropertyDirty（兼容不得回退）",
+                fieldLegacyOk,
+                Detail(fieldLegacyOk,
+                    fieldLegacySet == null
+                        ? "找不到 PMNet_Set_hp"
+                        : "PMNet_Set_hp 丢了标脏或赋值（期望 _hp = value; 与 MarkPropertyDirty("
+                          + hpFieldSlot + ");）"));
+
+            Check("字段旧模式：不发射自动属性三件套（RawSet / PropertySet / 槽位常量）",
+                playerText.IndexOf("PMNet_PropertyRawSet_", StringComparison.Ordinal) < 0
+                && playerText.IndexOf("PMNet_PropertySet_", StringComparison.Ordinal) < 0
+                && playerText.IndexOf("PMGeneratedPropertyIndex_", StringComparison.Ordinal) < 0,
+                Detail(playerText.IndexOf("PMNet_PropertyRawSet_", StringComparison.Ordinal) < 0
+                       && playerText.IndexOf("PMNet_PropertySet_", StringComparison.Ordinal) < 0,
+                    "字段产物里出现了自动属性专有成员"));
+
+            // ---- 6. Reader 不回环（收包只走 RawSet）----
+            int autoReaders = 0;
+            int readerViolations = 0;
+            int readerMissing = 0;
+            int fieldReaders = 0;
+            int fieldReaderViolations = 0;
+            int rawStubViolations = 0;
+            string firstReaderProblem = null;
+
+            for (int ci = 0; ci < scan.Model.Classes.Count; ci++)
+            {
+                PMDeclClass cls = scan.Model.Classes[ci];
+                string text = FindGenerated(files, PMDeclEmitter.FileNameFor(cls));
+                if (text == null)
+                {
+                    continue;
+                }
+
+                for (int pi = 0; pi < cls.Properties.Count; pi++)
+                {
+                    PMDeclProperty p = cls.Properties[pi];
+                    string member = p.MemberName;
+
+                    if (!p.IsField)
+                    {
+                        autoReaders++;
+                        string reader = ExtractMethodText(text,
+                            "private static void PMNet_Read_" + member + "(PMNet.PMNetObject t, PMNet.PMNetReader r)");
+                        if (reader == null)
+                        {
+                            readerMissing++;
+                            if (firstReaderProblem == null)
+                            {
+                                firstReaderProblem = cls.QualifiedName + "." + member + "：找不到 PMNet_Read_" + member;
+                            }
+
+                            continue;
+                        }
+
+                        bool callsRawSet = reader.IndexOf("PMNet_PropertyRawSet_" + member + "(", StringComparison.Ordinal) >= 0;
+                        bool callsSetter = reader.IndexOf("self." + member + " =", StringComparison.Ordinal) >= 0;
+                        bool callsPropertySet = reader.IndexOf("PMNet_PropertySet_" + member + "(", StringComparison.Ordinal) >= 0;
+                        if (!callsRawSet || callsSetter || callsPropertySet)
+                        {
+                            readerViolations++;
+                            if (firstReaderProblem == null)
+                            {
+                                firstReaderProblem = cls.QualifiedName + "." + member
+                                    + "：RawSet=" + callsRawSet + " / 普通赋值=" + callsSetter
+                                    + " / 赋值 helper=" + callsPropertySet;
+                            }
+                        }
+
+                        string stub = ExtractMethodText(text,
+                            "private void PMNet_PropertyRawSet_" + member + "(" + p.TypeName + " value)");
+                        if (stub == null
+                            || !HasTrimmedLine(stub,
+                                "throw new System.InvalidOperationException(\"PMNet property has not been woven\");"))
+                        {
+                            rawStubViolations++;
+                        }
+                    }
+                    else
+                    {
+                        fieldReaders++;
+                        string reader = ExtractMethodText(text,
+                            "private static void PMNet_Read_" + member + "(PMNet.PMNetObject t, PMNet.PMNetReader r)");
+                        if (reader == null || reader.IndexOf("self." + member + " =", StringComparison.Ordinal) < 0)
+                        {
+                            fieldReaderViolations++;
+                            if (firstReaderProblem == null)
+                            {
+                                firstReaderProblem = cls.QualifiedName + "." + member + "：字段 Reader 不是直接写成员";
+                            }
+                        }
+                    }
+                }
+            }
+
+            Check("自动属性的收包 Reader：先解码到局部值、再只调 RawSet（不回环、不走 setter）",
+                autoReaders > 0 && readerViolations == 0 && readerMissing == 0,
+                "自动属性 Reader " + autoReaders + " 个，违规 " + readerViolations + " 个，缺失 "
+                + readerMissing + " 个" + (firstReaderProblem != null ? "；首个：" + firstReaderProblem : string.Empty));
+
+            Check("自动属性的每一个 RawSet 都是未编织抛异常桩（无漏发 / 无自带实现）",
+                rawStubViolations == 0, "违规 " + rawStubViolations + " 个");
+
+            Check("字段旧模式的 Reader 仍是直接写成员（兼容不得回退）",
+                fieldReaders > 0 && fieldReaderViolations == 0,
+                "字段 Reader " + fieldReaders + " 个，违规 " + fieldReaderViolations + " 个");
+
+            // ---- 7. PCond / 注册表：自动属性用槽位常量注册 ----
+            bool registeredByConst = pureText.IndexOf("outProps.Add(PMGeneratedPropertyIndex_Hp,",
+                StringComparison.Ordinal) >= 0;
+            Check("CollectLifetimeReplicatedProps 对自动属性用槽位常量注册（与 MarkPropertyDirty 同源）",
+                registeredByConst,
+                Detail(registeredByConst, "找不到以 PMGeneratedPropertyIndex_Hp 为参数的 outProps.Add"));
+
+            // ---- 8. 混合类：RPC 与属性共用同一套编织门 ----
+            bool mixedOk = mixedText.IndexOf("private void PMNet_Reload(int p0)", StringComparison.Ordinal) >= 0
+                && mixedText.IndexOf("private void PMNet_PropertyRawSet_CombatHp(int value)", StringComparison.Ordinal) >= 0
+                && mixedText.IndexOf("PMNet_PropertySet_CombatHp", StringComparison.Ordinal) >= 0;
+            Check("混合类（RPC + 自动属性）同时发射 RPC helper 与自动属性 helper",
+                mixedOk, Detail(mixedOk, "混合类产物缺少 RPC 或属性 helper"));
+
+            // ---- 9. 发射器 fail-closed：属性无形态事实 ----
+            PMDeclModel brokenModel = new PMDeclModel();
+            PMDeclRawFacts brokenFacts = new PMDeclRawFacts();
+            PMDeclClass brokenClass = new PMDeclClass();
+            brokenClass.Namespace = "Injected";
+            brokenClass.TypeName = "NoShapeFact";
+            brokenClass.StableKey = "CLASS:Injected.NoShapeFact";
+            brokenClass.ClassId = 7777u;
+            brokenClass.IsPartial = true;
+            brokenClass.BaseTypeName = "PMNetObject";
+            PMDeclProperty brokenProp = new PMDeclProperty();
+            brokenProp.MemberName = "Value";
+            brokenProp.TypeName = "int";
+            brokenProp.PropertyId = 3;
+            brokenProp.MaskOffset = 0;
+            brokenProp.MaskBitCount = 1;
+            brokenProp.IsField = false; // 属性，但没有任何形态事实
+            brokenClass.Properties.Add(brokenProp);
+            brokenClass.ChangeMaskBitCount = 1;
+            brokenModel.Classes.Add(brokenClass);
+
+            bool propThrew = false;
+            string propThrown = null;
+            try
+            {
+                PMDeclEmitter.EmitAll(brokenModel, brokenFacts);
+            }
+            catch (Exception ex)
+            {
+                propThrew = true;
+                propThrown = ex.GetType().Name + ": " + ex.Message;
+            }
+
+            Check("发射器 fail-closed：属性无声明形态事实 ⇒ EmitAll 拒绝发射（不产出会静默写错的产物）",
+                propThrew, propThrew ? "已确认：" + propThrown
+                    : "EmitAll 没有抛异常 —— 未校验形态的属性被直接发射了");
+
+            // ---- 10. 规则 14：每种不支持形态都被拦下（逐关键词 + 逐属性名）----
+            PMDeclScanResult bad = SafeScan(new List<string> { badPath }, new PMIdLock());
+            if (bad == null)
+            {
+                Check("规则 14 用例可扫描", false, badPath);
+                return;
+            }
+
+            // 负例必须是**语法成立**的 C# 7.3：拒绝来自形态规则，而不是解析噪声。
+            // （显式用 CSharp7_3 再解析一次，而不是只信扫描器的 LanguageVersion.Latest。）
+            SyntaxTree badTree = CSharpSyntaxTree.ParseText(File.ReadAllText(badPath),
+                new CSharpParseOptions(LanguageVersion.CSharp7_3), "Bad.cs");
+            int badSyntaxErrors = 0;
+            foreach (Diagnostic d in badTree.GetDiagnostics())
+            {
+                if (d.Severity == DiagnosticSeverity.Error)
+                {
+                    badSyntaxErrors++;
+                }
+            }
+
+            Check("规则 14 的负例是语法成立的 C# 7.3（拒绝来自形态规则，而不是解析噪声）",
+                badSyntaxErrors == 0 && bad.Facts.SyntaxErrorCount == 0,
+                "CSharp7_3 解析错误 " + badSyntaxErrors + " 个 / 扫描器语法错误 "
+                + bad.Facts.SyntaxErrorCount + " 处");
+
+            string[][] rule14Cases =
+            {
+                new string[] { "自定义 getter", "BadPropShapes.CustomAccessors" },
+                new string[] { "自定义 setter", "BadPropShapes.CustomAccessors" },
+                new string[] { "只读（没有 set 访问器）", "BadPropShapes.ReadOnlyProp" },
+                new string[] { "表达式体属性", "BadPropShapes.ExpressionBodiedProp" },
+                new string[] { "没有 get 访问器", "BadPropShapes.WriteOnlyProp" },
+                new string[] { "indexer", "BadPropIndexer.this[]" },
+                new string[] { "virtual/override/abstract", "BadPropVirtual.VirtualProp" },
+                new string[] { "virtual/override/abstract", "BadPropAbstract.AbstractProp" },
+                new string[] { "virtual/override/abstract", "BadPropOverride.Overridable" },
+                new string[] { "ref-return", "BadPropRefReturn.RefReturnProp" },
+                new string[] { "显式接口实现", "BadPropExplicitInterface.Value" },
+            };
+
+            for (int i = 0; i < rule14Cases.Length; i++)
+            {
+                string keyword = rule14Cases[i][0];
+                string member = rule14Cases[i][1];
+                bool hit = HasRule14Error(bad.Model.Errors, keyword, member);
+                Check("规则 14 命中：" + keyword + "（" + member + "）", hit,
+                    Detail(hit, "Bad.cs 的错误里没有同时含「" + keyword + "」与「" + member + "」的条目"));
+            }
+
+            Check("规则 14 命中：标记在不支持的成员种类上（event）",
+                HasRule14Error(bad.Model.Errors, "声明位置不支持", "BadReplicatedOnEvent.SomethingChanged"),
+                Detail(HasRule14Error(bad.Model.Errors, "声明位置不支持", "BadReplicatedOnEvent.SomethingChanged"),
+                    "Bad.cs 的 event 用例未被拦下（静默漏扫）"));
+
+            Check("规则 14 命中：量化器单独写在 event 上",
+                HasRule14Error(bad.Model.Errors, "声明位置不支持", "BadReplicatedOnEvent.AnotherChanged"),
+                Detail(HasRule14Error(bad.Model.Errors, "声明位置不支持", "BadReplicatedOnEvent.AnotherChanged"),
+                    "[PMQuantized] 单独标在 event 上未被拦下"));
+
+            // static 属性由**规则 3** 拦下（规则 14 刻意不重复报，避免同一问题两条错误）。
+            // 这里钉住“它確實被拦下了”，而不是只信“某条规则会报”。
+            Check("规则 3 命中：static 属性（规则 14 不重复报）",
+                HasError(bad.Model.Errors, "[规则 3]") && HasError(bad.Model.Errors, "StaticProp"),
+                Detail(HasError(bad.Model.Errors, "StaticProp"),
+                    "BadPropShapes.StaticProp 未被规则 3 拦下"));
+
+            Check("规则 14 命中：嵌套类型的成员声明（静默漏扫的一份）",
+                HasRule14Error(bad.Model.Errors, "嵌套类型", "BadNestedHost.NestedReplicated.Mana")
+                && HasRule14Error(bad.Model.Errors, "嵌套类型", "BadNestedHost.NestedNetworkObject.Hp"),
+                Detail(HasRule14Error(bad.Model.Errors, "嵌套类型", "BadNestedHost.NestedReplicated.Mana")
+                       && HasRule14Error(bad.Model.Errors, "嵌套类型", "BadNestedHost.NestedNetworkObject.Hp"),
+                    "嵌套类型里的 [PMReplicated] 未被拦下（静默漏扫）"));
+
+            Check("规则 1 命中：嵌套类型上的 [PMNetworkObject]",
+                HasError(bad.Model.Errors, "[规则 1]") && HasError(bad.Model.Errors, "不得标注在**嵌套类型**上")
+                && HasError(bad.Model.Errors, "BadNestedHost.NestedNetworkObject"),
+                Detail(HasError(bad.Model.Errors, "不得标注在**嵌套类型**上"),
+                    "嵌套类型上的 [PMNetworkObject] 未被拦下"));
+
+            int rule14Hits = 0;
+            for (int i = 0; i < bad.Model.Errors.Count; i++)
+            {
+                if (bad.Model.Errors[i] != null && bad.Model.Errors[i].StartsWith("[规则 14] ", StringComparison.Ordinal))
+                {
+                    rule14Hits++;
+                }
+            }
+
+            Check("规则 14 至少命中 11 条（每种不支持形态各至少一条）", rule14Hits >= 11,
+                "规则 14 命中 " + rule14Hits + " 条");
+
+            // ---- 11. BCL 白名单没被放水（负向自测）----
+            string allowedComparer = FindUnexpectedSystemUsage(
+                "            bool pmChanged = !System.Collections.Generic.EqualityComparer<int>.Default.Equals(this.Hp, value);");
+            string rejectedOther = FindUnexpectedSystemUsage(
+                "            System.Console.WriteLine(1);");
+            Check("BCL 白名单：EqualityComparer<T>.Default 被允许（自动属性语义要求）",
+                allowedComparer == null, Detail(allowedComparer == null, "误报为：" + (allowedComparer ?? "<无>")));
+            Check("BCL 白名单负向自测：其它 System.* 用法仍被拒（白名单没被放水）",
+                rejectedOther != null,
+                Detail(rejectedOther != null, "System.Console.WriteLine 未被拒绝 —— 白名单变成了“允许一切”"));
+        }
+
+        /// <summary>在错误集合里找同时含关键词与属性名、且带 [规则 14] 前缀的条目。</summary>
+        private static bool HasRule14Error(List<string> errors, string keyword, string member)
+        {
+            for (int i = 0; i < errors.Count; i++)
+            {
+                string e = errors[i];
+                if (e == null || !e.StartsWith("[规则 14] ", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (e.IndexOf(keyword, StringComparison.Ordinal) >= 0
+                    && e.IndexOf(member, StringComparison.Ordinal) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static PMDeclClass FindClass(PMDeclModel model, string qualifiedName)
+        {
+            for (int i = 0; i < model.Classes.Count; i++)
+            {
+                if (string.Equals(model.Classes[i].QualifiedName, qualifiedName, StringComparison.Ordinal))
+                {
+                    return model.Classes[i];
+                }
+            }
+
+            return null;
+        }
+
+        private static int IndexBaseOf(PMDeclRawFacts facts, PMDeclClass cls)
+        {
+            int value;
+            if (facts.PropertyIndexBase.TryGetValue(PMDeclScanner.KeyOf(cls), out value))
+            {
+                return value;
+            }
+
+            return 0;
+        }
+
+        /// <summary>某个属性的槽位值（= 基址 + 类内下标）；属性不存在时返回 -1。</summary>
+        private static int PropertyIndexValue(PMDeclClass cls, int indexBase, string memberName)
+        {
+            for (int i = 0; i < cls.Properties.Count; i++)
+            {
+                if (string.Equals(cls.Properties[i].MemberName, memberName, StringComparison.Ordinal))
+                {
+                    return indexBase + i;
+                }
+            }
+
+            return -1;
+        }
+
+        private static int CountAutoPropertiesMissingIndexConst(PMDeclClass cls, string text, int indexBase)
+        {
+            int missing = 0;
+            for (int i = 0; i < cls.Properties.Count; i++)
+            {
+                PMDeclProperty p = cls.Properties[i];
+                if (p.IsField)
+                {
+                    continue;
+                }
+
+                if (!HasTrimmedLine(text, "public const int PMGeneratedPropertyIndex_" + p.MemberName
+                    + " = " + (indexBase + i) + ";"))
+                {
+                    missing++;
+                }
+            }
+
+            return missing;
+        }
+
+        /// <summary>数一个方法片段里以分号结尾的语句行数（用于断言 RawSet 桩只有一条 throw）。</summary>
+        private static int CountStatementLines(string methodText)
+        {
+            if (string.IsNullOrEmpty(methodText))
+            {
+                return 0;
+            }
+
+            int count = 0;
+            string[] lines = methodText.Replace("\r\n", "\n").Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string trimmed = lines[i].Trim();
+                if (trimmed.EndsWith(";", StringComparison.Ordinal))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>按 trimmed 相等判定“某行存在”（避免依赖具体缩进，但仍要求整行内容一致）。</summary></summary>
+        private static bool HasTrimmedLine(string text, string content)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            string[] lines = text.Replace("\r\n", "\n").Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (string.Equals(lines[i].Trim(), content, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 取出以 <paramref name="signature"/> 开头的方法的文本片段（到下一个 8 空格缩进的 `}` 为止）。
+        ///
+        /// 生成物是逐行发射的，方法内部的嵌套块缩进更深，因此“8 空格的右花括号”就是方法结束。
+        /// 找不到时返回 null（调用方必须把 null 当作失败，不能当作“通过”）。
+        /// </summary>
+        private static string ExtractMethodText(string text, string signature)
+        {
+            if (text == null)
+            {
+                return null;
+            }
+
+            int at = text.IndexOf(signature, StringComparison.Ordinal);
+            if (at < 0)
+            {
+                return null;
+            }
+
+            const string closer = "\n        }\n";
+            int end = text.IndexOf(closer, at, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                return null;
+            }
+
+            return text.Substring(at, end - at + closer.Length);
+        }
+
+        // =================================================================================
+        //  17. 自动属性生成物的真实 C# 7.3 编译（独立沙盒声明集）
+        // =================================================================================
+
+        /// <summary>
+        /// 用一份**全新写出的**声明集（不是 Good.cs）跑完整链路：扫描 → 校验 → 发射 →
+        /// 与 PMNet 运行时一起在 C# 7.3 + netstandard2.0 下真编译。
+        ///
+        /// 为什么单独一段：Good.cs 会被“重排不变”等用例反复使用，若它的某个写法
+        /// 恰好依赖某个 Roslyn 行为，整段门禁会一起松/紧。这里用一份最小、可读的新声明集
+        /// 把“自动属性生成物真的能编”钉在**独立输入**上，同时覆盖 public get/private set、
+        /// 私有自动属性、初始化器、PushBased=false 与数组自动属性。
+        /// </summary>
+        private static void CheckAutoPropertySandboxCompiles()
+        {
+            string dir = Path.Combine(_temp, "autoprop-sandbox");
+            Directory.CreateDirectory(dir);
+            string sourcePath = Path.Combine(dir, "AutoPropSandbox.cs");
+
+            string source =
+                "using PMNet;\n"
+                + "\n"
+                + "namespace PMAutoPropSandbox\n"
+                + "{\n"
+                + "    [PMNetworkObject]\n"
+                + "    public partial class SandboxAutoProp : PMNetObject\n"
+                + "    {\n"
+                + "        [PMReplicated]\n"
+                + "        public int Hp { get; private set; }\n"
+                + "\n"
+                + "        [PMReplicated(PMCond.OwnerOnly)]\n"
+                + "        private float Mana { get; set; }\n"
+                + "\n"
+                + "        [PMReplicated]\n"
+                + "        public int Armor { get; private set; } = 7;\n"
+                + "\n"
+                + "        [PMReplicated(PushBased = false)]\n"
+                + "        public uint PingMs { get; set; }\n"
+                + "\n"
+                + "        [PMReplicated]\n"
+                + "        public int[] Scores { get; set; }\n"
+                + "\n"
+                + "        [PMReplicated]\n"
+                + "        public string NickName { get; private set; }\n"
+                + "    }\n"
+                + "}\n";
+
+            File.WriteAllText(sourcePath, source, new UTF8Encoding(false));
+
+            PMDeclScanResult scan = SafeScan(new List<string> { sourcePath }, new PMIdLock());
+            if (scan == null)
+            {
+                return;
+            }
+
+            Check("沙盒：自动属性声明集零声明错误", scan.Model.Errors.Count == 0, FirstError(scan.Model));
+            Check("沙盒：6 个自动属性被扫出",
+                scan.Model.Classes.Count == 1 && scan.Model.Classes[0].Properties.Count == 6,
+                "类 " + scan.Model.Classes.Count + " 个，属性 "
+                + (scan.Model.Classes.Count > 0 ? scan.Model.Classes[0].Properties.Count : 0) + " 个");
+
+            List<PMGeneratedFile> files = PMDeclEmitter.EmitAll(scan.Model, scan.Facts);
+            WriteGenerated(Path.Combine(dir, "Generated"), files);
+
+            CSharpParseOptions options = new CSharpParseOptions(LanguageVersion.CSharp7_3);
+            List<SyntaxTree> trees = new List<SyntaxTree>();
+            for (int i = 0; i < files.Count; i++)
+            {
+                trees.Add(CSharpSyntaxTree.ParseText(files[i].Content, options, files[i].FileName));
+            }
+
+            trees.Add(CSharpSyntaxTree.ParseText(source, options, "AutoPropSandbox.cs"));
+
+            string pmnetDir = Path.Combine(_root, "Client/Assets/Scripts/PMNet");
+            string[] runtimeFiles = Directory.GetFiles(pmnetDir, "*.cs", SearchOption.AllDirectories);
+            Array.Sort(runtimeFiles, StringComparer.Ordinal);
+            for (int i = 0; i < runtimeFiles.Length; i++)
+            {
+                trees.Add(CSharpSyntaxTree.ParseText(File.ReadAllText(runtimeFiles[i]), options,
+                    Path.GetFileName(runtimeFiles[i])));
+            }
+
+            string refMode;
+            List<MetadataReference> references = BuildReferences(out refMode);
+            if (references == null || references.Count == 0)
+            {
+                Check("沙盒：编译引用集可用", false, refMode);
+                return;
+            }
+
+            CSharpCompilation compilation = CSharpCompilation.Create(
+                "PMAutoPropSandbox",
+                trees,
+                references,
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+            List<string> errors = new List<string>();
+            foreach (Diagnostic d in compilation.GetDiagnostics())
+            {
+                if (d.Severity == DiagnosticSeverity.Error)
+                {
+                    errors.Add(d.Id + " " + d.GetMessage() + " @ " + d.Location.GetLineSpan().Path + ":"
+                        + (d.Location.GetLineSpan().StartLinePosition.Line + 1));
+                }
+            }
+
+            for (int i = 0; i < errors.Count && i < 20; i++)
+            {
+                Console.WriteLine("      " + errors[i]);
+            }
+
+            Check("沙盒：自动属性声明 + 生成物 + PMNet 运行时在 C# 7.3 下零编译错误",
+                errors.Count == 0, Detail(errors.Count == 0, "错误 " + errors.Count + " 个（见上）"));
+            Console.WriteLine("      沙盒目录：" + dir);
         }
 
         private static PMDeclScanResult SafeScan(List<string> paths, PMIdLock idLock)

@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-A1 验收（T5A1 / T5A2 / T5A3）：生命周期 / 假弹镜像接管 / 三类 Pending 的真实核心测试。
+
+      为什么需要它：
+        「跨 owner 同号合法、同 owner 拒重号、ID 不复用、假弹存活时镜像不写位置、
+        一次消费接管、假弹已结束后迟到镜像不复活、拒绝实际撤销预测实例、停止不二次事件、
+        墓碑窗口内外、Pending 零结算、Confirm 只兑现一次」
+        —— 这些性质编译期完全看不出来，运行期又都长得像「偶尔双发/偶尔幽灵伤害」。
+        这里把它们钉成可执行断言，并且**预期值由独立手算给出**（不是拿实现自己的常量自比）。
+
+      做法：
+        · 直接编**真实源码**（本组两份实现 + 主 Agent 冻结的 contracts），不 mock 记账逻辑；
+        · 负向用例是真的边界值（容量 128/129、TTL 1999/2000、墓碑窗口内/外、时钟倒退/NaN/Inf），
+          不是「错误字符串包含」这类字符串门。
+
+      边界（诚实口径）：
+        · 不引 PMProjectileValidator（A2 组的几何/历史/L0–L4）：本组不依赖也不冒充；
+        · 不引 UnityEngine：真网络/Unity 宿主链属 B/C 阶段（T45 PENDING_USER）。
+
+      运行：dotnet Tools/PMProjectileLifecycleTest/bin/Release/net8.0/PMProjectileLifecycleTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMProjectileLifecycleTest</AssemblyName>
+    <RootNamespace>PMProjectileLifecycleTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实实现 + 冻结契约（与 PMProjectileCoreCheck 编的是同一份文件） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

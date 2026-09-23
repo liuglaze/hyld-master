@@ -11,7 +11,6 @@ using Server;
 using SocketProto;
 using LongZhiJie;
 using System.IO;
-using Google.Protobuf;
 using Logging;
 
 public class HYLDManger : Singleton<HYLDManger>
@@ -131,47 +130,7 @@ public class HYLDManger : Singleton<HYLDManger>
     {
         pingPongPack = pack;
     }
-    public void AddBattleReview(MainPack pack)
-    {
-        Debug.LogError(pack);
-        string SavePath = Application.streamingAssetsPath + "/Review/"+ DateTime.Now.ToLocalTime().ToString("yyyyMMddHHmmss") +".txt";
-        if (string.IsNullOrEmpty(SavePath))
-            return;
 
-        var dir = Path.GetDirectoryName(SavePath);
-        if (!Directory.Exists(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        using (var stream = File.Open(SavePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.ReadWrite))
-        {
-            var bytes = pack.ToByteArray();
-            stream.Write(bytes, 0, bytes.Length);
-            stream.Flush();
-        }
-    }
-    public void GetBattleReview()
-    {
-        string SavePath = Application.streamingAssetsPath + "/Review.txt";
-        if (string.IsNullOrEmpty(SavePath))
-            return;
-
-        var dir = Path.GetDirectoryName(SavePath);
-        if (!Directory.Exists(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-
-        using (var stream = File.Open(SavePath, FileMode.OpenOrCreate, FileAccess.Read, FileShare.ReadWrite))
-        {
-            byte[] bytes = new byte[stream.Length];
-            stream.Read(bytes, 0, (int)stream.Length);
-            MainPack pack = (MainPack)MainPack.Descriptor.Parser.ParseFrom(bytes, 0, (int)stream.Length);
-            Debug.LogError(pack);
-        }
-    }
-    
     public void OnInit()
     {
         Server.RequestManger.RemoveAllRequest();
@@ -223,31 +182,33 @@ public class HYLDManger : Singleton<HYLDManger>
         _disconnectHandling = true;
         HYLDStaticValue.是否为连接状态 = false;
 
-        bool isBattleScene = SceneManager.GetActiveScene().name == "HYLDGame";
-        bool hasBattleManager = Manger.BattleManger.Instance != null;
-        bool isBattleGameOver = hasBattleManager && Manger.BattleManger.Instance.IsGameOver;
+        // 旧链退役（契约 §B）：不再读 Manger.BattleManger。断线时改看**新链**客户端宿主的生命周期：
+        //   · IsActive            = 新链局内会话仍在跑（局内战斗走 UDP，与大厅 TCP 无关）
+        //   · HasLastCombatResult = 已收到并保存**可信终局**（只有通过校验的合法结果才会置位）
+        bool newChainActive = PMNet.Unity.PMClientSessionHost.IsActive;
+        bool hasTrustworthyTerminal = PMNet.Unity.PMClientSessionHost.HasLastCombatResult;
 
         Logging.HYLDDebug.Trace("[Net][CloseClient] trigger=PingTimeoutOrManual -> close tcp");
-        Logging.HYLDDebug.FrameTrace($"[Net][CloseClient] battleScene={SceneManager.GetActiveScene().name} isGameOver={isBattleGameOver}");
+        Logging.HYLDDebug.FrameTrace($"[Net][CloseClient] scene={SceneManager.GetActiveScene().name} newChainActive={newChainActive} terminal={hasTrustworthyTerminal}");
 
         if (_socketManger != null)
         {
             _socketManger.CloseSocket();
         }
 
-        // 战斗场景中的 TCP 连接只承载大厅/补充链路，实时战斗主链路走 UDP。
-        // 因此这里不能因为 TCP 断开就提前触发 BeginGameOver 或直接切回开始场景，
-        // 否则会抢跑服务端权威的 BattlePushDowmGameOver，表现为“击杀后卡死/停住”。
-        if (isBattleScene && hasBattleManager && !isBattleGameOver)
-        {
-            Logging.HYLDDebug.Trace("[Net][CloseClient] battle scene detected, keep UDP battle alive and wait for authoritative result");
-            _disconnectHandling = false;
-            return;
-        }
-
-        // 避免在非主线程直接切场景（CloseClient 可能由 ping 超时路径触发）
+        // 避免在非主线程直接切场景 / 释放新链会话（CloseClient 可能由 TCP 收包线程触发）
         NetGlobal.Instance.AddAction(() =>
         {
+            // 新链断线收尾（契约「HYLDManger 断线清新 PMClientSessionHost」）：
+            //   · 已拿到可信终局 ⇒ 什么都不停：按新 host 的**正常结束**语义，EndSessionNormally
+            //     已把只读终局 HUD 摘成 static 保留，Stop 会把它一起抹掉，所以这里绝不 Stop；
+            //   · 否则（尚未终局）⇒ 显式 Stop 收尾，避免留下一个拿不到大厅的孤岛会话。
+            if (PMNet.Unity.PMClientSessionHost.IsActive
+                && !PMNet.Unity.PMClientSessionHost.HasLastCombatResult)
+            {
+                PMNet.Unity.PMClientSessionHost.Stop();
+            }
+
             SceneManager.LoadScene("HuangYeLuanDouStart");
             _disconnectHandling = false;
         });

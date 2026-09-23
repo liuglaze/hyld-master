@@ -44,10 +44,9 @@ namespace PMNet
     /// <summary>
     /// 标记一个字段或属性参与复制。
     ///
-    /// 语义要点：Push 模型下，业务必须在**真实赋值之后、紧邻赋值处**调用
-    /// `MarkPropertyDirty`。漏标会导致该属性静默不同步——这是最难查的一类网络 bug，
-    /// 因此生成器会为每个被标记的成员产出一个 `PMNet_SetXxx` 访问器，
-    /// 供业务用「赋值即标脏」的单点写法。
+    /// 自动属性：普通赋值由编织器自动处理变化与权威标脏，收包 Reader 直接 RawSet。
+    /// 字段：Push 模式仍需业务调用 MarkPropertyDirty 或生成的 PMNet_SetXxx。
+    /// PushBased=false 时复制层轮询比较；数组原地修改不属于自动 setter 跟踪范围。
     /// </summary>
     [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false, Inherited = true)]
     public sealed class PMReplicatedAttribute : Attribute
@@ -56,8 +55,8 @@ namespace PMNet
         public PMCond Condition = PMCond.None;
 
         /// <summary>
-        /// 是否由业务侧负责标脏（Push Model）。
-        /// `false` 表示每帧由复制层做「与基线比较」来决定是否发送（Pull 式，成本更高但不会漏标）。
+        /// 是否使用 Push Model：自动属性由编织 setter 标脏，普通字段由业务标脏。
+        /// false 时在复制调度预算内轮询采样，与各连接基线比较；值未变化不发送。
         /// </summary>
         public bool PushBased = true;
 

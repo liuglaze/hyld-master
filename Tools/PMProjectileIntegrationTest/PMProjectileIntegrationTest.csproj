@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-A3 验收（T5A6 的 A3 面）：整合器 + 两组真实核心的 net8.0 真实运行测试。
+
+      为什么需要它：
+        「客户端预测 admission 的权威面消毒」「activation 确认后三队列联动」「Verify-before-Spawn
+        按序回放」「Pending 结论确认时不重跑历史」「拒绝/TTL 不结算」「同 activation 散弹」
+        「墓碑窗口内外」「跨 owner/epoch/id/state 注入」「trustedSpec 防改 speed/radius」
+        「旧流/死亡目标确认时拒结算」「Drain 重复无结果」「队列压力」「升 epoch/断线清理」「NaN/倒退」
+        —— 这些性质编译期完全看不出来，运行期又都长得像「偶尔多一次伤害 / 偶尔少一次 / 偶发幽灵弹」。
+        这里把它们钉成可执行断言，预期值由独立手算给出。
+
+      直接编**真实源码**（与 PMProjectileIntegrationCheck 同一文件面，逐文件给定、**不 glob** B1 codec）：
+        · Client/Assets/Scripts/PMProjectile/{PMProjectileContracts,PMProjectileLifecycle,
+          PMProjectilePending,PMProjectileHistory,PMProjectileValidator,PMProjectileCoordinator}.cs
+        · Client/Assets/Scripts/PMNet/{PMNetIdentity,PMNetRole}.cs
+        · Client/Assets/Scripts/PMMover/PMMoverState.cs
+
+      诚实边界：本测试只覆盖纯核心（T5A6 的 A3 面）。真实 RPC 承载 / 复制 / Unity 宿主 / 双端实机
+      属于 B/C 阶段与 T45（PENDING_USER），本工程不冒充它们已验收。
+
+      运行：dotnet Tools/PMProjectileIntegrationTest/bin/Release/net8.0/PMProjectileIntegrationTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMProjectileIntegrationTest</AssemblyName>
+    <RootNamespace>PMProjectileIntegrationTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实实现 + 冻结契约（与 PMProjectileIntegrationCheck 编的是同一份文件） -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileHistory.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileValidator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCoordinator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+  </ItemGroup>
+
+</Project>

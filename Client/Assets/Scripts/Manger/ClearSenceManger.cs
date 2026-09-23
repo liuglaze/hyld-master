@@ -5,19 +5,19 @@
 *****************************************************/
 
 using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
 using System;
+using UnityEngine;
 using UnityEngine.UI;
-using System.Linq;
 using UnityEngine.SceneManagement;
-using SocketProto;
 
 namespace Manger
 { 
 
 	public class ClearSenceManger :MonoBehaviour
 	{
+		// 仅保留场景序列化引用（HYLDAsyncScence.unity 中已挂载该面板）。
+		// 旧「清场景」协议退役后本类不再与该面板交互；为避免改动 Unity 资产的
+		// 序列化语义，此处不清空该字段（面板 class/GUID 保持不变，仅作本地进度 UI）。
 		public MVC.UISliderPanel UISliderPanel;
 		//显示进度的文本
 
@@ -116,51 +116,28 @@ namespace Manger
 		/// <returns></returns>
 		IEnumerator AsyncLoadScene(int scene)
 		{
-			isAllPlayerClearOk = false;
 			//Logging.HYLDDebug.LogError("AsyncLoadScne " + scene);
 			async = SceneManager.LoadSceneAsync(scene);
 			//yield return async;
 
 			async.allowSceneActivation = false;
 
-			while (!async.isDone)
+			// 纯本地异步加载：allowSceneActivation=false 时 Unity 最多加载到 0.9 就停住，
+			// 因此 progress >= 0.9 即视为场景已就绪并直接放行。
+			// 旧链在这里会等加载面板的「全员清场完成」远端 Ready 才放行；该协议与专属等待
+			// 分支已随旧战斗链退役，避免没有对端响应时把加载流程挂死。
+			while (async.progress < 0.9f)
 			{
-				if (async.progress < 0.9f)
-					progressValue = async.progress;
-				else
-					progressValue = 1.0f;
+				progressValue = async.progress;
 				slider.value = progressValue;
-				
 				progress.text = (int)(slider.value * 100) + " %";
-				if (progressValue >= 0.95)
-				{
-					if (scene != SceneConfig.battleScene)
-					{
-						break;
-					}
-
-					UISliderPanel.SendLoadOver();
-					break;
-				
-				}
 				yield return null;
 			}
 
-
-			//Server.UDPSocketManger.Instance.Send(pack);
-
-
-			if (scene == SceneConfig.battleScene)
-			{
-				yield return new WaitUntil(() => {
-
-					return UISliderPanel.IsCanEnterBattle; // 在这里等待所有玩家都异步场景加载完毕
-				});
-			}
-			
+			slider.value = 1.0f;
+			progress.text = "100 %";
 			async.allowSceneActivation = true;
 		}
-		private bool isAllPlayerClearOk = false;
 		void OnDestroy()
 		{
 			async = null;

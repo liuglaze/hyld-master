@@ -675,8 +675,8 @@ namespace PMR3IntegrationTest
                     LastProbeNonce = ProbeNonceSent;
                     player.ProbeSentCount++;
 
-                    // 经**生成的调用桩**发（PMNet_ServerProbe），不手写业务状态包（契约 §7.4）。
-                    player.PMNet_ServerProbe(LastProbeNonce);
+                    // 经**声明层入口**发（普通名 ServerProbe），不手写业务状态包（契约 §7.4）。
+                    player.ServerProbe(LastProbeNonce);
                 }
 
                 PendingProbes.Clear();
@@ -1083,7 +1083,7 @@ namespace PMR3IntegrationTest
                 Check(forgedTarget != null, "G74 客户端 A 持有 B 的副本（用于冒名探针）");
                 if (forgedTarget != null)
                 {
-                    forgedTarget.PMNet_ServerProbe(0x5150);   // 经生成桩发出，真实 UDP
+                    forgedTarget.ServerProbe(0x5150);   // 经生成桩发出，真实 UDP
                     Pump(12);
                 }
 

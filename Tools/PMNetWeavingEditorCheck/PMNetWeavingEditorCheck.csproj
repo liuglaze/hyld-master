@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      RPC 编织便利层的**真实 Unity 2019.4 API 编译面**门禁。
+
+      为什么需要它：
+        Client/Assets/Editor/PMNetWeaving/*.cs 只会在 Unity 2019.4 里编译。本仓库既有教训
+        （Docs/plans/net-architecture-migration.md §9.5 坑 #25：没有自测编译手段时，用户就是你的编译器）
+        是一次 API 拼错就要用户点一轮编辑器。本工程把那件事变成可自动跑的 CLI 门。
+
+      与 Tools/PMUnityGlueCheck 的区别（必须说清）：
+        · PMUnityGlueCheck 用手写 UnityEngine/UnityEditor **桩件**，只证明"语法与类型自洽"；
+        · 本工程引用 D:/Unity/2019.4.8f1/Editor/Data/Managed 下的**真实 DLL**，因此真正校验：
+            - `UnityEditor.Compilation.CompilationPipeline.assemblyCompilationFinished`
+              的委托形态（`Action<string, CompilerMessage[]>`）——参数写错就编不过；
+            - `UnityEditor.Compilation.CompilerMessage.type` 是**公开字段**（不是属性）；
+            - `UnityEditor.Build.IPostBuildPlayerScriptDLLs`（`void OnPostBuildPlayerScriptDLLs(BuildReport)`）
+              与 `IPreprocessBuildWithReport`、`IOrderedCallback.callbackOrder` 的真实签名；
+            - `UnityEditor.Build.Reporting.BuildReport.files` / `BuildFile.path` / `BuildSummary.outputPath`；
+            - `EditorApplication.playModeStateChanged`（`Action<PlayModeStateChange>`）、`isPlaying` 可写、
+              `EditorApplication.update` / `delayCall` 是**静态字段**（不是事件）；
+            - `EditorUtility.RequestScriptReload`、`UnityEditor.Menu.SetChecked`、`SessionState`、`EditorPrefs`。
+          这些都是"编译期就不允许含糊"的界面；编译通过即为存在性+签名证据。
+
+      语言面：netstandard2.0 + C# 7.3（与 Unity 2019.4 的 apiCompatibilityLevel=6 / .NET Standard 2.0 一致）。
+      这里**不是**在证明运行期行为：没有启动 Unity、没有触发任何回调、没有编织任何程序集，
+      Player 管线位置与真实域重载顺序仍属 PENDING_USER（见 Docs/plans/_rpc_weaving_editor.md）。
+
+      运行：dotnet build Tools/PMNetWeavingEditorCheck -c Release
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMNetWeavingEditorCheck</AssemblyName>
+    <RootNamespace>PMNetWeavingEditorCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- 警告即错误：这份代码要在用户编辑器里天天跑，不能靠"只是警告"积累噪音。 -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <DefineConstants>UNITY_EDITOR;UNITY_2019_4</DefineConstants>
+    <!-- Unity 托管程序集带 NU1701 之类的包兼容提示，与"能否编译"无关。 -->
+    <NoWarn>$(NoWarn);CS1591;NU1701;CS0618;CS0649;CS0169;CS0414</NoWarn>
+    <UnityManagedDir Condition="'$(UnityManagedDir)' == ''">D:\Unity\2019.4.8f1\Editor\Data\Managed</UnityManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      被验证的**真实源码**（精确到文件，不通配目录）：
+        · PMNetWeavingEditor.cs — 回调接线、Play/Build 门禁、生成元数据刷新、菜单
+        · PMNetToolProcess.cs   — 外部工具执行器（超时/并发/分块有界读取与排空/只杀自己的子进程）
+        · PMNetWeavingPolicy.cs — 纯 BCL 决策策略（文件名匹配、Player 目标、工具输入内容指纹、契约探针）
+          —— 它不含任何 Unity API，因引同时被 Tools/PMNetWeavingEditorTest（net8.0）编译；
+             两套编译面都过才算"策略与宿主解耦"。
+    -->
+    <Compile Include="..\..\Client\Assets\Editor\PMNetWeaving\PMNetWeavingEditor.cs" LinkBase="PMNetWeaving" />
+    <Compile Include="..\..\Client\Assets\Editor\PMNetWeaving\PMNetToolProcess.cs" LinkBase="PMNetWeaving" />
+    <Compile Include="..\..\Client\Assets\Editor\PMNetWeaving\PMNetWeavingPolicy.cs" LinkBase="PMNetWeaving" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      真实 Unity 汇编（不写桩件）：
+        · UnityEngine.dll                        —— 门面程序集（类型转发到各 Module）；
+        · UnityEngine.CoreModule.dll             —— Debug/Application/File… 之前的核心类型；
+        · UnityEngine.IMGUIModule.dll            —— EditorUtility 内有 Rect/GUIContent 形态的重载，
+                                                    绑定这些成员时需要它能被解析；
+        · UnityEngine.SharedInternalsModule.dll  —— 模块引用了它，必须一并给出；
+        · UnityEditor.dll                        —— CompilationPipeline / Build 回调接口 / EditorApplication /
+                                                    SessionState / EditorPrefs / Menu / AssetDatabase。
+    -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.SharedInternalsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEditor">
+      <HintPath>$(UnityManagedDir)\UnityEditor.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

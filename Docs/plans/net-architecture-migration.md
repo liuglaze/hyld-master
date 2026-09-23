@@ -12,13 +12,11 @@
 
 > 这一节是为了让**压缩上下文后的新会话**能在几分钟内定位，不必从头读 1000 行。
 
-### 当前状态（R3 开工审查后）
+### 当前状态（R5代码优先推进）
 
-R0 契约已冻结。R1传输/世界与R2声明/复制已通过离线和内存投递门禁；R2独立审查返工见文末RV1–RV7（声明71、复制265、世界197、E2E209）。真实UDP会话认证、Unity宿主及握手尚未验收。
+R1/R2网络基础与声明复制已落地；R3真实DS控制/会话已验证，但双Unity客户端T42待验。R4基础Mover/预测链已落地，诊断PhysX/真实DS运动通过；正式内容C1于14:33完整烘焙成功，用户报告已重新Build。正式地图双客户端以及完整Modifier/效果拒绝能力仍未验收。R5-A核心、B1线协议、B2声明网络与C宿主诊断射击接线已落地，自动门禁通过；真实Unity投射物联机仍待验，R6-A/B/C首批正式直线攻击、资源、伤害、死亡、胜负及HUD已接线并通过自动门禁；特殊机制/道具与集中实机仍待；旧网络运行链与旧战斗protobuf已实际删除。
 
-**当前进度：R3-A基础实现与针对性门禁已交付，R3-B代码及回环整链已交付，真实Unity T42待验**，冻结契约 `Docs/plans/net-r3-control-contract.md`。R3-B再接匹配入口、Unity场景就绪、客户端切服及完整结果回收；T42不得凭替身进程或内存投递标PASS。R4-A纯预测与Mover模型已落地并通过集成门禁，R4-B网络/Unity宿主接线已交付，真实PhysX与新DS包待验；R5投射物尚未实现。
-
-旧§5.4–5.6及历史交接数字只作历史记录，当前以文末RV与R3验收表为准。旧大厅战斗仍可达；新入口可用前不删除，不允许新旧同时驱动同一局。保持Unity2019.4、无数据库、无旧协议兼容要求，不编译UE工程、不代提交。
+用户最新决定：先写后续代码，Unity双客户端/弱网/正式内容实机集中后置；自动编译、纯核心测试和独立复核仍执行。不得把PENDING_USER改成PASS，不要求每阶段停下来让用户点菜单。优先R5，之后R6；不在新路径可接收之前删除旧链，不允许同一对局双权威。Unity2019.4、C#7.3/netstandard2.0、不提交、不编译UE、不抢编辑器锁。
 
 ### 环境现状（本机实测）
 
@@ -838,7 +836,7 @@ public interface IPMClientClassPoolable { bool IsClientClassPoolingEnabled(); vo
 | R3 Lobby/Unity DS全链路 | M11/M12：大厅拉起DS→凭据/入局快照→就绪地址→客户端进局→结果幂等回传与确认→退出；DS加载权威场景/碰撞环境 | R1/R2；编排实现可并行 | T42 | **进行中**：R3-A控制与会话适配已交付（473/343），独立审查问题已返工；R3-B真实宿主、两客户端T42仍PENDING |
 | R4 Mover/NetworkPrediction移植 | M07/M08：先一个角色Input/Sync/Aux历史、同帧校正、恢复重模拟、Finalize、SP插值；再接运动模式/叠加/效果/Modifier、参数变更与拒绝撤销。帧锚/B7在此解决 | R1/R2；测试场景可先于R3完成 | T43、T44 | **进行中**：R4-A预测417/Mover245/集成264项通过；R4-B接线与自动化门禁通过，真实PhysX/Unity与完整裁决待验，T43/T44整体仍PENDING |
 | R5 投射物与历史命中 | M09：预测ID/权威对象关联、接管、服务器直创、历史查询、Pending裁决、拒绝清理、停止墓碑；DS最终伤害 | R2、R4帧锚契约 | T45 | PENDING |
-| R6 全业务切换/旧链退役 | M10及集成：角色/攻击/资源/道具/死亡/胜负改接框架；完善FastArray/裁剪/休眠/调度；删除旧战斗MainPack/state_mask/连发/旧SavedMove路径；回放与文档收尾 | R3/R4/R5 | T46、T47及旧T项适用部分 | PENDING |
+| R6 全业务切换/旧链退役 | M10及集成：角色/攻击/资源/道具/死亡/胜负改接框架；完善FastArray/裁剪/休眠/调度；删除旧战斗MainPack/state_mask/连发/旧SavedMove路径；回放与文档收尾 | R3/R4/R5 | T46、T47及旧T项适用部分 | **进行中**：首批直线攻击/资源/伤害/死亡/胜负与宿主HUD已落地（末尾R6交付段）；特殊机制/道具及实机仍待；旧运行链与旧proto已删除（见末尾退役交付） |
 
 R0契约冻结后，R1与R2生成器部分可并行；R3与R4可按文件边界并行。最终切换必须确认新开局与结算都有接收者，再拆除大厅旧仿真。允许开发中短暂并存用于对照，但不要求兼容旧协议，不允许两套权威长期共同写同一对象。
 
@@ -2127,3 +2125,474 @@ C1/C2/C3代码与真实Unity2019 API编译已交付，独立复核_P4C1/C2并修
 3 Build/Build HyldDS (Windows Headless)重打正式包（现19:16包是旧代码，不能验正式内容）。
 4 Lobby以HYLD_PMNET_DS=1并让PMDsBattleContentConfig找到manifest（默认仓库Client/Assets/Resources/PMNet/BattleContentV1.json，可用HYLD_PMNET_CONTENT_MANIFEST覆盖）；manifest缺失时新链拒绝拉局，不得回落诊断。
 5 两个Unity客户端经PMDS1入局验证正式地图障碍/出生/表现与WASD，再验退出回收；攻击/大招/摇杆UI与跨机仍未接，属R5/R6。
+
+
+### P4C1首次真实烘焙崩溃与修复（待用户复跑确认）
+
+用户在Unity执行Build/Prepare PMNet Battle Content时编辑器崩溃（崩溃上报器弹出）。主侧用Editor.log栈+Dump+场景YAML定位：崩溃在SourceSceneScope.Dispose的CloseScene(native SIGSEGV)，**当时的归因**是烘焙期的生成纪律——旧代码先tile.SetActive(template.activeSelf)再CopyComponentSet，对未激活对象AddComponent MeshRenderer/Collider，transform change interests永不注销，组件表与物理登记表被破坏，关场景拆层级时崩溃。**口径修正（第四轮）**：上述“生成纪律是根因”与“共享物理世界破坏登记表”都属于**当时未出口的假说**，从未被实验证实；可引用的只有“Editor.log 日志链”与“32 条 CheckConsistency 的调用栈全部落在旧码的通用序列化写入上”这两项观测。原句保留以供追溯，不擦证据。Editor.log原文链：CheckConsistency→Can't add component MeshFilter already added→Retrieving array size but no array was provided→change interests present when destroying the hierarchy(关临时场景)→Cannot unregister Collider not in the table(关源场景)→SIGSEGV。场景事实（YAML核验）：ScenseBuildLogic.floors指向的Plain02 (1)/Plain01 (1)为m_IsActive:0且无Collider，共2660个地板落点全部命中；旧MyInstantiate只Instantiate+SetParent不SetActive⇒这些实例在旧运行时同样不可见无碰撞。当时未留下任何产物，且摘要只在finally打印故Editor.log无工具摘要。
+修复：F1目标一律先active建并拷完组件、最后才施加模板激活态；F2默认跳过未激活模板落点并计入摘要与digest（地面inactive则显式失败）；F3 AddComponent判重与null防护；F4数组分支只在isArray时读arraySize；F5销毁自建root前先SetActive(false)、关场景前确认临时场景已空；F6逐步落盘日志Logs/PMBattleContentBuild.log(FileShare.ReadWrite)并在每次CloseScene前后写标记；F7回读校验补非白名单组件与Collider enabled/active断言。manifest schema/派生与C1/C2/C3既有拒绝门未放宽。
+主Agent本次build0后run0：PMBattleContentSceneFactsCheck 63/0（含9项负向注入）、PMBattleContentBuildCheck真实Unity2019程序集0错误、RuntimeCheck 0错误、ManifestTest 92/0、SessionTest 86/0。日志Tools各工程r4c-main-verify.log。报告_r4c_crashfix_report.md。
+状态：崩溃是否消失以及三产物/正式地图仍未验证=PENDING_USER。下次执行菜单若再失败，先看Logs/PMBattleContentBuild.log最后一条Step定位步骤，再看Editor.log对应报错，不要重复全量排查。
+
+### R4-C 显式组件拷贝重写（第四轮）
+
+**本轮目标（唯一）**：停止继续修补通用 `SerializedObject` 字段搬运；把 C1 烘焙里**地图层级的组件拷贝**改为
+**明确组件类型的 Unity 公开 API 字段复制**；不支持的类型在**创建组件之前**明确拒绝（fail closed），不静默丢字段。
+
+**为什么换掉通用搬运（证据边界，必须分清"现场"与"假说"）**：
+现场证据（`_r4c_round3_report.md` §3.2）显示真机 Editor.log 里 32 条
+`CheckConsistency: GameObject does not reference component <类型>. Fixing.` 的调用栈**全部**是
+`SerializedObject.ApplyModifiedPropertiesWithoutUndo()` ← `CopyComponentFields` —— 这是**已观测的调用点**。
+而「通用序列化字段写入是 SIGSEGV 根因」「共享物理世界破坏登记表」「向非激活对象 AddComponent 必崩」
+都只是**当时的假说，从未被证实**。本轮**不依赖任何假说**：直接把那条写路径删掉，并让"拷了哪些字段"
+变成可枚举、可回读核对的事实。F1（先 active 建、拷完再施加最终激活态）作为**安全纪律保留**，
+但不再在注释里把它写成已证实的根因。
+
+**范围（真实调用面，已量，不是估计）**：
+
+- `CopyComponentSet` **只被地图路径调用**：`BuildMapHierarchy`（地面 / tile 根）与 `CopyChildHierarchy`（子物体）。
+- 角色路径 `BuildPlayerHierarchy` 走 `Instantiate` + 删组件，**不调用** `CopyComponentSet`
+  ⇒ 本轮**不动**角色路径（无谓重写）。
+- 源场景模板子树实测（YAML 级普查，`floors 4 / walls 4 / obstacles 8 / Grasses 1 / trees 7`，
+  含子物体共 38 个节点）组件类型**只有**：
+  `Transform`×38 / `MeshFilter`×32 / `MeshRenderer`×32 / `MeshCollider`×19 / `BoxCollider`×14；
+  地面 `HYLDGameTatal/MAP/Plane` = Transform / MeshFilter / MeshRenderer / MeshCollider。
+  ⇒ 白名单里的 `LODGroup` / `SphereCollider` / `CapsuleCollider` / kinematic `Rigidbody`
+  **当前源未出现**：实现支持，但**未被执行、未验证**，不得称已验证。
+- 公开允许组件契约保持：`LODGroup` 的 Renderer 引用在**完整目标层级建完之后**按源→目标映射重绑定；
+  当前源没有 LOD，故按契约**实现支持**并把"未被执行"记成边界。
+
+**支持矩阵（显式拷贝；其余一律在 AddComponent 之前拒绝）**：
+
+| 组件 | 拷贝字段 | 源实测 |
+|---|---|---|
+| `MeshFilter` | `sharedMesh` | 出现 32 |
+| `MeshRenderer` | `sharedMaterials` / `enabled` / `shadowCastingMode` / `receiveShadows` / `motionVectorGenerationMode` / `lightProbeUsage` / `reflectionProbeUsage` / `allowOcclusionWhenDynamic` / `sortingLayerID` / `sortingOrder` / `renderingLayerMask` / `probeAnchor`（按映射重绑定，不指源） | 出现 32 |
+| `BoxCollider` | `center` / `size` + 公共（`enabled` / `isTrigger` / `sharedMaterial` / `contactOffset`） | 出现 14 |
+| `MeshCollider` | `sharedMesh` / `convex` / `cookingOptions` + 公共 | 出现 19 |
+| `SphereCollider` / `CapsuleCollider` | `center` / `radius`（+`height`/`direction`）+ 公共 | **未出现（未验证）** |
+| `LODGroup` | `fadeMode` / `animateCrossFading` / `localReferencePoint` / `size` / `enabled` + Renderer 数组**延后重绑定** | **未出现（未验证）** |
+| `Rigidbody`（仅 kinematic） | `mass`/`drag`/`angularDrag`/`useGravity`/`isKinematic`/`constraints`/`collisionDetectionMode`/`interpolation`/`detectCollisions`/`maxAngularVelocity`/`centerOfMass`/`inertiaTensor`/`inertiaTensorRotation` | **未出现（未验证）** |
+| 其它任何类型（含 `TerrainCollider`/`WheelCollider` 等 Collider 子类、`Animator`、`SkinnedMeshRenderer`） | —— | **AddComponent 之前拒绝** |
+
+**`MeshCollider` 赋值顺序**（避免 transient invalid 配置）：先 `enabled=false` → `sharedMesh` → `convex`
+→ `cookingOptions` → 公共字段 → 最后恢复源的 `enabled`。目标组件在配置期间始终 disabled，
+不会出现"启用的 collider 处于非法 mesh/convex 组合"的中间态。
+
+**明确不做（非目标）**：不改源场景/prefab；不改角色路径；不动 F8 隔离门 / PMR3 握手 / R5/R6；
+不引入反射遍历 setter、不引入"通用隐藏字段写入"的任何替代；不把字符串检查当成运行行为证明；
+不自动烘焙、不启动或关闭 Unity、不提交。
+
+**步骤**：S1 本段写入主计划（先行）→ S2 `CopyComponentSet`/`CopyComponentFields` 显式重写 +
+延后引用重绑定 + 回读核对 + 源/dest owner 前后核对 → S3 `PMBattleContentSceneFactsCheck` 替换已过时的
+F4 字符串不变量，新增「模板层级组件类型 ⊆ 支持集」的**源数据级**检查与「无 Serialized 写入 API」断言
+→ S4 同一 cs 内新增最小编辑器自测菜单（不新增 cs/meta）→ S5 T2 真实 Unity2019 程序集 build + 既有门禁
+build&&run → S6 交付记录 `_r4c_explicit_copy_fix.md`。
+
+**验收状态（本轮）**：
+
+| ID | 场景 | 执行者 | 状态 |
+|---|---|---|---|
+| T1 | AI 静态 + 自测代码：SceneFactsCheck 更新（删除已过时的 F4 字符串不变量；新增源数据级组件集检查、禁用 Serialized 写入断言、未支持类型拒绝的静态断言）；最小自测菜单代码落盘 | AI | 结果见本段末尾 |
+| T2 | AI：真实 Unity2019 程序集 `PMBattleContentBuildCheck` build 0 错误；`PMBattleContentSceneFactsCheck` / `RuntimeCheck` / `ManifestTest` / `SessionTest` build 后 run | AI | 结果见本段末尾 |
+| T3 | 用户：最小自测菜单 → 完整 `Prepare` 实机复跑 | 用户 | **PENDING_USER**（本轮未启动 Unity；**不能**声称 native crash 已消除） |
+
+**既有隔离硬门的诚实口径**：F8「临时场景必须自证拥有独立物理世界」这道硬门**保留**；但它在用户的
+Unity 上是否成立，本轮**没有**新增证据 —— 它**仍可能**在隔离证明失败时**阻断完整烘焙**（表现为菜单立即
+失败、零副作用）。不得称"已可用"。
+
+**本轮明确不主张**：crash 已消除；LODGroup/Sphere/Capsule/Rigidbody 路径已运行验证；
+"通用序列化写入已证实是根因"（只保留"现场栈全部落在该调用点"这一事实）。
+
+**本轮结果（T1/T2 实测；T3 PENDING_USER）**
+
+**代码改动（`Client/Assets/Editor/PMBattleContentBuild.cs`）**
+
+- 通用序列化字段搬运**整体删除**：`CopyComponentFields` / `TryGetArraySize` / `VerifyArraySizes` 三个函数与其守卫全部移除；
+  改为 `TryCopyComponentFields` 按具体类型分派 + 每类型一个独立函数 + **拷贝后立即回读核对**
+  （材质数组逐元素引用比对；数值字段不等即失败）。
+- **未知类型 fail-closed**：新增 `IsExplicitCopySupported`，在 `AddComponent` **之前**判定；
+  未实现类型（含 `TerrainCollider`/`WheelCollider` 等 Collider 子类、`Animator`、`SkinnedMeshRenderer`）被拒绝，
+  **不在目标上留下空壳组件**。
+- **归属**：拷贝前后核对**源 owner 不变**（`sourceOwnerAfter != sourceOwner` ⇒ 失败）+ 目标 owner 必须是 dest。
+- **引用不指源**：`LODGroup` 的 Renderer 数组与 `Renderer.probeAnchor` 延后到**整棵目标子树建完之后**，
+  按 `MapCopyContext.NodeMap`（源 Transform → 目标 Transform）重绑定；映射不到即失败；
+  回读核对还包含"该 Renderer 是否仍在源场景"这条判据。
+- **数组**：材质走 `sharedMaterials`（不触发实例化）；`MeshRenderer.sharedMaterials` 逐元素引用核对。
+- **MeshCollider 赋值顺序**：`enabled=false` → `sharedMesh` → `convex` → `cookingOptions` → 公共字段（最后恢复 enabled），
+  配置期间不存在"启用的 collider 处于非法 mesh/convex 组合"的中间态。
+- **最小自测菜单** `Build/Self-test PMNet Content Copy (no bake)`（同一 cs 内，无新增 cs/meta）：
+  合成 MeshFilter / MeshRenderer（两个材质）/ BoxCollider / MeshCollider / 两个子渲染器 / LODGroup（两级），
+  调**生产函数** `CopyComponentSet` + `ResolveDeferredReferences`，断言 owner、组件类型集合、数值字段、
+  材质数组、LOD 重绑定、源未被改写、清理；外加 fail-closed 负例（`WheelCollider` 必须被拒绝且目标上无该组件）；
+  自测期间同样挂 `CheckConsistency` 钩子并判失败；只写 `Logs/PMBattleContentSelfTest.log`，**不生成任何持久化资产**。
+
+**测试实际结果（T1/T2）**
+
+| 门禁 | 命令 | 结果 |
+|---|---|---|
+| `PMBattleContentBuildCheck`（**真实 Unity 2019.4 程序集**，netstandard2.0 + C#7.3，含新 API 与自测）| `dotnet build Tools/PMBattleContentBuildCheck -c Release` | **0 错误 0 警告** |
+| `PMBattleContentRuntimeCheck`（真实 Unity 2019.4 程序集）| 同上 | **0 错误 0 警告** |
+| `PMBattleContentSceneFactsCheck` | build 后 `dotnet .../PMBattleContentSceneFactsCheck.dll` | **137 项 0 失败，exit 0** |
+| `PMBattleContentManifestTest` | build 后 run | **92 项 0 失败** |
+| `PMBattleContentSessionTest` | build 后 run | **86 项 0 失败** |
+| `check_cs_braces.py`（两个改动 cs）| — | PASS（顺序感知）|
+
+**SceneFactsCheck 的更新**：§E 的 F4 字符串不变量（"`arraySize` 读取面收敛在 `TryGetArraySize` 里"）**已过时**，
+替换为更强且更简单的断言：代码里不得再出现 `.arraySize` / `TryGetArraySize` / `VerifyArraySizes` /
+`CopyFromSerializedProperty` / `ApplyModifiedProperties*`；§E 的三处 `CopyComponentSet` 顺序断言随新签名更新；
+新增 §H（源数据级组件集合 ⊆ 支持集 + 不可搬运引用字段必须为 `{fileID: 0}` + 支持集类型名覆盖）。
+口径写明：§H 的 A 部分是**源数据**检查、B 部分是**静态结构**检查，**都不证明** Unity 真能把这些字段拷过去。
+
+**新增门禁的负向验证（用 `--scene <临时副本>` 注入，未改源场景）**
+
+| 注入 | 期望 | 实测 |
+|---|---|---|
+| 把地面 MeshCollider 文档头改成 classID 154（WheelCollider，支持集外）| §H 报"组件类型不在支持集" | **FAIL 2 项**（含具体路径与 classID）|
+| 注入 `m_LightProbeVolumeOverride: {fileID: 987654}` | §H 源数据门失败 | **FAIL 1 项** |
+| 注入 `m_LightProbeProxyVolume: {fileID: 123456}` | §H 源数据门失败 | **FAIL 1 项** |
+
+另有一条**非空转的直接证据**：§E/§H 的"无 `ApplyModifiedProperties`"断言在本轮**真实失败过一次**
+（第 1715 行的**代码字符串**里含该词），改掉后转绿。
+
+**源数据普查（§H 输出，模板 + 地面，含全部后代）**：去重后 **37 个 GameObject**；普查按“调色板条目 + 地面”逐次遍历
+（同一对象被多个调色板引用时重复计入），所以组件计数为
+`Transform×39 / MeshRenderer×33 / MeshFilter×33 / MeshCollider×20 / BoxCollider×14` —— **全部落在显式拷贝支持集内**。
+⇒ 白名单里的 `LODGroup` / `SphereCollider` / `CapsuleCollider` / kinematic `Rigidbody`（以及 `probeAnchor` 重绑定路径）
+**有实现但当前源数据未执行到**，不得称已验证。
+
+**T3（用户侧）＝ PENDING_USER**：最小自测菜单与完整 `Prepare` **本轮都未在 Unity 内执行**（未启动 Unity、未抢锁）。
+因此**不能**声称 native crash 已消除。既有 F8 隔离硬门保留，**仍可能**在隔离证明失败时阻断完整烘焙。
+
+**口径修正（保留历史标注，不擦证据）**：本轮把
+「向非激活对象 AddComponent = 崩溃根因」「共享物理世界破坏登记表 = 崩溃根因」「通用序列化写入 = 崩溃根因」
+三者在文件头显式标注为**未证实的假说**；只保留两条**已观测事实**：32 条 `CheckConsistency … Fixing.` 的调用栈
+全部落在旧码的 `ApplyModifiedPropertiesWithoutUndo` 上；SIGSEGV 发生在关源场景时。
+F1（先 active 建、拷完再施加最终激活态）作为**安全纪律**保留。
+
+
+**第五轮窄修正（本段追加；只动 `PMBattleContentBuild.cs` 的定点修正，未重开调查、未扩范围）**
+
+主 Agent 复核第四轮落地代码后指出两项**具体缺陷**，已定点修掉：
+
+1. **`probeAnchor` 在"后代还没建出来"的一瞬间就被解析 ⇒ 对合法源数据必误拒**。
+   修正前 `CopyRendererCommonFields` 在登记延后修复**之前**先查 `context.NodeMap`，查不到即
+   `failures.Add(...); return false`。但 `CopyComponentSet` 是 `AddComponent` 之后**立刻**逐字段拷贝的，
+   而 map 路径**先拷 tile 根、再由 `CopyChildHierarchy` 建子层** ⇒ "根 renderer 的 `probeAnchor` 指向自己的后代"
+   这种合法源数据在那一瞬必然查不到，**无谓失败**（源场景 `m_ProbeAnchor` 全为 `{fileID: 0}`，故此前未被触发）。
+   **修正**：拷贝阶段**只排队**（只保留 `context == null` 的显式失败），解析统一交给整棵目标子树建完之后的
+   `ResolveProbeAnchorFixup`（届时查不到才失败；跨树引用照旧 fail closed，仍绝不指回源场景）。
+2. **`ResolveLodGroupFixup` 用 `RecalculateBounds()` 覆写已拷的 `size`/`localReferencePoint`；且解析失败仍 `SetLODs` 不完整数组**。
+   `RecalculateBounds()` 会按 Renderer 包围盒覆写这两个已按源逐字段拷贝并回读核对过的值；
+   而某一级 Renderer 映射不到时旧码只记失败、**照样** `SetLODs` 一个含 `null` 的数组（编辑器还会抛 `ArgumentException`）。
+   **修正**：删除 `RecalculateBounds()`；`SetLODs` 之后**显式恢复**源的 `size` / `localReferencePoint` 并回读核对；
+   新增 `mappingComplete` 记账 —— **任一** Renderer 解析失败即**整体放弃该 LODGroup 的 `SetLODs`**。
+
+**自测（同一 cs 内，走生产函数）**：源根 `MeshRenderer.probeAnchor` 指向**后建的后代**，并**自证**拷贝根时
+`NodeMap` 尚无该后代映射，建完整树后解析成功、且引用落在目标后代（不等于源）；负例为**树外 `probeAnchor`**，
+要求拷贝阶段只排队、解析阶段必失败且目标不留非空引用。LOD 侧改用**明显非自动**的
+`localReferencePoint=(1,2,3)` / `size=7.25f` 并回读，证明没有被重算；负例为 LOD Renderer 不登记映射，
+要求解析失败且目标 LODGroup 上不出现任何 Renderer。
+
+**验证结果（T2 级）**：`PMBattleContentBuildCheck`（真实 Unity 2019.4 程序集）**0 错误 0 警告**；
+`PMBattleContentSceneFactsCheck` build && run 后仍为 **137 项 0 失败**（与修正前**同数** ⇒ **无静态断言过时，
+本轮未改 `Tools/**` 下任何文件**）；`ManifestTest` 92 项 0 失败、`SessionTest` 86 项 0 失败；
+`check_cs_braces.py` PASS；`PMBattleContentBuild.cs` 全程 UTF-8 **BOM + CRLF**。
+日志：`Tools/r4c-narrow-fix-build.log`、`Tools/PMBattleContentSceneFactsCheck/r4c-narrow-fix-verify.log`。
+
+**口径不变（不得夸大）**：**T3 仍是 PENDING_USER** —— 本轮未启动 Unity，两处新增自测断言只有
+"生产函数 + 真实 Unity API 编译"级证据，**没有运行证据**；**不主张** native crash 已消除、
+`probeAnchor`/`LODGroup` 路径已实机通过、完整 `Prepare` 已可用。F8 隔离硬门保留。
+
+
+### R4-C 组合碰撞体守卫修正（真实烘焙 14:09 日志）
+
+- 用户已通过真实 Unity 最小组件复制自测。完整烘焙在 P_PROP_cookingpot 第二个 BoxCollider 被旧类型判重错误拒绝；源场景 YAML 的两个组件 ID 为 6114937395773329605 / 5099715451068533784，均属于 5099715451068533783。不是新增组件归属损坏证据。
+- 本次完整烘焙日志 #18/#19 证明源场景关闭及清理完成，PreviewScene 已证明物理世界非默认。不能由此宣称全部烘焙通过。
+- 修正：Collider 允许同类型多实例，逐个显式复制；其它类型与预存组件检查不放宽。最小自测新增两个不同形状 BoxCollider 的数量/字段/归属断言。
+- T1 AI：真实 Unity2019 BuildCheck 0错误0警告；SceneFactsCheck构建后运行139/0。初跑旧静态判重字符串断言失败，更新为非Collider判重规则并新增cookingpot双BoxCollider源事实后通过。日志 Tools/PMBattleContentSceneFactsCheck/r4c-multiple-colliders.log。
+- T2 用户：新增双 BoxCollider 自测和完整 Prepare，PENDING_USER；本轮不改源资产或生成 manifest。
+
+
+### R4-C prefab资产激活校验修正（14:14真实日志）
+- 地图333节点/角色56节点已保存；回读错误使用资产activeInHierarchy导致Ground/Plane误拒。源场景与scratch正常关闭，manifest未发布。
+- 目标：Editor回读校验用碰撞体至prefab根的activeSelf链（必须到达指定根且全为true），运行时C2的activeInHierarchy门不改。
+- T1 AI：校验已保存YAML并编译+静态门禁；T2 用户：最小自测新增父级禁用/自身禁用/非本树负例后完整Prepare，PENDING_USER。
+- 本轮读取生成资产：地图314 Collider均enabled且完整父链activeSelf=1；角色0 Collider；两者0 MonoBehaviour。仅是资产数据检查，不冒充运行时加载验证。
+
+- T1执行结果：BuildCheck真实Unity2019程序集0错误0警告；SceneFactsCheck构建后139/0（日志r4c-prefab-active.log）。生成资产YAML网格/材质非空检查通过；T2真实Editor回读仍PENDING_USER。
+
+
+### R4-C 控制器资产参数检查（14:23日志）
+- 地图保存及回读均已实机通过；角色在清理实例时Speed存在，保存后的资产Animator.parameters读出不存在。生成资产仍引用58bf525e1318d724e926a134defbf475（HYLD2.0/Animator/Player.controller），源控制器定义Speed m_Type=1。
+- 统一Editor两处检查，读取AnimatorController.parameters定义；AnimatorOverrideController解包并防环，不调用资产Animator.parameters，不改源控制器、不添加伪Speed参数。
+- T1 AI：真实Unity2019编译、静态回归、源控制器GUID及参数核验；T2用户：完整Prepare仍PENDING_USER。运行时实例Animator参数检查不改。
+
+- 本轮T1：BuildCheck真实Unity2019编译0错误0警告（先修正PMNet.UnityEditor命名空间遮蔽，用global::UnityEditor）；SceneFacts 141/0；SessionTest 86/0。ManifestTest 92项中91通过、1失败：两个prefab存在但manifest尚未发布，符合本次烘焙失败的磁盘状态；不改测试掩盖未完成发布，不宣称全绿。角色检查后的路径已复核，仅余WriteManifest写盘/导入/C2解析，Unity内仍待验。
+
+
+### R4-C C1首次完整实机烘焙通过（14:33用户复验）
+- 用户执行Prepare成功，Client/Logs/PMBattleContentBuild.log #15/#17两prefab保存，#18/#19地图/角色回读通过，#21 manifest发布并解析通过，#28清理完成，#29结束成功。C1本次完整烘焙实机PASS；不外推为正式双客户端/DS运行验收通过。
+- 三产物已生成于Client/Assets/Resources/PMNet。contentDigest=694c469dbf0bc1625aa67e69faf7eaf1b777ae2270420401c798963f2eba97ea，collisionDigest=2638629993，worldVersion=491146345；本次与14:09/14:14/14:23日志digest一致（不等于跨机器确定性已验证）。
+- AI重新构建后执行ManifestTest通过，日志Tools/PMBattleContentManifestTest/r4c-bake-success.log；此前缺manifest的产物完整性失败已解除。
+- 下一步仍待用户重打同版本DS/客户端并验正式地图出生、移动、障碍与退出；T42/T43/T44整体不因此改PASS。本次未启动Unity、未提交、未改资产。
+
+
+### R5代码优先开工（用户最新授权）
+- 前置已完成：读取主计划全文，两个有界调查_r5_host_survey.md/_r5_semantics_survey.md，冻结net-r5-projectile-contract.md与PMProjectileContracts.cs。调查报告中的“本机无Unity”不采纳，本机有2019.4但禁止抢锁启动第二实例。
+- 决策D-R5-01：有意修订R0挂起Spawn无cap，128/owner、总活记录1024、owner64，拒新而非无界；Verify暂存TTL随Spawn，Pending命中2000ms。身份单epoch单owner/origin ID不复用，拒绝UE客户端伪造server-origin激活号段免校验。
+- A1生命周期/假弹接管/三等待与A2目标历史/几何/L0-L3验证按共享类型并行；A3主侧实际API集成及独立复核；B声明RPC/复制，C宿主/表现顺序消费A实现；R6后续切换。A不能冒充完整T45。
+| ID | 实施映射 | 场景 | 执行者 | 方法/命令 | 预期结果 | 状态 | 证据 |
+|---|---|---|---|---|---|---|---|
+| T5A1 | A1 | 身份/容量/清理 | AI | PMProjectileLifecycleTest | 拒重号、跨epoch、有限队列 | PENDING | |
+| T5A2 | A1 | 接管/拒绝/迟到镜像 | AI | 同上 | 无双弹、拒绝实际移除、停止不重复 | PENDING | |
+| T5A3 | A1/A3 | 三Pending与墓碑 | AI | 同上+集成 | Pending零结算、出队保序且幂等 | PENDING | |
+| T5A4 | A2 | 历史帧/时间/升流 | AI | PMProjectileValidationTest | 不混帧、Teleport不插值、退化可见 | PENDING | |
+| T5A5 | A2 | L0-L3几何/消毒/预算 | AI | 同上 | 正反边界/NaN/超额/重复拒绝 | PENDING | |
+| T5A6 | A3 | 编译与整合 | AI | netstandard2.0+C#7.3及真实核心集成 | 零Unity依赖、非空生产链 | PENDING | |
+| T45 | B/C | 真网络/Unity投射物全链 | AI+用户 | 后续同版本双端 | 权威伤害/接管/拒绝/墓碑 | PENDING_USER | 用户决定实机集中后置 |
+
+
+### R5-A与B1代码交付（实机集中后置）
+- 已落地PMProjectile纯核心7文件：Contracts、Lifecycle、Pending、History、Validator、Coordinator、Codec。A1/A2并行→独立复核返工→A3/B1并行→独立复核返工；主Agent核报告/关键API后新增PMProjectileWireTest把实际codec字节往返与实际权威整合器串起来。
+- T5A1/2/3限定纯核心PASS，LifecycleTest本次build后510/0；T5A4/5限定纯核心PASS，ValidationTest264/0；T5A6真实库整合PASS，IntegrationTest952/0；B1 CodecTest453/0；主侧WireTest19/0（Spawn bytes→owner校验→权威升级→真实追赶→Snapshot bytes→Hit bytes→唯一settlement→Decision bytes）。全部本次build exit0/run exit0，总2198断言。四个netstandard2.0+C#7.3门禁均0错误；日志Tools各PMProjectile工程/r5-main-verification.log。
+- 采纳审查API修订：RequestSpawn请求时预留，Confirmed原地TryPromoteReservedToAuthority赋真实NetId后追赶；ReportHits必须显式authenticatedOwnerNetId；输出队列满Faulted+抛异常，不丢已接受伤害/裁决；host motion false/NaN/异常就地停不回退穿墙；Pending消毒结论暂存时去重并StopOnHit立即停，最后确认复核目标stream/alive；生命周期终态不因账本淘汰而复活。A3故障只有新epoch恢复，宿主未来必须捕获并终止该会话，不可吞掉继续跑。
+- 未接线的边界必须保留：PMR3生成RPC/真实Transport没有新增投射物入口；Unity DS/客户端宿主没有创建Coordinator或采集目标历史；没有输入攻击/可见子弹；Settlement还没有R6伤害接收者。此批是可运行的纯核心与wire测试，绝非已能联机开枪。T45仍PENDING_USER，R5整体进行中。
+- 下一代码阶段B2：在单一PMR3生成集合加入投射物网络对象和玩家Spawn/Verify声明；解决PMNetWorld真实NetId预留/初始状态发布顺序（不得先复制未确认空壳或用伪authorityId），codec100候选4321B超过生成byte[]4096需按预算分批（每弹5次Verify总额不能因拆包偷增）。C接DS历史采样/可信武器配置与激活策略/碰撞hook/客户端预测镜像表现；再R6全业务与旧链退役。R4未完成Modifier/效果拒绝等继续显式欠账，不因R5推进消失。
+- R0有意适配：三Pending有限资源/按owner-origin单epoch单调关联ID不复用；runtime Actor NetId仍由World唯一分配。报告_r5_*_report.md早期表述若与对应*_review.md冲突，以review和本段为准。主Agent未采纳“溢出丢最旧已确认输出”“失败回退直线”“预测登记无需升权威即可追赶”等错误实现结论，均已返工。
+- 用户报告正式内容打包已完成；本轮未要求用户再打包或做实机，不启动/关闭Unity，不改旧资产，不提交。
+
+
+### R5-B2代码续作（声明网络接线）
+- 用户继续授权。前置冻结net-r5-network-contract.md；先B2a World预留和B2a声明两组并行，后B2b消费实际API驱动与Transport门禁。
+- World预留使用不可伪造跨world能力令牌PMNetSpawnReservation（非裸NetId），Pending无对象/无Create；确认时初始snapshot先写好再上线。不通过注册假空壳或伪authorityId绕过。
+| ID | 实施映射 | 场景 | 执行者 | 方法/命令 | 预期结果 | 状态 | 证据 |
+|---|---|---|---|---|---|---|---|
+| T5B2a | World预留 | 取消/复用/容量/跨world/初始化 | AI | PMNetWorldTest build后run | 无幽灵Create、身份不复用、初值原子 | PENDING | |
+| T5B2b | 声明 | 同集合新RPC/Prop/类、稳定ID/权限/OnRep | AI | PMR5DeclarationTest+decl-check | 实际生成桩、旧ID不漂移 | PENDING | |
+| T5B2c | Driver | 真Transport AP/DS/SP状态与裁决 | AI | PMR5NetworkTest | Owner拒绝/无重复/弱网收敛/有限队列 | PENDING | |
+| T45 | Unity宿主 | 真双客户端投射物 | 用户+AI | 后置集中验收 | 完整接管与权威伤害 | PENDING_USER | 不强迫用户阶段性打包 |
+
+
+### R5-C宿主接线前置冻结
+- B2b网络与C适配已实现并独立复核返工，待主侧最终门禁。主侧补6个旧工具PMProjectile include及Server排除PMR5ProjectileDriver（Lobby只编声明）；旧stub真实API缺失由适配复核补齐。
+- 接下来DS/客户端宿主按net-r5-network-contract.md尾C契约并行接线；共享PMProjectileDiagnosticConfig只读。明确本轮可执行入口F键“单发诊断弹”，不是所有英雄普通/大招实现，不提前扣血；诊断结算出口只计数，R6接真正伤害/资源/胜负。
+- T5C1：DS历史采样/可信策略/对象生命周期接线，AI真实API编译与回归；T5C2：Client AP输入/子步候选/视图表现/清理，AI真实API编译与可自动门禁；T5C3/T45：Unity双客户端/PhysX网络行为继续PENDING_USER，不要求用户本轮点菜单。
+
+
+### R5-B2/C代码交付与主侧最终验证
+- World新增PMNetSpawnReservation能力令牌+TryReserveNetId/CancelReservedNetId/SpawnReserved：Pending不发Create，取消不复用ID，确认初始状态先写再上线。T5B2a纯核心PASS：PMNetWorldTest本次333/0。
+- 单一PMR3生成集合新增PMR5Projectile（ClassId227098277、snapshot6683）及玩家3RPC（Spawn21590/Hit33011/Decision38620），旧ID不变，整体ProtocolHash=0x43DD5A42。T5B2b PASS：DeclarationTest139/0，真实decl-check通过。
+- 网络驱动已消费真实Coordinator/Codec/World/Bridge/Generated，AP假弹→权威镜像接管/拒绝、SP镜像、TTL与身份预留清理、命中分48目标且每RPC计入5次总额、结算有界待取、发送错误显式fault。独立复核修decision过早接管、过时snapshot回退、缺权威追赶、Destroy留fake、无结算消费者丢伤害、Unbind漏预留、RPC复合键错误。T5B2c限定Transport字节链PASS：NetworkTest417/0（含重新调用生成RPC的Spawn重复幂等，故障回退13条断言失败证明门禁有效）。不是Unity网络实机。
+- C适配PMUnityProjectileMotion/Presentation及真实DS/ClientSessionHost接线已落地：指定独立PhysicsScene，可信诊断策略、每帧权威目标历史；客户端F键单发、逐子步候选、简单球形表现。目标候选数据不依赖角色Prefab Collider，不直接写HP。T5C1/C2编译与受控测试PASS：真实Unity2019 PMR4UnityCheck（含两个host）、PMR5UnityCheck均0错误；UnityAdapterTest74/0（替身非PhysX）；CandidateTest137/0。host自身完整运行仍待实机，不能用API编译代替。
+- DS宿主审查新增旁路DiagnosticProjectileUplinkGate曾用于掩盖driver重复Spawn会反向Rejected；主侧拒绝该方案，后续在driver完成真正幂等且完整删除host旁路，保持唯一player.ProjectileDriver适配器。断线补Alive=false历史+实时filter，DS/client周期排空dirty views，表现容量对齐并显式失败，候选key独立退休，日志异常不重复结算均已收口。
+- 主侧最终本次build0/run0：World333、Declaration139、Network417、Adapter74、Candidate137、R4Network389、R4Integration113、R3Integration143、ProjectileIntegration977，均零失败。PMR5NetworkCheck/PMR5UnityCheck/PMR4UnityCheck/PMClientCheck/PMUnityGlueCheck编译0错误；Lobby编到独立Tools输出0错误（8既有警告，不覆盖运行中server），decl-check3产物+锁文件通过。日志Tools各工程r5-b2c-main-verification.log、r5-lobby-build.log。
+- 真实缺口：R6伤害/资源/普通大招/道具/死亡胜负尚未接，现DS只DiagnosticProjectileHitCount计数；ServerDirect核心/网络有入口但正式玩法NPC/技能触发与权威自动目标扫描尚未接；子弹外观是diagnostic-sphere-not-hero-art。R4完整Modifier/效果拒绝/平台等仍欠账。T42/T43/T44/T45整体仍PENDING_USER，不能标完整游戏已迁完。
+- 用户继续“先代码后实机”，本轮不要求再Build。但协议摘要已变化，先前用户打包的DS不能和新脚本混用；集中联调时Lobby/DS/客户端必须同版本重建。
+- 下一阶段：R6先冻结真正英雄攻击授权/配置/资源与结算复制契约，再把诊断入口替成正式玩法并收旧链；不得无真实接收者直接删旧战斗。所有报告_r5_*_report.md早期结论受对应review及本段覆盖。不启动Unity、不改资产、不提交。
+
+
+### R6-A开工：正式直线攻击与资源/伤害/死亡/胜负
+- 用户持续授权继续写代码。两路有界前置_r6_combat_semantics_survey.md/_r6_host_survey.md完成；接口冻结net-r6-combat-contract.md和PMCombatContracts.cs。
+- D-R6-01：两端共用ResolveAttack的现存权威SpawnBulletCount（normal=PerShot/super=Total），不复活旧客户端Total多画与方向平移分歧；第一批仅非抛物线且有共享配置的normal/super，Unsupported拒且不扣资源。特殊技能/爆炸/弹射/道具/完整UI后续，不把它们静默当直线。
+- D-R6-02：血量共享MaxHp、Mana90、Energy200，普通扣蓝后重置reload按共享ReloadSeconds每拍回30，大招满200清0，伤害回能damage/2封顶；不复活麦克斯未使用的ManaRecover字段。本批显式100ms最小攻击间隔安全门。
+- D-R6-03：保留旧服首杀终局；修旧断线固定winner1为剩余唯一队伍/无唯一winner0；所有名册完成接入前StartMatch gate禁止新攻击。DS结束先ClientMatchResult/ACK或5秒宽限再Lobby.SubmitResult，防ACK即退出吞玩家结果。
+- A1纯核心planner/session与A2纯声明生成并行，后B真实R6+R5驱动整合/C宿主接线顺序消费API。旧链尚不删除，必须新玩法消费者闭环后清理。
+| ID | 实施映射 | 场景 | 执行者 | 方法/命令 | 预期结果 | 状态 | 证据 |
+|---|---|---|---|---|---|---|---|
+| T6A1 | Planner | 20英雄normal/super与unsupported | AI | PMCombatCoreTest | 数值/方向/弹数一致 | PENDING | |
+| T6A2 | Session | 资源/授权/ID/容量/过期 | AI | 同上 | 原子/幂等/有限 | PENDING | |
+| T6A3 | Session | R5结论→HP/死亡/胜负 | AI | 同上 | DS唯一写、重复无伤害、首杀单次 | PENDING | |
+| T6A4 | 声明 | 公共状态/OwnerOnly/可靠RPC | AI | PMR6DeclarationTest | 真实传输不泄资源、旧ID不变 | PENDING | |
+| T6B | 网络驱动 | Attack→R5→伤害/资源/结果ACK | AI | PMR6NetworkTest | 新链完整字节闭环 | PENDING | |
+| T6C | 宿主 | 真实Unity API编译+回归 | AI | PMR4UnityCheck等 | 新host可编，非实机证据 | PENDING | |
+| T46/T47 | 完整游戏 | 全业务/弱网/长局/退旧链 | AI+用户 | 后置集中验收 | 实际完整对局 | PENDING_USER | 本轮不让用户点菜单 |
+
+
+### R6-C宿主接线开工
+A1/A2/B已落地并复核：核心修planner转换溢出/首杀后同批继续伤害/重复授权终态绕过/满表拒绝ID复用/Start未全在线/结算owner状态；driver修Tick先于攻击、hostPosition先于slot、回蓝复制、AP接受态不被迟到拒绝倒转、满表发包前拒、回调异常隔离。接下来DS和Client宿主按net-r6-combat-contract.md尾C并行；只在非ServerSmoke常规新链替换diagnostic策略。客户端F普攻/G已支持直线大招+最小只读HUD。实机仍集中后置，不请求用户此时构建。
+
+
+### R6-A/B/C首批正式直线战斗代码交付（非完整R6验收）
+- 已落地PMCombatWeaponPlanner/PMCombatSession，17个normal直线配置与5个super直线配置支持；3个normal抛物线/15个无配置或抛物线super明确Unsupported不扣资源。双方共用ResolveAttack SpawnBulletCount与SpreadDirection；资源90/200、HP MaxHp、0伤害保留、首杀终局、断线winner不固定1。
+- PMR3Player新增9属性（7公共+Mana/Energy OwnerOnly），4可靠RPC（Attack42343/ResultAck50908/AttackResult44706/MatchResult39181），旧ID不变；PMR3Player类摘要0xB09BCD1C，全局ProtocolHash=0xE6130FAA。真正generated三产物+锁文件decl-check通过。
+- PMR6CombatDriver与R5已真实串接：先Tick回蓝再处理Attack→批准激活→计划内N颗预测/权威弹→DS结算HP/回能→纯字段复制→死亡Freeze/首杀锁结果→Client可靠MatchResult与ACK→全ACK或5s后Lobby SubmitResult。Duplicate Accepted不翻Rejected，满表拒绝记水位，错owner/epoch/expired/ended failclosed。宿主只在非ServerSmoke启用R6；smoke保留旧Probe诊断自动结算，不误认为CLI懂战斗。
+- DS宿主从认证roster原始TeamId/HeroId注册玩家，全expected ready后StartMatch、30s未齐Fail；正式结算消费者只有R6，不与diagnostic双订阅。死亡立即history.Alive=false+Mover Freeze，终局另按model.Ended守卫禁止推进；断线Freeze失败仍独立尝试Dispose。ready后提交一次冻结summary，LobbyAck/Exited原链不变。
+- Client宿主F普攻/G已支持直线大招，方向取真实predicted yaw，禁止旧CommandManger/shell并发；HP/Mana/Energy从复制只读，HUD显示资源/服务器真实拒绝原因及结果。可靠结果先Pump验证保存再判DS退出，不能用MatchResultsReceived计数当可信结果；未知/冲突终局不冒充胜利。正常退场释放隔离scene恢复大厅，末次结果HUD保留至新Enter/Stop。
+- 独立复核修正：double转int溢出伪合法配置、首杀后同批继续扣血、重复授权绕过终态、Capacity拒绝ID复用、Start未全在线、攻击先于回蓝误拒、回蓝不复制、hostPosition晚于slot消费、AP终态倒转、callback异常扰乱结算、未验证终局计数导致断线挂死、Enter失败漏Dispose等。未采纳报告中的by-design漏洞解释，均按后续fix/review和本段覆盖。
+- 主侧最终本次build0后run0：CoreTest1699/0、R6Declaration235/0、R6Network385/0（主侧追加DS真实拒绝原因可观察2条）、R5Network417/0、R4Network389/0、R4Integration113/0、R3Integration143/0、World333/0、ProjectileIntegration977/0、Candidate137/0。R4Network初跑两条旧“复制属性数3”断言失败，按9新属性改期望12后通过，旧ID/功能断言未弱化。日志Tools各工程r6-main-verification.log。
+- PMCombatCoreCheck/PMR6NetworkCheck netstandard2.0+C#7.3通过；真实Unity2019 PMR4UnityCheck（两个host+HUD）0错误，主侧补IMGUIModule引用；PMClientCheck/PMUnityGlueCheck0错误。Lobby独立Tools输出0错误（既有4警告，不覆盖运行进程）。不启动Unity、不改源场景/Prefab、不提交。
+- 明确未完成：真实Unity双客户端/PhysX/长局仍未验；普通攻击总弹幕节奏、抛物线/AoE/弹射/毒/位移特殊技能、道具权威化、原英雄子弹美术、摇杆与旧完整UI、回放、旧网络链退役尚未实现。本批攻击predictionMs仍固定100，尚未按实测RTT自适应。T42/T43/T44完整边界及T46/T47不因此改PASS；R4 Modifier/拒绝补偿/平台等继续登记。
+- 当前代码进度进入R6分项收尾：先继续特殊机制/道具与正式交互，再清旧链与集中实机验证。协议已变化，先前DS包不能与新脚本混用；按用户决定暂不请求分批重打，集中验证时统一Lobby/DS/Client构建。
+
+
+### 旧链退役开工（用户当前首要目标）
+- 用户明确“主要是旧的代码都删掉”，本轮优先删除而非继续扩特殊技能。用户授权代码优先前提下，不再以完成Unity实机作为删旧链前置；仅新DS路径保留，缺配置/不支持技能明确失败不fallback。集中实机风险仍待验，不伪称已完成所有玩法。
+- 三路有界引用/资产调查已落盘_legacy_server_removal_survey.md/_legacy_client_removal_survey.md/_legacy_asset_boundary_survey.md。主侧读PMDsHost.Initialize实码裁决：PMUdpRouter是早期P3无bootstrap诊断路径，现新会话用PMUdpSessionEndpoint，因此撤销client调查“PMUdpRouter属于新链必须保留”的建议，随旧DS分支删除。
+- 前置冻结net-legacy-retirement-contract.md。A服务端旧仿真/UDP/匹配分支，B客户端旧同步/预测/输入聚合及调用方，C旧DS wrapper/router和工具，D4资产精确解挂四组并行无写冲突。后顺序E旧proto消费归零/真实重生成与旧门禁改造，F综合回归/禁回归门/文档。
+- BattleManger GUID7200a0eb9673b6e4f8cb8386cdde31db只旧HYLDGameTest场景；HYLDCameraManger GUIDeec213bc5141674488046b737aede2bf只旧试玩2场景+Main Camera prefab。正式Scene HYLDGame.unity/Remake Player.prefab/Resources PMNet产物不修改。
+- 旧试玩自动宿主入口一并停用；保留供正式烘焙与美术读取的源资产及仍挂载数据/表现脚本，不把它们当旧网络存活理由。后续若继续清残余源表现代码须单独处理GUID/数据契约，不扩大删第三方库。
+| ID | 场景 | 执行者 | 验收 | 状态 |
+|---|---|---|---|---|
+| T-L1 | Server旧Battle/LZJUDP/7777退役 | AI | 编译+Lobby回归+实时引用扫描 | PENDING |
+| T-L2 | Client旧BattleData/SavedMove/Command/UDP删除 | AI | Client/Glue/真实UnityAPI编译+R4/R5/R6回归 | PENDING |
+| T-L3 | DS只bootstrap新session | AI | 缺bootstrap failclosed、无旧router；新smoke保留 | PENDING |
+| T-L4 | 四资产精确解挂 | AI | GUID反查0/文件ID引用一致/源产物hash不变 | PENDING |
+| T-L5 | 旧proto及失效工具删除 | AI | 真实生成/同步/字节门禁/无旧消费者 | PENDING |
+| T-L6 | 文档与真实游戏 | AI+用户 | docs只有新入口，实机后置 | PENDING_USER |
+
+
+### 旧网络链退役交付（用户优先删除要求已落实）
+**实际删除，不是注释/开关隐藏：** Server 8个旧仿真/UDP源码 + Client 15个旧manager/预测/输入/UDP/HUD源码 + DS早期router2源码 = **25个runtime cs**（删前合计约8602行，另PMDsHost wrapper净缩约400行）；对应Client17个meta删除；3个失效工具工程及5个源文件、2个实际存在的非权威proto副本删除。旧SavedMove/state_mask/BattleInfo/MoveAck/BattleReview网络模型不再有生产代码消费者。保留历史Docs/log/bin不作活源码。
+
+**协议：** 权威proto删14message/2enum，21message/9enum→7/7；Request7/8、Action31..41、MainPack13/15的号与名均reserved，幸存大厅字段ID不漂移。工具/client/server三份protoc产物逐字节一致，PMNet产物hash与源一致；真实build.bat生成+check-only和PMR3 decl-check均通过。大厅BattlePlayerPack/Hero/FightPattern/StartEnterBattle30是仍有消费者的匹配数据，保留正确。
+
+**运行入口：** Server默认只DS编排，旧HYLD_PMNET_DS=0无效，UDP7777已无代码监听；Client仅PMDS1，不再加载旧战场fallback；DS仅bootstrap新session，无裸socket/router/旧tick。主侧补Start/Pump异常立即Quit1、Dispose异常仍摘引用，PMDsHostCheck受控注入证明。run_lobby.bat使用仓库相对开发默认（env显式配置优先）并有--check-only路径检查，部署不再靠旧链可用掩盖缺配置；未启动任何用户服务。
+
+**资产：** 精确解挂4份旧测试/试玩资产的BattleManger/HYLDCameraManger MonoBehaviour文档与对应component项，新增行0，其它字节不变；两GUID实时资产反查0。正式Scenes/HYLDGame.unity、Resources/Remake/Player.prefab、Resources/PMNet三产物与BuildSettings哈希不变。仍挂载的PlayerLogic/TouchLogic/Toolbox/shell等源数据/表现/旧试玩脚本及第三方保留；其旧联网调用已断，不宣称全部OldScripts或已登记本地数值写例外已删除。
+
+**独立复核：** _legacy_runtime_review.md/_legacy_protocol_review.md确认入口单链/幸存大厅请求索引/4生成产物/资产ID正确，发现禁回归门将HYLDBaoShiZhengBaManger拼成双D（已修并新增真实名字复活负例）、wrapper顶层异常兜底缺口（已补）、启动脚本缺显式DS配置（已补本地默认且check-only通过）。现有HyldDS二进制属于旧构建仍可能包含删掉的分支，**源码删除不代表旧包更新**，保持集中实机前统一重建要求，不擅自删除用户构建目录。
+
+| ID | 实际验收 | 状态/证据 |
+|---|---|---|
+| T-L1 | Server独立输出构建0错误；PMDsLobbyTest268/0、Control623/0、R3Integration143/0；真实源码无旧UDP/仿真入口 | PASS（自动范围） |
+| T-L2 | PMClientCheck/GlueCheck/真实Unity2019 PMR4UnityCheck0错误；R4Network389/0、R4Integration113/0、R5Network417/0、R6Declaration235/0、R6Network385/0、CombatCore1699/0 | PASS（自动范围，非Unity实机） |
+| T-L3 | PMDsHostCheck73/0，含缺bootstrap、不重复Pump/Dispose及Start/Pump/Dispose异常受控注入 | PASS（wrapper替身范围） |
+| T-L4 | 4资产逐字节差分/GUID归零与禁改hash；SceneFacts141/0、Manifest94/0、ContentSession85/0 | PASS（静态资产+规则，原生加载仍待） |
+| T-L5 | PMNetVerify498/0独立protoc字节oracle；两套gen同步校验；PMLegacyRetirementTest28静态+6负例PASS | PASS |
+| T-L6 | Client/Server AGENTS与ForServer重写现状，旧协作/流水文档显式历史，BothSide当前入口更新 | PASS（文档）；真实对局PENDING_USER |
+
+其它主侧回归：World333/0、Session405/0、E2E209/0、Transport173/0、NumericEquivalence341/0，Hero表7/0与ID6/0，权威写门越界0（仍含已登记例外，不冒称全部权威违反清零）。全部本次build0后run0，日志Tools各工程legacy-final-verification.log；PMServerSmokeTest只编译未连用户现有服务，不列运行PASS。
+
+本轮完整回归首次暴露ContentSessionTest D5把已生成真实manifest摘要与合成夹具常量比较（实际2638629993 vs夹具1279077919）；已改为从真实contentDigest独立手算LE uint期望，未改资产/不放宽生产校验，复跑85/0。PMLegacy新增N6时主侧一次字符串换行转义错误导致编译失败，已整块重写测试方法并build0/run0，不沿用旧DLL。
+
+**Git边界：** Server子组曾用git rm暂存8条删除，主侧仅git restore --staged这8条并保留工作区删除；之后index核验空。本轮没有提交/无范围暂存/SVN写入。新旧当前源码正常编译，尚缺特殊机制、道具/完整UI/回放与真实长局性能等R6项，T46/T47整体不标完成。用户要求先代码后实机继续有效。
+
+
+### 退旧后框架审计（本轮用户授权：审核大框架与关键点，代码侧先闭合）
+目标：从真实调用与对抗输入检查边界，不能只复述旧报告或重跑绿灯；确认的问题直接修复并补能失败的回归。非目标：不扩新英雄/技能，不迁Unity版本，不启动/停止Unity或用户服务，不改原资源，不提交。当前工作区已有大量迁移修改与未跟踪源，必须保留。旧.github/copilot-instructions.md当前不存在，不据历史摘要重建。
+步骤：A四个独立只读证据分区审查→B主侧核证据/排严重性/冻结修复边界→C独立文件组修复与反例测试→D主侧交叉集成回归和剩余风险结论。状态只在本主计划登记；分区报告为证据而非重复计划。
+| ID | 实施映射 | 场景 | 执行者 | 方法/命令 | 预期结果 | 状态 | 证据 |
+|---|---|---|---|---|---|---|---|
+| T-AUD1 | A/B/C | Lobby/DS入局、认证、断线/结果与进程资源 | AI | 有界源码审查；确认后真实控制/会话反例测试 | 身份不可绕过，失败有界且不吞结果/泄资源 | PENDING | _audit_control.md |
+| T-AUD2 | A/B/C | 传输RPC复制及World生命周期 | AI | 有界源码审查；真实字节链/畸形包/弱网反例 | 不越权，不静默确认丢状态，队列有界 | PENDING | _audit_netcore.md |
+| T-AUD3 | A/B/C | Mover预测回滚与宿主时间顺序 | AI | 有界源码审查；历史耗尽/重同步/预算/非有限值测试 | 输入预算不可绕过，重模拟与终态一致 | PENDING | _audit_prediction.md |
+| T-AUD4 | A/B/C | 攻击授权/候选验证/结算/死亡结果 | AI | 有界源码审查；真实R5/R6字节链反例 | 不伪伤害/重复扣费/复活，合法攻击不永久阻断 | PENDING | _audit_combat.md |
+| T-AUD5 | D | 跨组修复集成、编译与旧链禁回归 | AI | 本次build0后run；每组隔离输出 | 生产源码可编，新反例先失败后修复通过，原门禁不弱化 | PENDING | 后续登记 |
+| T-AUD6 | D | Unity双客户端/PhysX/部署弱网 | 用户后置 | 同版本统一构建后的真实验收 | 不以算法或替身代替实机证据 | PENDING_USER | 本轮不启动实机 |
+
+
+### RPC UE式声明体验（用户插入优先任务）
+框架四区审计暂挂（只有计划，未启动四区审查）；用户先要求按UE实际声明/Implementation体验落实。已完成两路只读前置并主侧核真实PMHeroComponent头/gen.cpp，采用net-rpc-ue-authoring-contract.md冻结契约。UE调查后续建议误把hyld当UE引擎的部分不采纳；C#调查“必须先实机再实现”不采纳，保留自动事件实机待验即可。C#7.3用生成器专用#if声明区；不升级Unity/不做IL编织，不把标记Implementation当满足用户要求。
+步骤A生成扫描/验证/发射及生成器门禁；B业务/消费者/E2E迁移；C独立Editor生成便利层与外部命令；三组共享只读契约、互不写同一文件并行。主侧之后统一实际生成PMR3、编译与集成审查。保留RPC锁/hash/线布局；生成RPC调用普通名，实现private/protected Implementation，底层权限不放宽。
+| ID | 实施映射 | 场景 | 执行者 | 方法/命令 | 预期结果 | 状态 | 证据 |
+|---|---|---|---|---|---|---|---|
+| T-UX1 | A | 声明语法/签名/发射 | AI | PMDeclCheck及实际C#7.3编译 | 正常入口有效、错误声明fail closed | PENDING | _rpc_authoring_generator.md |
+| T-UX2 | B/D | PMR3迁移/稳定ID/业务字节链 | AI | decl-check+R3/R4/R5/R6门禁 | 13 RPC和hash不漂移、无旧发送入口 | PENDING | _rpc_authoring_migration.md |
+| T-UX3 | A/B/D | 本地/远端/Multicast/校验语义 | AI | PMNetE2E真实生成运行+反例 | 不递归、不过早执行业务、校验与顺序符合契约 | PENDING | 同上 |
+| T-UX4 | C/D | 自动生成构建便利层 | AI | 真实Unity2019程序集编译+外部gen/check | 失败可见、可外部修复、二次生成零diff | PENDING | _rpc_authoring_editor.md |
+| T-UX5 | D | 跨组集成回归 | AI | Client/Glue/UnityAPI/Lobby独立build及关键tests | 本次build0/run0、旧链不复活 | PENDING | 后续填写 |
+| T-UX6 | C/D | Editor自动事件/首编译恢复/Play与Build | 用户后置 | 同版本Unity2019内执行 | 正确触发/拦阻，不重编译循环 | PENDING_USER | 本轮不启动Unity |
+
+
+### RPC自然C#接口／IL编织（用户已批准，覆盖前段T-UX）
+用户否决#if声明区方案，选择普通标记方法直接写业务、普通名调用，由编译器工具自动拆体。T-UX实现取消（之前只有只读调查与契约，未改生产代码），总体框架审计继续暂挂。当前契约net-rpc-weaving-contract.md：复用现有生成helper/分发器，Mono.Cecil工具编织；无运行时反射、无Unity/C#升级、无业务手写Implementation；线上ID/参数/hash不变。
+步骤P1独立编织工具与真实生成夹具证明，同时独立实现Editor接口便利层（仅编译不启动）。P1主侧验收后P2生成器/业务/构建接线，P3对抗复核与回归。不会在证明前改现有PMR3源码或Generated。
+| ID | 实施映射 | 场景 | 执行者 | 方法/命令 | 预期结果 | 状态 | 证据 |
+|---|---|---|---|---|---|---|---|
+| T-W1 | P1/P2 | 普通调用/自动业务体/参数与异常语义 | AI | PMNetWeaverTest真实编译+编织+执行 | 本地一次、远端序列化、接收不递归 | PENDING | _rpc_weaver_proof.md |
+| T-W2 | P1/P3 | 漏编织/损坏/幂等/符号 | AI | 负例与文件hash前后对比 | failclosed、不半写、二次零diff | PENDING | 同上 |
+| T-W3 | P2 | 生成器/PMR3迁移及稳定协议 | AI | decl-check+ID锁+E2E/R3/R4/R5/R6 | 旧前缀不再业务可见、真实字节链不回退 | PENDING | 后续集成报告 |
+| T-W4 | P1/P2 | Editor与Player编织位置 | AI | 真实Unity2019程序集编译+接口核查 | 只在正确阶段处理、不改已加载内存假装成功 | PENDING | _rpc_weaving_editor.md |
+| T-W5 | P2/P3 | 增量构建与跨层回归 | AI | 独立输出build成功后run+check | guard实际生效、不跑旧DLL假绿 | PENDING | 后续登记 |
+| T-W6 | P3 | Unity真实自动编译/Player/IL2CPP | 用户后置 | 集中实机 | 实际回调与运行无误 | PENDING_USER | 不启动Unity、不抢锁 |
+
+
+RPC编织进度：P1主侧真实build/run141/0、EditorAPI编译0；P2生成器门禁107/0，编织门禁消费真生成物192/0（移除临时补guard），业务107处调用迁移，生产3Generated真实生成，锁SHA256 47f0ad21845f5810edb3705dbb7e1bcff4b6752595a83066f470766bd40fece8未变、协议0xE6130FAA。P3工具审查修复合法重载PDB误拒/假guard/构造gate/假版本/PDB错配/回滚锁等，314/0；真实E2E208/1为旧故障注入还在调普通名（现为网络入口）而不再调业务体，主侧待修检测力。Editor复核worker在trust.json.lock mkdir EPERM阶段退出，checkpoint确认0工具、核盘无review/policy/test新文件；不采用虚假完成。主侧已读其checkpoint与现码，后续仅继续未执行的Editor修复。实机不变PENDING_USER。
+
+
+### RPC自然C#接口交付（代码侧闭合，实机仍后置）
+用户批准的最终作者体验已落地：普通方法上标记、体内直接业务、普通名字调用；编译后工具自动拆私有业务体。不写Implementation/#if声明区，不再业务调用PMNet_前缀。T-UX旧方案取消；详细证据_rpc_weaving_integrated.md，现行接口net-rpc-weaving-contract.md。原框架四区审计尚未启动，不能用本轮结果冒称全架构无问题。
+
+- PMNetGen正式生成private helper+version0+构造/注册guard，PMNetWeaver处理普通入口和两个内部调用；Cecil只工具依赖。ID锁SHA256 47f0ad21845f5810edb3705dbb7e1bcff4b6752595a83066f470766bd40fece8不变、13RPC、ProtocolHash0xE6130FAA不变。
+- 根Directory.Build.targets编译前自动check/gen正式PMR3（差异才写），刷新新增Compile项；CoreCompile后先织obj/check再拷bin。首次工具restore、父输出/TFM隔离、增量与新类均实测。
+- Editor独立asmdef已接生成刷新/编译回调/永久Play-Build硬门/Player脚本DLL阶段；删缺格式休眠与旧包路径猜测，源gen/手动Repair必须重载；工具源内容指纹含依赖；进程输出/等待有界。真实事件/Player运行未验。
+- 独立审查修复PDB合法重载误拒、假version/guard、实例gate漏检、PDB错配、暂存/回滚/锁等；主侧再修不同namespace同名类PDB定位、方法体Synchronized等标志丢失（旧版真实6条失败→新版314/0）、Editor相对路径基准与盘符相对误认、E2E旧缺陷探针误调普通入口。
+
+| ID | 最终对象/方法 | 当前结果与证据 |
+|---|---|---|
+| T-W1 | 真实生成/Debug-Release编译/克隆执行 | PASS（代码）：WeaverTest314/0，57次CLI、22次夹具编译；普通入口/收包/异常体/委托/数组/锁语义 |
+| T-W2 | 漏编织/损坏/符号/回滚/并发 | PASS（已列场景）：新与注册guard、真实反例、check零写/二次零diff；断电强杀事务不保证 |
+| T-W3 | PMR3迁移/稳定ID/真实字节链 | PASS（代码）：Gen与decl-check、锁hash不变；E2E209/0；R3Runtime180/0、R3Integration143/0、R4Network PASS、R4Integration113/0、R5Declaration139/0、R5Network PASS、R6Declaration235/0、R6Network385/0 |
+| T-W4 | Editor API与纯策略/进程 | PASS（自动范围）：真实Unity2019 API编译0警告0错误；EditorTest26/0；不等于回调实机 |
+| T-W5 | 构建与跨层回归 | PASS：独立沙盒build pipeline6/0，冷/增量/标记变更/新增RPC/新增类/非法声明；Client/Glue/R4Unity/R6Network/NetLang及Server独立输出build0；Callspace93/0、Replication265/0+5/5注入、Transport173/0、Core1699/0、World333/0、Session405/0、Control623/0、Lobby268/0、Host73/0、NetVerify498/0、Legacy28+6通过 |
+| T-W6 | Unity自动事件/Player/Mono-IL2CPP | PENDING_USER：集中同版本构建验证，不启动Unity、不抢锁、不要求现在操作 |
+
+主侧日志Tools各工程/weave-main-verification.log，独立Server日志Tools/PMNetWeaverTest/server-main-build.log；沙盒Tools/rpc-build-pipeline.log与rpc-build-sandbox-*.log；方法标志反例methodimpl-before.log。所有PASS均本次build0才run，失败不执行旧DLL。主侧新增自动元数据target首次MSB4092引号问题已修并重测；沙盒夹具漏括号被完整性门阻断，已修夹具，未弱化生产校验。
+
+后置实机步骤（仅记录，不在本轮执行）：1 同版本源码打开Unity2019等导入/编译，查看Weaving日志与Verify菜单；首次无已加载hook若未织，按Repair→Request Script Reload恢复，不绕硬门。2 Play/退出/再次Play确认无循环编译和旧映像；正常RPC输入不在错误端执行业务。3 重建DS/Client，记录Player脚本DLL阶段目标与weave/check日志；BuildReport目标缺失必须失败不得回旧包。4 双客户端正式地图移动/普攻/伤害/胜负及弱网长局，与既有T42–T47一起验。IL2CPP单列验证，不能由Mono通过推定。
+
+交付约束：没有提交/暂存/回退/用户进程启停/原资源改动；5个新meta GUID唯一且无BOM/LF，中文源码BOM/CRLF；editor-tool输出加入.gitignore。明确不支持虚RPC/继承重写、泛型/async/重载/ref-out-in/params/default、强名称/非portable符号。下一步恢复原用户要求的大框架四区审计；特殊技能/道具/完整UI等旧欠账不因本轮消失。
+
+
+### 自动属性复制开工（用户批准）
+目标：自然C# auto-property赋值自动Push标脏；复制应用绕过setter通知；补PushBased=false真实轮询。字段旧模式保留，不拦任意stfld/数组元素修改，不复制UE的C++声明形式。前置核对UE文档§3.3/3.4：普通轮询与显式Push不同，当前hyld NeedsWork未消费PushBased=false。冻结net-property-authoring-contract.md；保留13属性名/ID/类型/掩码/OnRep与0xE6130FAA摘要。
+步骤A生成器auto-property helper/约束，B既有Weaver扩展并做真实夹具，C复制轮询/条件/公平预算三组独立；之后主侧D生产13成员同名迁移/真实生成/交叉回归，E独立审查窄修。不得把array[i]写入当作setter自动覆盖。
+| ID | 实施映射 | 场景 | 执行者 | 方法/命令 | 预期结果 | 状态 | 证据 |
+|---|---|---|---|---|---|---|---|
+| T-P1 | A | 生成/签名与不支持形态 | AI | PMDeclCheck/C#7.3 | helper正确、非法声明失败、旧字段不变 | PENDING | _property_generator.md |
+| T-P2 | B | 真编织/赋值/接收/guard/幂等 | AI | PMPropertyWeaverTest+原WeaverTest | 自动脏、不回环、无OnRep副作用、纯属性也不能漏织 | PENDING | _property_weaver.md |
+| T-P3 | C | Poll/条件/ACK/公平预算 | AI | PMReplicationTest新增真实反例 | 清脏ACK后仍Poll，无变化不发，无饥饿 | PENDING | _property_polling.md |
+| T-P4 | D/E | PMR3/R5生产迁移 | AI | gen/check+ID锁+R3/R4/R5/R6/E2E | 13属性协议不漂移，普通赋值真实同步 | PENDING | 后续整合报告 |
+| T-P5 | D/E | 编译与SDK构建 | AI | Client/Glue/UnityAPI/Server独立输出及沙盒 | build0后run0，冷/增量正确 | PENDING | 后续日志 |
+| T-P6 | E | Unity/Player/IL2CPP | 用户后置 | 集中实机 | 不用替身/编译冒充真实回调 | PENDING_USER | 不启动Unity |
+
+
+### 自动属性复制交付（代码侧验收闭合）
+已按用户批准落地自然C#自动属性：普通赋值/复合赋值自动Push；仅值变化且Authority且PushBased才标脏，收包Reader绕setter直接RawSet，OnRep仍由复制层统一分发。字段旧手动模式保留；数组只跟踪引用替换，原地改元素/同引用重赋需手动Mark或Poll。接口net-property-authoring-contract.md，整合报告_property_integrated.md。
+主侧迁移PMR3Player12+PMR5Projectile1为同名private auto-property，Publish普通赋值，认证uid经InitializeIdentity；原公开只读视图不变。真实生成12+1个PropertySet helper，decl-check通过，两类13属性13RPC，ID锁SHA256=47f0ad21845f5810edb3705dbb7e1bcff4b6752595a83066f470766bd40fece8不变，类0xB09BCD1C/整体0xE6130FAA不变。
+
+复核与真实修复：生成器原PushBased具名参数误当条件且未真实解析、indexer静默遗漏；轮询未消费false、不可见未知基线/脏/force持续占预算、前缀饥饿、不可见仍调用Writer、预算顺延漏记loss导致重新可见永久旧值。RawSet再次命中方法标志丢失模式，真实持锁阻塞对照先失败后修，check逐位核对。B初版手写属性生成形状未作为最终验收，已删并全部真生成，加World/Channel字节链而非反射OnRep冒充。
+
+| ID | 最终结果 | 证据范围 |
+|---|---|---|
+| T-P1 | PASS：PMDeclCheck157/0 | 真生成/C#7.3/非法形态/字段兼容 |
+| T-P2 | PASS：PMPropertyWeaverTest223/0；RPC314/0 | 真实生成编译编织、纯属性与混合类、初值/赋值/收包/锁、损坏负例，非Unity实机 |
+| T-P3 | PASS：PMReplicationTest364/0，14/14缺陷注入 | Poll、条件/dirty/force/visibility-loss、ACK/丢包/公平预算与对象表变化 |
+| T-P4 | PASS：PMR3Runtime180/0、R3Integration143/0、R4Network PASS、R4Integration113/0、R5Declaration139/0、R5Network PASS、R6Declaration235/0、R6Network385/0、E2E209/0 | 生产13成员普通赋值真实复制回归、ID与摘要不变 |
+| T-P5 | PASS：Client/Glue/R4Unity/EditorWeaving/R6Network及Server独立输出build0；SDK沙盒6/0；Core1699/0、Session405/0、World333/0、Legacy28+6、EditorTest26/0 | 全部主侧本次build0才run0，不跑旧DLL假绿 |
+| T-P6 | PENDING_USER | Unity自动事件/Player/Mono/IL2CPP/真实双客户端仍集中后置 |
+
+日志Tools各工程/property-main.log，Server日志Tools/PMPropertyWeaverTest/server-main.log（输出独立Tools目录）；SDK冷/增量日志Tools/property-build-pipeline.log。未提交/暂存，未改原资源，未启动Unity/用户服务。后置步骤沿RPC交付T-W6，再检查普通HP/资源/快照赋值跨端、OnRep不重复与弱网收敛。
+尚未扩展FastArray、自定义属性访问器、完整频率/休眠/相关性、网络继承；整对象扫描可能顺便发现混合对象未标脏变化，不把这种偶然性当数组自动跟踪承诺。原框架四区审计与特殊技能/道具/UI等欠账仍保留。
+
+
+### 运行准入测试集开工（本轮）
+判断：当前可进入受控开发联调，不等于稳定性/发布验收。T-AUD1..4仍待专项审查，T-W6/T-P6仍待真实Unity验证。本轮只补可重复的运行准入测试集与实机操作表，不启服务/Unity、不修改玩法实现。
+冻结交付：Tools/run_net_acceptance.py（--suite smoke|full，默认smoke，--list只列清单，--timeout-seconds，串行运行，单次唯一Tools/NetAcceptance/bin/<run>/输出与JSON/Markdown汇总）；Tools/test_net_acceptance_runner.py；Docs/plans/net-runtime-acceptance.md（操作规范，不另立进度源）。构建0才run，失败/超时/取消不跑旧DLL，默认失败即停且剩余NOT_RUN；机器报告明确CODE_ONLY，Unity永不自动判通过。full包含smoke且加入编织真实夹具、控制/传输/战斗/资源门及SDK沙盒。不得自动运行需要用户大厅或Unity进程的测试。
+
+| ID | 范围与执行者 | 方法与通过标准 | 状态 |
+|---|---|---|---|
+| T-GATE1 | AI：统一runner | 清单显式、失败退出非0、build失败不run、超时/取消清理自身子树、唯一产物与增量报告；自测含失败反例 | PENDING |
+| T-GATE2 | AI：实际代码门禁 | 通过runner执行smoke；full可独立运行，未跑不宣称通过。只报告本次结果 | PENDING |
+| T-GATE3 | AI：实机测试说明 | U01..U12：构建编织、入局、运动/碰撞、普通RPC/复制、攻击/资源、终局退出、再开局、断线、配置负例、弱网、长局、后端构建；每项前置/操作/结果/证据/停止条件 | PENDING |
+| T-GATE4 | 用户集中实机 | 按操作表至少完成首次冒烟与保存四端日志；没有实测证据始终PENDING_USER | PENDING_USER |
+
+复核优先级：首先Unity实际编译/加载/Player编织与混版本失败；其次全链会话失败回收/结果ACK；再做T-AUD1..4范围的认证/生命周期/预测/结算边界。不用新增测试数量代替尚未做完的审查。
+
+
+### 运行准入测试集交付（本轮实际执行）
+新增Tools/run_net_acceptance.py和Tools/test_net_acceptance_runner.py，以及实机操作规范Docs/plans/net-runtime-acceptance.md（U01..U12）。不启动服务/Unity、不改玩法，不把CODE_ONLY结果当实机或全框架审查。
+- smoke固定14项；full固定34项（包含smoke、真实属性/RPC编织、控制/传输/声明/战斗/资源、protobuf独立oracle、DS wrapper、真实Unity API编译、Server独立输出和SDK沙盒）。不含需要用户大厅或Unity的运行项。
+- 输出Tools/NetAcceptance/bin/<run>/summary.json/md；每阶段前记录命令/日志/状态、逐项落盘、单文件原子替换；build失败/缺dll不运行旧产物；失败/取消后完整清单保留NOT_RUN。日志直写文件、wait有期限，避免长行内存膨胀/后代持管道等待EOF。
+- 主侧反例证实并修复初版runner三处：取消报告只剩当前项（旧len1/应3）；空/半写锁被自动当陈旧删除（可能双runner并发）；运行前及成功项未及时写报告。修为完整预置清单、现存锁一律保守拒绝需人工确认后清理、每阶段持久化。超时测试实际验证父进程+后代均退出、无关进程存活，不只断言父PID。
+- 文档实码确认：1v1应两个账号各自开始匹配，不在同队组队等另一队；run_lobby.bat固定启动Debug Server.dll，独立输出必须显式启动对应DLL；客户端B使用独立-logFile避免和DS默认日志互相覆盖；DS日志下一局前归档。明确OwnerOnly泄漏/OnRep次数/畸形票据注入/精准坐标和性能缺观测手段时BLOCKED。
+
+| ID | 实际结果 | 证据 |
+|---|---|---|
+| T-GATE1 | PASS：runner自测47/47（临时仓库真实编译失败/缺产物/退出码、进程树超时、并发锁及报告反例） | Tools/net-acceptance-selftest.log |
+| T-GATE2 | PASS：统一入口--suite full 34/34（含smoke14项），所有构建成功后运行；build-only不运行 | Tools/NetAcceptance/bin/20260922-214631-p75360-72a55d/summary.json 与summary.md；总日志Tools/net-acceptance-full.log |
+| T-GATE3 | PASS（仅文档可执行性核查）：U01..U12已写前置/步骤/标准/证据与停止条件 | Docs/plans/net-runtime-acceptance.md |
+| T-GATE4 | PENDING_USER | 未运行Unity/Player/真实客户端 |
+
+本次判断：可以开始受控联调（不是已通过实机准入）；先Unity编织/构建→双客户端分开匹配→运动/普通攻击/HP资源→首杀终局→回收再开。T-AUD1..4仍PENDING，不因现有门禁通过自动关闭。发布/稳定性结论仍未达；弱网/长局/Mono-IL2CPP实机仍后置。没有提交/暂存。

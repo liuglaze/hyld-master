@@ -129,12 +129,18 @@ namespace PMR3RuntimeTest
             }
 
             string player = Path.Combine(root, "Client", "Assets", "Scripts", "PMR3", "PMR3Player.cs");
+            string projectile = Path.Combine(root, "Client", "Assets", "Scripts", "PMR3", "PMR5Projectile.cs");
             string outDir = Path.Combine(root, "Client", "Assets", "Scripts", "PMR3", "Generated");
             string idLock = Path.Combine(root, "Docs", "plans", "pmnet-r3-ids.json");
 
             ProcessStartInfo psi = new ProcessStartInfo();
             psi.FileName = "dotnet";
-            psi.Arguments = "\"" + gen + "\" --decl-check \"" + player + "\" --out-dir \"" + outDir
+            // R5-B2a：单一生成集合现在含**两个**网络类（PMR3Player + PMR5Projectile），
+            // 因此声明路径必须把两者都传给 --decl-check，否则生成期注册表（2 个类）
+            // 会与只扫到 1 个类的内存产物对不上 —— 那会把“本测试没跟上新建类”
+            // 误报成“生成产物与声明不同步”。
+            psi.Arguments = "\"" + gen + "\" --decl-check \"" + player + "\" \"" + projectile
+                            + "\" --out-dir \"" + outDir
                             + "\" --id-lock \"" + idLock + "\"";
             psi.UseShellExecute = false;
             psi.RedirectStandardOutput = true;
@@ -183,18 +189,22 @@ namespace PMR3RuntimeTest
             CheckTrue(PMNetRegistry.IsSealed, "Register() 之后注册表已封板");
             CheckEq(PMNetRegistry.ClassCount, global::PMNet.Generated.PMNetGeneratedRegistry.GeneratedClassCount,
                 "注册类数 == 生成期常量 GeneratedClassCount");
-            CheckEq(global::PMNet.Generated.PMNetGeneratedRegistry.GeneratedClassCount, 1,
-                "本程序集只注册 PMR3Player 一个类");
+            // R5-B2a：单一生成集合里新增了投射物声明对象（PMR5Projectile），
+            // 所以类数从 1 修正为 2。这里只改“新建类带来的计数”，
+            // 下面的 ID/描述符断言（PMR3Player 的 ClassId、成员数、RPC 档位）一律不放宽。
+            CheckEq(global::PMNet.Generated.PMNetGeneratedRegistry.GeneratedClassCount, 2,
+                "本程序集注册 PMR3Player + PMR5Projectile 两个类（R5-B2a 新增投射物声明）");
 
             PMNetClassEntry entry;
             CheckTrue(PMNetRegistry.TryGetClass(PMR3Player.PMGeneratedClassId, out entry) && entry != null,
                 "PMR3Player 的 ClassId 已注册：0x" + PMR3Player.PMGeneratedClassId.ToString("X8"));
             // R4-B（B1）：PMR3Player 新增第 3 个复制属性 `_movementSnapshotV1`（运动权威快照，byte[]）。
-            // 位宽从 2 变 3，故这里更新期望值，并**额外断言新字段真的注册进了描述符**
-            // （只改数字会退化成"数字对不对"，断言成员名才能证明它就是那个新字段）。
-            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 3, "复制属性位宽 == 3（Uid + ProbeCount + MovementSnapshotV1）");
-            CheckEq(entry != null && entry.Rep != null ? entry.Rep.Properties.Length : -1, 3,
-                "复制描述符里的属性数 == 3");
+            // R6-A2：再追加 9 条战斗声明属性（7 公共 + 2 OwnerOnly），位宽从 3 变 12。
+            // 这里只更新「新增属性带来的计数」；下面的成员名/写入口断言与 ID/RPC 档位断言一律不放宽。
+            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 12,
+                "复制属性位宽 == 12（Uid + ProbeCount + MovementSnapshotV1 + 9 战斗属性）");
+            CheckEq(entry != null && entry.Rep != null ? entry.Rep.Properties.Length : -1, 12,
+                "复制描述符里的属性数 == 12");
 
             PMNet.PMPropertyDescriptor snapshotProp = default(PMNet.PMPropertyDescriptor);
             bool hasSnapshotProp = false;
@@ -377,10 +387,10 @@ namespace PMR3RuntimeTest
                 CheckTrue(clientPlayer.Role == PMNetRole.AutonomousProxy,
                     "客户端副本角色 = AutonomousProxy（IsOwner 由 DS 现算）");
 
-                // C2：本地 owner 经生成桩发一次探针（`PMNet_ServerProbe`，不手写业务包）。
+                // C2：本地 owner 经生成桩发一次探针（`ServerProbe`，不手写业务包）。
                 int nonce = 0x1234;
                 clientPlayer.ProbeSentCount++;
-                clientPlayer.PMNet_ServerProbe(nonce);
+                clientPlayer.ServerProbe(nonce);
                 CheckEq(global::PMNet.Generated.PMNetGeneratedRegistry.PendingRpcCount, 0,
                     "RemoteSender 已接线：生成桩没有落进待发队列");
 
@@ -398,7 +408,7 @@ namespace PMR3RuntimeTest
 
                 // C4：再发一次，计数继续增长（不是一次性巧合）。
                 clientPlayer.ProbeSentCount++;
-                clientPlayer.PMNet_ServerProbe(nonce + 1);
+                clientPlayer.ServerProbe(nonce + 1);
                 rig.Frame(6);
 
                 CheckEq(serverPlayer.ProbeCount, 2, "第二次探针后服务端 ProbeCount == 2");
@@ -449,7 +459,7 @@ namespace PMR3RuntimeTest
 
                 // 非 owner 冒名发探针：callspace 会判 Remote（客户端侧不额外判归属），
                 // 但**服务端**必须按「来源连接是不是该对象 owner」拒绝（D-R0-42）。
-                otherPlayer.PMNet_ServerProbe(0x777);
+                otherPlayer.ServerProbe(0x777);
                 rig.Frame(6);
 
                 CheckEq(serverPlayer.ProbeCount, probeBefore, "非 owner 的探针**没有**执行实现（ProbeCount 不变）");
@@ -472,7 +482,7 @@ namespace PMR3RuntimeTest
                 CheckTrue(ownPlayer != null, "第一个客户端拿到自己的副本");
                 if (ownPlayer != null)
                 {
-                    ownPlayer.PMNet_ServerProbe(0x99);
+                    ownPlayer.ServerProbe(0x99);
                     rig.Frame(6);
                     CheckEq(serverPlayer.ProbeCount, probeBefore + 1, "owner 的探针仍然被接受（对照）");
                 }

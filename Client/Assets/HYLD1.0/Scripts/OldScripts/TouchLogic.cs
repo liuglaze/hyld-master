@@ -87,7 +87,6 @@ public class TouchLogic : MonoBehaviour
 			isMoveInputActive = false;
 			HYLDStaticValue.PlayerMoveX  = 0f;
 			HYLDStaticValue.PlayerMoveY  = 0f;
-			CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
 			Logging.HYLDDebug.FrameTrace($"[StopInput][JoystickRelease] axis=(0.0000,0.0000) prevMove=({prevMoveX:F4},{prevMoveY:F4}) startDz={MoveStartDeadZone:F2} stopDz={MoveStopDeadZone:F2}");
 			_lastLoggedMoveZero = true;
 			_lastLoggedMoveX = 0f;
@@ -110,8 +109,8 @@ public class TouchLogic : MonoBehaviour
 			selfFireLineRenderer.enabled = false;
 
 			// ★ 去掉 fireState == none 的前置检查
-			// 现在攻击统一走 CommandManger → EnqueueAttack 队列，
-			// 不再用 fireState 做输入门控，fireState 只用于逻辑层驱动发射
+			// 旧链退役（契约 §B）：攻击原统一走 CommandManger → EnqueueAttack 队列，该发送链已删除；
+			// 这里不做输入门控，fireState 只用于逻辑层发射表现
 			// 摇杆位移太小时忽略（两个轴都接近零 = 没有有效方向）
 			Logging.HYLDDebug.FrameTrace($"[AttackInput] joystick={move.joystickName} FirePosX={FirePositionX:F4} FirePosY={FirePositionY:F4}");
 			if (Mathf.Abs(FirePositionX) <= 0.02f && Mathf.Abs(FirePositionY) <= 0.02f)
@@ -134,13 +133,14 @@ public class TouchLogic : MonoBehaviour
 					Logging.HYLDDebug.FrameTrace("[SuperInput] REJECTED reason=unsupported_super_type");
 					return;
 				}
-				Logging.HYLDDebug.FrameTrace("[SuperInput] ACCEPTED -> AddCommad_SuperAttack");
-				CommandManger.Instance.AddCommad_SuperAttack(FirePositionX, FirePositionY);
+				// 旧链退役（契约 §B）：旧 CommandManger 发送端已删除，旧摇杆**未接新链**。
+				// 这里只记录校验通过，不发送、也不伪造「已接新链」。
+				Logging.HYLDDebug.FrameTrace("[SuperInput] VALIDATED（旧 CommandManger 发送已退役）");
 				return;
 			}
 
-			Logging.HYLDDebug.FrameTrace("[AttackInput] ACCEPTED -> AddCommad_Attack");
-			CommandManger.Instance.AddCommad_Attack(FirePositionX, FirePositionY);
+			// 旧链退役（契约 §B）：旧 CommandManger 发送端已删除，旧摇杆**未接新链**。
+			Logging.HYLDDebug.FrameTrace("[AttackInput] VALIDATED（旧 CommandManger 发送已退役）");
 		}
 	}
 
@@ -264,7 +264,6 @@ public class TouchLogic : MonoBehaviour
 			{
 				HYLDStaticValue.PlayerMoveX = 0f;
 				HYLDStaticValue.PlayerMoveY = 0f;
-				CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
 				if (!_lastLoggedMoveZero)
 				{
 					Logging.HYLDDebug.FrameTrace($"[StopInput][DeadZoneZero] axis=({axisX:F4},{axisY:F4}) magSqr={magnitudeSqr:F4} prevMove=({_lastLoggedMoveX:F4},{_lastLoggedMoveY:F4}) wasActive={wasMoveInputActive} startDz={MoveStartDeadZone:F2} stopDz={MoveStopDeadZone:F2}");
@@ -290,7 +289,6 @@ public class TouchLogic : MonoBehaviour
 				HYLDStaticValue.PlayerMoveY = 0f;
 			}
 
-			CommandManger.Instance.AddCommad_Move(HYLDStaticValue.PlayerMoveX, HYLDStaticValue.PlayerMoveY);
 			float currentMoveX = HYLDStaticValue.PlayerMoveX;
 			float currentMoveY = HYLDStaticValue.PlayerMoveY;
 			if (_lastLoggedMoveZero)

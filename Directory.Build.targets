@@ -1,0 +1,224 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ============================================================================
+  RPC 自然 C# 接口 / IL 编织 —— 仓库级 .NET 构建接线（P2）
+
+  契约：Docs/plans/net-rpc-weaving-contract.md（§2 冻结接口 / §4 构建接口）
+  状态与验收：Docs/plans/net-architecture-migration.md（T-W3 / T-W5）
+  本文件证据：Docs/plans/_rpc_weaving_migration.md
+
+  为什么需要它：
+    生成器产出的是「普通带体方法 M + private 发送 helper PMNet_<M> + 收包 helper
+    PMNet_RpcInvoke_<M>」，而把业务体拆到私有体 PMNet_RpcBody_<M>、把两个 helper 改指私有体、
+    并把 stamp 从 0 改成 1 —— 全部发生在**编译之后**，由 Tools/PMNetWeaver 离线完成。
+    若没有这一步，编译出来的程序集在运行期会被自己的 guard 拒绝
+    （PMNet_BuildEntry 与实例 readonly 字段初始化都会调用 PMNet_RequireRpcWeave()），
+    所以「DLL 交给依赖或运行之前必须已经编织过」是硬要求，不能靠人记得手跑工具。
+
+  为什么钩在 @(IntermediateAssembly)（CoreCompile 之后、CopyFilesToOutputDirectory 之前）：
+    1. CopyFilesToOutputDirectory 的正文就是 <Copy SourceFiles="@(IntermediateAssembly)"
+       DestinationFolder="$(OutDir)">（SDK 10 Microsoft.Common.CurrentVersion.targets:4920），
+       而 CoreCompile 在 CoreBuildDependsOn 里排在 PrepareForRun（=CopyFilesToOutputDirectory）之前
+       ⇒ 在 obj 里织好的 DLL/PDB 就是被拷到 bin、被依赖方与运行方看到的那一份。
+    2. 只写工程自己的中间目录：不会去碰 Server/bin 之类可能正被运行中进程占用的输出，
+       也不会因为目标输出目录被锁而使编织失败。
+    3. 反过来，若改成「拷完之后再织 $(TargetPath)」，那么一旦 CoreCompile 增量重跑
+       （obj 里的未编织 DLL 被重写）而下一次 Copy 又把未编织 DLL 盖回 bin，
+       就会出现「磁盘上看起来是新构建、实际是未编织」的静默失败 —— 这正是本接线要排除的形态。
+
+  参与判定（只处理「编入 PMNetGeneratedRegistry.g.cs 生成集合」的目标）：
+    执行期在 @(Compile) 里查找文件名恰为 PMNetGeneratedRegistry.g.cs 的项。
+    不参与的项目（工具自身、只编译手写核心的门禁）目标体整体不执行，不改变既有构建行为。
+    执行期而非求值期的原因：PMNetE2E 的生成物由其 BeforeCompile 目标在编译前刷新并补
+    Compile 项，求值期的 @(Compile) 快照可能看不到它们。
+
+  require-rpcs 开关的判定：
+    只在生成源码里真的出现 PMGeneratedRpcId_ 常量时才传（逐文件结果打进日志）。
+    传了它却一条 RPC 都没有 ⇒ 工具按契约失败；没有码的项目不该被这个开关判红。
+    PMGeneratedRpcId_<M> 只有存在 RPC 时才会被生成（纯复制属性的类没有），因此这是精确判据。
+
+  防递归：
+    weaver 工具工程（Tools/PMNetWeaver）自己不编入任何 PMNetGeneratedRegistry.g.cs，
+    因此上面这条参与判定天然把它排除掉；本文件对它是完全惰性的（不触发任何构建）。
+
+  没有「跳过编织」的开关：
+    本接线刻意只提供定位类覆盖（工具工程路径 / dotnet 宿主），不提供全局旁路。
+    未编织程序集在运行期本来就会被 guard 拒绝，因此构建期 Fail-closed 才是唯一诚实的口径。
+
+  实现注意（踩过的坑）：
+    `IntermediateAssembly` 是**项**（@(IntermediateAssembly)），不是属性；
+    写成 $(IntermediateAssembly) 会恒为空，条件静默不成立 —— 表现为「接了线却从不编织」。
+    另外「收集」刻意与「定稿」拆成两个目标：收集按 @(Compile) 分批（每批只看一项），
+    定稿是非分批的，避免在分批目标里依赖同批次刚建立的项。
+-->
+<Project>
+
+  <PropertyGroup>
+    <!-- 工具工程位置：默认仓库内；命令行可用 -p:PMNetWeaverProjectPath=... 覆盖（只为定位）。 -->
+    <PMNetWeaverProjectPath Condition="'$(PMNetWeaverProjectPath)' == ''">$(MSBuildThisFileDirectory)Tools/PMNetWeaver/PMNetWeaver.csproj</PMNetWeaverProjectPath>
+
+    <!--
+      用哪个宿主跑 PMNetWeaver.dll：优先 MSBuild 自己拿到的 dotnet 宿主（.NET SDK 会带
+      DOTNET_HOST_PATH），否则退回 PATH 上的 dotnet。
+    -->
+    <PMNetRpcWeaveDotNetHost Condition="'$(PMNetRpcWeaveDotNetHost)' == '' and '$(DOTNET_HOST_PATH)' != ''">$(DOTNET_HOST_PATH)</PMNetRpcWeaveDotNetHost>
+    <PMNetRpcWeaveDotNetHost Condition="'$(PMNetRpcWeaveDotNetHost)' == ''">dotnet</PMNetRpcWeaveDotNetHost>
+
+    <!--
+      嵌套构建 weaver 时必须剔除的「父工程属性」。
+      这些是 global property 时会原样灌进被调用的工程，把工具的输出目录/目标框架带歪：
+      例如 `dotnet build -o <独立输出>` 会带上 OutputPath，而参与项目里又有 netstandard2.0
+      的替身编译门禁 —— 不剔除的话 weaver 会被要求用 netstandard2.0 构建 Exe。
+    -->
+    <PMNetRpcWeaveDropProperties>BaseOutputPath;BaseIntermediateOutputPath;MSBuildProjectExtensionsPath;ArtifactsPath;OutDir;OutputPath;TargetDir;TargetPath;TargetName;TargetFileName;TargetExt;IntermediateRefAssembly;TargetRefPath;TargetFramework;TargetFrameworks;TargetFrameworkIdentifier;TargetFrameworkVersion;TargetFrameworkMoniker;RuntimeIdentifier;RuntimeIdentifiers;SelfContained</PMNetRpcWeaveDropProperties>
+
+    <!-- 默认「本工程没有 RPC 标记」；由扫描目标单调提升为 true（只 false→true，与批次顺序无关）。 -->
+    <_PMNetRpcWeaveHasRpcs Condition="'$(_PMNetRpcWeaveHasRpcs)' == ''">false</_PMNetRpcWeaveHasRpcs>
+    <_PMNetRpcWeaveGeneratedSourceEmpty Condition="'$(_PMNetRpcWeaveGeneratedSourceEmpty)' == ''">true</_PMNetRpcWeaveGeneratedSourceEmpty>
+  </PropertyGroup>
+
+  <!-- 正式PMR3消费者在编译前检查/刷新元数据，避免仅编织了已过时的方向/可靠性描述。 -->
+  <Target Name="PMNetRefreshR3Declarations" BeforeTargets="BeforeCompile" Condition="'$(DesignTimeBuild)' != 'true'">
+    <ItemGroup>
+      <_PMNetR3Input Include="@(Compile)" Condition="'%(Filename)%(Extension)' == 'PMR3Player.cs'" />
+    </ItemGroup>
+    <PropertyGroup Condition="'@(_PMNetR3Input)' != ''">
+      <_PMNetR3Source>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)Client/Assets/Scripts/PMR3'))</_PMNetR3Source>
+      <_PMNetR3Out>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)Client/Assets/Scripts/PMR3/Generated'))</_PMNetR3Out>
+      <_PMNetR3OutDir>$([MSBuild]::EnsureTrailingSlash('$(_PMNetR3Out)'))</_PMNetR3OutDir>
+      <_PMNetR3Lock>$(MSBuildThisFileDirectory)Docs/plans/pmnet-r3-ids.json</_PMNetR3Lock>
+    </PropertyGroup>
+    <MSBuild Projects="$(MSBuildThisFileDirectory)Tools/PMNetGen/PMNetGen.csproj"
+             Targets="Restore;Build" Properties="Configuration=$(Configuration)"
+             RemoveProperties="$(PMNetRpcWeaveDropProperties)" Condition="'@(_PMNetR3Input)' != ''" />
+    <MSBuild Projects="$(MSBuildThisFileDirectory)Tools/PMNetGen/PMNetGen.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)"
+             RemoveProperties="$(PMNetRpcWeaveDropProperties)" Condition="'@(_PMNetR3Input)' != ''">
+      <Output TaskParameter="TargetOutputs" ItemName="_PMNetR3Generator" />
+    </MSBuild>
+    <Exec Command="&quot;$(PMNetRpcWeaveDotNetHost)&quot; &quot;@(_PMNetR3Generator)&quot; --decl-check &quot;$(_PMNetR3Source)&quot; --out-dir &quot;$(_PMNetR3Out)&quot; --id-lock &quot;$(_PMNetR3Lock)&quot;"
+          IgnoreExitCode="true" Condition="'@(_PMNetR3Input)' != ''">
+      <Output TaskParameter="ExitCode" PropertyName="_PMNetR3CheckExit" />
+    </Exec>
+    <Error Condition="'@(_PMNetR3Input)' != '' and '$(_PMNetR3CheckExit)' != '0' and '$(_PMNetR3CheckExit)' != '2'"
+           Text="PMNet声明检查失败，拒绝使用旧元数据编译。" />
+    <Exec Command="&quot;$(PMNetRpcWeaveDotNetHost)&quot; &quot;@(_PMNetR3Generator)&quot; --decl-gen &quot;$(_PMNetR3Source)&quot; --out-dir &quot;$(_PMNetR3Out)&quot; --id-lock &quot;$(_PMNetR3Lock)&quot;"
+          Condition="'@(_PMNetR3Input)' != '' and '$(_PMNetR3CheckExit)' == '2'" />
+    <Exec Command="&quot;$(PMNetRpcWeaveDotNetHost)&quot; &quot;@(_PMNetR3Generator)&quot; --decl-check &quot;$(_PMNetR3Source)&quot; --out-dir &quot;$(_PMNetR3Out)&quot; --id-lock &quot;$(_PMNetR3Lock)&quot;"
+          Condition="'@(_PMNetR3Input)' != '' and '$(_PMNetR3CheckExit)' == '2'" />
+    <ItemGroup Condition="'@(_PMNetR3Input)' != ''">
+      <_PMNetR3OldGenerated Include="@(Compile)" Condition="'%(RootDir)%(Directory)' == '$(_PMNetR3OutDir)'" />
+      <Compile Remove="@(_PMNetR3OldGenerated)" />
+      <Compile Include="$(_PMNetR3Out)/*.g.cs" Link="PMR3/Generated/%(Filename)%(Extension)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    ============================================================
+      1) 收集（分批）：按 @(Compile) 找生成注册表与生成源码
+         每批最多各命中一项，因此这里刻意保持极小（不做任何文件读取）。
+    ============================================================
+  -->
+  <Target Name="PMNetRpcWeave_Collect">
+    <ItemGroup>
+      <_PMNetRpcWeaveRegistry Include="@(Compile)" Condition="'%(Filename)%(Extension)' == 'PMNetGeneratedRegistry.g.cs'" />
+      <_PMNetRpcWeaveGeneratedSource Include="@(Compile)" Condition="'%(Extension)' == '.cs' and $([System.String]::Copy('%(Filename)').EndsWith('.g'))" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    ============================================================
+      2) 定稿（非分批）：现在两个项列表都齐了，再决定是否参与
+    ============================================================
+  -->
+  <Target Name="PMNetRpcWeave_Commit" DependsOnTargets="PMNetRpcWeave_Collect">
+    <PropertyGroup>
+      <_PMNetRpcWeaveActive Condition="'@(_PMNetRpcWeaveRegistry)' != '' and '$(DesignTimeBuild)' != 'true' and '@(IntermediateAssembly)' != ''">true</_PMNetRpcWeaveActive>
+      <_PMNetRpcWeaveGeneratedSourceEmpty Condition="'@(_PMNetRpcWeaveGeneratedSource)' != ''">false</_PMNetRpcWeaveGeneratedSourceEmpty>
+    </PropertyGroup>
+    <Message Importance="normal"
+             Condition="'@(_PMNetRpcWeaveRegistry)' != ''"
+             Text="[PMNet] 参与判定：$(MSBuildProjectName) 编入了注册表 @(_PMNetRpcWeaveRegistry->'%(Filename)%(Extension)')；生成源码 @(_PMNetRpcWeaveGeneratedSource->'%(Filename)%(Extension)')；Active=$(_PMNetRpcWeaveActive)" />
+  </Target>
+
+  <!--
+    ============================================================
+      3) RPC 标记扫描（分批）：逐文件看有没有 PMGeneratedRpcId_ 常量
+         每批两件事：把该文件的 Contains 结果打进日志（逐文件证据），
+         命中时把 _PMNetRpcWeaveHasRpcs 单调提升为 true。
+         空生成集合时这些批不存在，目标体不执行。
+    ============================================================
+  -->
+  <Target Name="PMNetRpcWeave_ScanGeneratedFiles" DependsOnTargets="PMNetRpcWeave_Commit">
+    <PropertyGroup Condition="'$(_PMNetRpcWeaveGeneratedSourceEmpty)' != 'true'">
+      <_PMNetRpcWeaveHasRpcs Condition="$([System.IO.File]::ReadAllText('%(_PMNetRpcWeaveGeneratedSource.FullPath)').Contains('PMGeneratedRpcId_'))">true</_PMNetRpcWeaveHasRpcs>
+    </PropertyGroup>
+    <Message Importance="normal"
+             Condition="'$(_PMNetRpcWeaveGeneratedSourceEmpty)' != 'true'"
+             Text="[PMNet] RPC 标记扫描：%(_PMNetRpcWeaveGeneratedSource.Filename)%(_PMNetRpcWeaveGeneratedSource.Extension) → PMHasRpcMarker=$([System.IO.File]::ReadAllText('%(_PMNetRpcWeaveGeneratedSource.FullPath)').Contains('PMGeneratedRpcId_'))" />
+  </Target>
+
+  <!--
+    ============================================================
+      4) require-rpcs 定稿（非分批）：只记录最终结论
+    ============================================================
+  -->
+  <Target Name="PMNetRpcWeave_ResolveRpcRequirement" DependsOnTargets="PMNetRpcWeave_ScanGeneratedFiles">
+    <Message Importance="normal"
+             Condition="'$(_PMNetRpcWeaveActive)' == 'true'"
+             Text="[PMNet] require-rpcs 判定：HasRpcs=$(_PMNetRpcWeaveHasRpcs)" />
+  </Target>
+
+  <!--
+    ============================================================
+      5) 编织 + 校验：CoreCompile 之后、CopyFilesToOutputDirectory 之前，作用于 @(IntermediateAssembly)
+         任何一步失败 ⇒ 目标失败 ⇒ 本次构建失败（Fail-closed：绝不把未编织的 DLL 交出去）
+    ============================================================
+  -->
+  <Target Name="PMNetRpcWeave"
+          AfterTargets="CoreCompile"
+          DependsOnTargets="PMNetRpcWeave_ResolveRpcRequirement">
+
+    <PropertyGroup>
+      <_PMNetRpcWeaveRequireArgument Condition="'$(_PMNetRpcWeaveHasRpcs)' == 'true'">--require-rpcs</_PMNetRpcWeaveRequireArgument>
+    </PropertyGroup>
+
+    <Message Importance="high"
+             Condition="'$(_PMNetRpcWeaveActive)' == 'true'"
+             Text="[PMNet] 编织 $(MSBuildProjectName)：@(IntermediateAssembly)；require-rpcs=$(_PMNetRpcWeaveHasRpcs)" />
+
+    <!-- 5.1 先把工具建出来：新 DLL 才允许交给依赖/运行（工具自身不参与本接线，无递归）。 -->
+    <MSBuild Projects="$(PMNetWeaverProjectPath)"
+             Targets="Restore;Build"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="$(PMNetRpcWeaveDropProperties)"
+             Condition="'$(_PMNetRpcWeaveActive)' == 'true'" />
+
+    <!-- 5.2 用 MSBuild 自己解析工具的输出路径（不硬编码 TFM/输出目录）。 -->
+    <MSBuild Projects="$(PMNetWeaverProjectPath)"
+             Targets="GetTargetPath"
+             BuildInParallel="false"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="$(PMNetRpcWeaveDropProperties)"
+             Condition="'$(_PMNetRpcWeaveActive)' == 'true'">
+      <Output TaskParameter="TargetOutputs" ItemName="_PMNetWeaverTargetPath" />
+    </MSBuild>
+
+    <Error Condition="'$(_PMNetRpcWeaveActive)' == 'true' and '@(_PMNetWeaverTargetPath)' == ''"
+           Text="[PMNet] 取不到 PMNetWeaver 的输出路径（工程 $(PMNetWeaverProjectPath)）。未编织的程序集在运行期会被 guard 拒绝，因此这里必须失败。" />
+    <Error Condition="'$(_PMNetRpcWeaveActive)' == 'true' and !Exists('@(_PMNetWeaverTargetPath)')"
+           Text="[PMNet] PMNetWeaver 未成功构建：@(_PMNetWeaverTargetPath) 不存在。" />
+
+    <!-- 5.3 weave：幂等（已编织则零改写）；全部预检通过前零写，失败不留半程序集。 -->
+    <Exec Command="&quot;$(PMNetRpcWeaveDotNetHost)&quot; &quot;@(_PMNetWeaverTargetPath)&quot; --weave &quot;@(IntermediateAssembly)&quot; $(_PMNetRpcWeaveRequireArgument)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          Condition="'$(_PMNetRpcWeaveActive)' == 'true'" />
+
+    <!-- 5.4 check：验证 wrapper 与两个 helper 真的都指向私有业务体（不是只看 stamp），且不写盘。 -->
+    <Exec Command="&quot;$(PMNetRpcWeaveDotNetHost)&quot; &quot;@(_PMNetWeaverTargetPath)&quot; --check &quot;@(IntermediateAssembly)&quot; $(_PMNetRpcWeaveRequireArgument)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          Condition="'$(_PMNetRpcWeaveActive)' == 'true'" />
+  </Target>
+
+</Project>

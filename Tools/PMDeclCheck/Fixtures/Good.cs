@@ -208,6 +208,80 @@ namespace PMNetFixtures
     }
 
     /// <summary>
+    /// 自动属性复制的**纯属性**夹具（零 RPC）。
+    ///
+    /// 契约 Docs/plans/net-property-authoring-contract.md §1/§2：
+    ///   · 支持普通实例 auto-property（get;set;），允许访问性不同与初始化器；
+    ///   · 总是存入新值；只有「值变化 + 有权威 + PushBased」才标脏；
+    ///   · PushBased=false 的属性走复制层轮询，setter 不标脏、也不涉及权威判定；
+    ///   · 数组只自动跟踪**整体引用替换**。
+    ///
+    /// 它同时是「纯属性零 RPC 的类也必须发射编织门」这条契约的载体 ——
+    /// 若生成器把版本门绑在「有 RPC」上，这个类就会带着未编织的 setter 跑起来。
+    /// </summary>
+    [PMNetworkObject]
+    public partial class FixtureAutoPropOnly : PMNetObject
+    {
+        /// <summary>公有 get / 私有 set（访问性不同是允许的）。</summary>
+        [PMReplicated]
+        public int Hp { get; private set; }
+
+        /// <summary>私有自动属性 + 复制条件。</summary>
+        [PMReplicated(PMCond.OwnerOnly)]
+        private float Mana { get; set; }
+
+        /// <summary>带初始化器的自动属性（初始值不依赖标脏；初始全量由复制层负责）。</summary>
+        [PMReplicated]
+        public int Armor { get; private set; } = 25;
+
+        /// <summary>PushBased=false：由复制层按基线比较轮询决定是否发送，setter 不标脏。</summary>
+        [PMReplicated(PushBased = false)]
+        public uint PingMs { get; set; }
+
+        /// <summary>数组自动属性（只跟踪整体引用替换）。</summary>
+        [PMReplicated]
+        public int[] Scores { get; set; }
+
+        /// <summary>字符串自动属性（引用重赋也要真的存值）。</summary>
+        [PMReplicated]
+        public string NickName { get; private set; }
+    }
+
+    /// <summary>
+    /// 混合夹具：**自动属性 + RPC 同在一个类里**。
+    /// 验证两类编织点（RPC 拆体、属性 setter/RawSet）共用同一套编织门，互不干扰。
+    /// </summary>
+    [PMNetworkObject]
+    public partial class FixtureAutoPropMixed : PMNetObject
+    {
+        /// <summary>自动属性。</summary>
+        [PMReplicated]
+        public int CombatHp { get; private set; }
+
+        /// <summary>带 RepNotify 的自动属性（规则 5 / 6）。</summary>
+        [PMReplicated]
+        public int Ammo { get; private set; }
+
+        /// <summary>RepNotify 目标（必须无参、返回 void）。</summary>
+        [PMRepNotify(nameof(Ammo))]
+        private void OnRep_Ammo()
+        {
+        }
+
+        /// <summary>Server RPC（规则 8：必须声明校验）。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void Reload(int amount)
+        {
+        }
+
+        /// <summary>`Reload` 的三态校验同伴（规则 13）。</summary>
+        private PMNet.PMRpcValidation Reload_ForceValidate(int amount)
+        {
+            return amount > 0 ? PMNet.PMRpcValidation.Accept : PMNet.PMRpcValidation.Reject;
+        }
+    }
+
+    /// <summary>
     /// 显式钉住稳定键的类型：改类名后类型 ID **不变**（契约 §2.3 的第三条不变性）。
     /// 门禁会把它改名后再扫一次并断言 ClassId 未变。
     /// </summary>

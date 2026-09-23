@@ -235,6 +235,8 @@ namespace UnityEngine
     /// <summary>
     /// R4-B（B3）：运动碰撞适配器的最小 PhysicsScene 替身（签名与真实 Unity 2019.4 一致）。
     /// <c>IsValid()</c> 是方法；CapsuleCast/OverlapCapsule 都是批量重载。
+    /// R5-C1（投射物 C1）新增用到 <c>SphereCast</c> / <c>OverlapSphere</c> 批量重载
+    /// （返回个数、结果写进数组），签名由 Tools/PMR5UnityCheck 引**真实 DLL** 校验。
     /// </summary>
     public struct PhysicsScene
     {
@@ -273,6 +275,27 @@ namespace UnityEngine
 
         public int OverlapCapsule(Vector3 point0, Vector3 point1, float radius, Collider[] results,
                                   int layerMask, QueryTriggerInteraction queryTriggerInteraction)
+        {
+            return 0;
+        }
+
+        /// <summary>
+        /// R5-C1（C1 投射物）：批量球体扫掠（恒 0 = 未命中；替身不实现几何，只保证形状）。
+        /// 对应 Unity 2019.4 <c>PhysicsScene.SphereCast(Vector3, float, Vector3, RaycastHit[], float, int, QueryTriggerInteraction)</c>。
+        /// </summary>
+        public int SphereCast(Vector3 origin, float radius, Vector3 direction, RaycastHit[] results,
+                              float maxDistance, int layerMask,
+                              QueryTriggerInteraction queryTriggerInteraction)
+        {
+            return 0;
+        }
+
+        /// <summary>
+        /// R5-C1（C1 投射物）：批量球体重叠（恒 0 = 无重叠；替身不实现几何，只保证形状）。
+        /// 对应 Unity 2019.4 <c>PhysicsScene.OverlapSphere(Vector3, float, Collider[], int, QueryTriggerInteraction)</c>。
+        /// </summary>
+        public int OverlapSphere(Vector3 position, float radius, Collider[] results,
+                                int layerMask, QueryTriggerInteraction queryTriggerInteraction)
         {
             return 0;
         }
@@ -321,8 +344,41 @@ namespace UnityEngine
     {
         None = 0,
         Space = 32,
-        A = 97, D = 100, S = 115, W = 119,
+        A = 97, D = 100, F = 102, G = 103, S = 115, W = 119,
         LeftArrow = 276, RightArrow = 275, UpArrow = 273, DownArrow = 274,
+    }
+
+    /// <summary>
+    /// R6-C：PMUnityCombatHud 的 OnGUI 需要 Rect。真实签名：
+    /// <c>public Rect(float x, float y, float width, float height)</c>。
+    /// </summary>
+    public struct Rect
+    {
+        public float x;
+        public float y;
+        public float width;
+        public float height;
+
+        public Rect(float x, float y, float width, float height)
+        {
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+        }
+    }
+
+    /// <summary>
+    /// R6-C：IMGUI 的最小替身（只含 PMUnityCombatHud 真正用到的两个真实重载）。
+    ///
+    /// 真实签名（Unity 2019.4）：<c>public static void Box(Rect position, string text)</c> /
+    /// <c>public static void Label(Rect position, string text)</c>。
+    /// 本门禁只能保证调用形状正确，**不**验证绘制语义（那必须回到 Unity）。
+    /// </summary>
+    public static class GUI
+    {
+        public static void Box(Rect position, string text) { }
+        public static void Label(Rect position, string text) { }
     }
 
     public static class Input
@@ -449,9 +505,21 @@ namespace UnityEngine
 
     public class Mesh : Object { }
 
+    /// <summary>
+    /// 材质替身。
+    /// R5-C2（C2 表现层）：适配器用 <c>new Material(内建共享材质)</c> 克隆一次占位材质
+    /// （只改克隆体，不写源），因此需要 <c>Material(Material)</c> 重载 ——
+    /// 该重载存在于 Unity 2019.4 真实程序集（由 Tools/PMR5UnityCheck 引真实 DLL 校验）。
+    /// 显式声明构造函数会取消隐式无参构造，故两者都给。
+    /// </summary>
     public class Material : Object
     {
         public Color color { get; set; }
+
+        public Material() { }
+
+        public Material(Material source) { }
+
         public void SetFloat(string name, float value) { }
         public void SetColor(string name, Color value) { }
     }
@@ -628,21 +696,10 @@ namespace UnityEditor.SceneManagement
 }
 
 // ============================================================================
-//  旧链边界替身：Server.UDPSocketManger
+//  旧链边界替身：Server.UDPSocketManger —— 已随旧链退役删除
 // ============================================================================
-//  R4-B（B3）把客户端宿主也编进了本门禁，而它对旧链只有一个接触点：
+//  这里曾为 `PMClientSessionHost` 对旧链的唯一触点
 //      global::Server.UDPSocketManger.CloseExisting();   // 关掉旧战斗 UDP socket
-//  真实实现（Client/Assets/Scripts/Server/Manger/UDPSocketManger.cs）会把整套旧战斗链拖进来，
-//  而本门禁要验证的是「新宿主的运动接线能否编译」。因此只替旧链边界，
-//  **不替本项目任何新类型**（Driver / Physics / Session / PMNet / PMMover / PMPrediction 全编真实源码）。
-//  签名与真实实现逐字一致（internal class + public static void CloseExisting()），
-//  否则这里会给出假绿灯。
-namespace Server
-{
-    internal static class UDPSocketManger
-    {
-        public static void CloseExisting()
-        {
-        }
-    }
-}
+//  提供替身。契约 §B 删除了旧客户端 UDP 链与那个触点，替身随之移除；
+//  门禁现在只编**真实**新类型源码，不再需要（也不再允许）这个 dummy。
+//  本文件其余部分是本门禁需要的真实 Unity API 桩件，不受影响。

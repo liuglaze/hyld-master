@@ -353,4 +353,354 @@ namespace PMNetBadFixtures
         }
     }
 
+    // =========================================================================================
+    //  规则 7（补充）：编织器明确拒绝的方法形态（契约 net-rpc-weaving-contract.md §3）
+    //
+    //  为什么这些必须在**声明期**报错：这些形态在编译后的 IL 编织阶段必然失败，
+    //  但那时生成物已经写出去、业务也已经照着它编译过了 ---- 失败点离声明点太远。
+    //  因此把它们收成语法事实，由规则 7 在生成前拦下。
+    //
+    //  本文件只做**语法解析**（不需要能编译），因此 `void M();`、`extern`、
+    //  `abstract` 这些语义不合法的写法在这里仍然是合法的输入。
+    // =========================================================================================
+
+    /// <summary>规则 7 补充：`virtual` / `abstract` / `extern` / `async` / 泛型 / 无体。</summary>
+    [PMNetworkObject]
+    public abstract partial class BadRpcWeaveShapes : PMNetObject
+    {
+        /// <summary>virtual：编织器不处理虚方法/网络继承。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public virtual void VirtualRpc(int value)
+        {
+        }
+
+        private PMNet.PMRpcValidation VirtualRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>abstract：没有业务体可拆。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public abstract void AbstractRpc(int value);
+
+        private PMNet.PMRpcValidation AbstractRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>extern/native：没有托管业务体可拆。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public extern void ExternRpc(int value);
+
+        private PMNet.PMRpcValidation ExternRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>无体（既非 abstract 也非 extern）：`void M();` 这种写法拆不出业务体。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void NoBodyRpc(int value);
+
+        private PMNet.PMRpcValidation NoBodyRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+    }
+
+    /// <summary>规则 7 补充：`async` / 泛型方法。</summary>
+    [PMNetworkObject]
+    public partial class BadRpcAsyncGeneric : PMNetObject
+    {
+        /// <summary>async：状态机会改写方法体。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public async void AsyncRpc(int value)
+        {
+        }
+
+        private PMNet.PMRpcValidation AsyncRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>泛型方法。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void GenericRpc<T>()
+        {
+        }
+
+        private PMNet.PMRpcValidation GenericRpc_ForceValidate<T>()
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+    }
+
+    /// <summary>规则 7 补充：同名重载 / 一个方法带多个 RPC 标记。</summary>
+    [PMNetworkObject]
+    public partial class BadRpcOverloadAndMultiAttr : PMNetObject
+    {
+        /// <summary>同名重载：RPC 方法名在类型里出现两次。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void OverloadedRpc(int value)
+        {
+        }
+
+        private PMNet.PMRpcValidation OverloadedRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>与上面同名的普通重载（未标记，但足以让编织器拒绝）。</summary>
+        public void OverloadedRpc(string other)
+        {
+        }
+
+        /// <summary>一个方法带两个 RPC 标记：会生成两个同名 helper（直接编译失败）。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        [PMClientRpc(Reliability = PMRpcReliability.Reliable)]
+        public void MultiAttrRpc(int value)
+        {
+        }
+
+        private PMNet.PMRpcValidation MultiAttrRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+    }
+
+    /// <summary>规则 7 补充：`ref` / `out` / `in` / `params` / 默认值形参。</summary>
+    [PMNetworkObject]
+    public partial class BadRpcParamModifiers : PMNetObject
+    {
+        /// <summary>ref。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void RefRpc(ref int value)
+        {
+        }
+
+        private PMNet.PMRpcValidation RefRpc_ForceValidate(ref int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>out。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void OutRpc(out int value)
+        {
+            value = 0;
+        }
+
+        private PMNet.PMRpcValidation OutRpc_ForceValidate(out int value)
+        {
+            value = 0;
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>in。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void InRpc(in int value)
+        {
+        }
+
+        private PMNet.PMRpcValidation InRpc_ForceValidate(in int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>params。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void ParamsRpc(params int[] values)
+        {
+        }
+
+        private PMNet.PMRpcValidation ParamsRpc_ForceValidate(params int[] values)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+
+        /// <summary>默认值形参。</summary>
+        [PMServerRpc(Reliability = PMRpcReliability.Reliable, Validator = PMRpcValidator.ForceValidate)]
+        public void DefaultRpc(int value = 3)
+        {
+        }
+
+        private PMNet.PMRpcValidation DefaultRpc_ForceValidate(int value)
+        {
+            return PMNet.PMRpcValidation.Accept;
+        }
+    }
+
+    // =========================================================================================
+    //  规则 14：自动属性复制只支持普通实例 auto-property
+    //
+    //  契约 Docs/plans/net-property-authoring-contract.md §1：
+    //    “新自动模式仅支持普通实例 auto-property（get;set;，允许访问性不同和初始化器）；
+    //     拒绍自定义 getter/setter、只读、indexer、virtual/abstract/override、static、
+    //     ref-return、显式接口等不支持形态。”
+    //
+    //  为什么这些必须在**声明期**报错：到编织期才发现、或生成器静默跳过，都会变成
+    //  “写了标记、但完全不参与复制”的静默缺陷。
+    //  本文件只做**语法解析**（不需要能编译），因此 ref-return / explicit interface 等
+    //  写法在这里仍然是合法的输入。
+    // =========================================================================================
+
+    /// <summary>规则 14 用例：自定义 getter/setter、只读、表达式体、只写。</summary>
+    [PMNetworkObject]
+    public partial class BadPropShapes : PMNetObject
+    {
+        private int _backing;
+
+        /// <summary>自定义 get + 自定义 set（不是 auto-property）。</summary>
+        [PMReplicated]
+        public int CustomAccessors
+        {
+            get { return _backing; }
+            set { _backing = value; }
+        }
+
+        /// <summary>只读（自动 getter，没有 setter）：没有可改写的 setter。</summary>
+        [PMReplicated]
+        public int ReadOnlyProp { get; }
+
+        /// <summary>表达式体属性：没有 auto-property 的 backing field。</summary>
+        [PMReplicated]
+        public int ExpressionBodiedProp => _backing;
+
+        /// <summary>只写（没有 getter）：复制层的 Writer 读不到值。</summary>
+        [PMReplicated]
+        public int WriteOnlyProp
+        {
+            set { _backing = value; }
+        }
+
+        /// <summary>static 自动属性：规则 3 拦下（规则 14 不重复报）。</summary>
+        [PMReplicated]
+        public static int StaticProp { get; set; }
+    }
+
+    /// <summary>规则 14 用例：indexer（`this[...]`）。</summary>
+    [PMNetworkObject]
+    public partial class BadPropIndexer : PMNetObject
+    {
+        private int _backing;
+
+        /// <summary>indexer：成员名不是合法标识符，无法生成 PMNet_Set / 槽位常量。</summary>
+        [PMReplicated]
+        public int this[int index]
+        {
+            get { return _backing; }
+            set { _backing = value; }
+        }
+    }
+
+    /// <summary>规则 14 用例：virtual 属性。</summary>
+    [PMNetworkObject]
+    public partial class BadPropVirtual : PMNetObject
+    {
+        /// <summary>virtual：编织器不处理虚成员。</summary>
+        [PMReplicated]
+        public virtual int VirtualProp { get; set; }
+    }
+
+    /// <summary>规则 14 用例：abstract 属性（所在类也必须 abstract）。</summary>
+    [PMNetworkObject]
+    public abstract partial class BadPropAbstract : PMNetObject
+    {
+        /// <summary>abstract：没有可改写的实现体。</summary>
+        [PMReplicated]
+        public abstract int AbstractProp { get; set; }
+    }
+
+    /// <summary>规则 14 用例：override 属性的基类。</summary>
+    public partial class BadPropOverrideBase : PMNetObject
+    {
+        /// <summary>供派生类重写的虚成员（本身未被标记）。</summary>
+        protected virtual int Overridable
+        {
+            get { return 0; }
+            set { }
+        }
+    }
+
+    /// <summary>规则 14 用例：override 属性。</summary>
+    [PMNetworkObject]
+    public partial class BadPropOverride : BadPropOverrideBase
+    {
+        /// <summary>override：编织器不猜重写继承链。</summary>
+        [PMReplicated]
+        protected override int Overridable { get; set; }
+    }
+
+    /// <summary>规则 14 用例：ref-return 属性。</summary>
+    [PMNetworkObject]
+    public partial class BadPropRefReturn : PMNetObject
+    {
+        private int _backing;
+
+        /// <summary>ref-return：无法作为 EqualityComparer&lt;T&gt; 的闭合类型参数。</summary>
+        [PMReplicated]
+        public ref int RefReturnProp
+        {
+            get { return ref _backing; }
+        }
+    }
+
+    /// <summary>规则 14 用例用的接口（显式接口实现的载体）。</summary>
+    public interface IBadPropContract
+    {
+        /// <summary>成员。</summary>
+        int Value { get; set; }
+    }
+
+    /// <summary>规则 14 用例：显式接口实现。</summary>
+    [PMNetworkObject]
+    public partial class BadPropExplicitInterface : PMNetObject, IBadPropContract
+    {
+        /// <summary>显式接口实现：元数据里的访问器名带接口前缀。</summary>
+        [PMReplicated]
+        int IBadPropContract.Value { get; set; }
+    }
+
+    /// <summary>
+    /// 规则 14 用例：把 [PMReplicated] / [PMQuantized] 标在**不支持的成员种类**上（event）。
+    ///
+    /// 这类声明根本进不了 IR：若不专门扫，就会变成“标记了但完全不参与复制”的静默漏扫。
+    /// </summary>
+    [PMNetworkObject]
+    public partial class BadReplicatedOnEvent : PMNetObject
+    {
+        /// <summary>字段式事件不是可复制成员。</summary>
+        [PMReplicated]
+        public event System.Action SomethingChanged;
+
+        /// <summary>量化器单独写在事件上同样无效。</summary>
+        [PMQuantized(3)]
+        public event System.Action AnotherChanged;
+    }
+
+    /// <summary>
+    /// 规则 1 / 14 用例：**嵌套类型**上的网络声明。
+    ///
+    /// 扫描器只处理顶层类型（生成物是「顶层 partial class &lt;TypeName&gt;」，无法与嵌套类型合并），
+    /// 因此嵌套类型上的 [PMNetworkObject] 与其成员上的 [PMReplicated] 都不会生效；
+    /// 若不显式扫，就是“写了声明、但完全不参与复制”的静默漏扫。
+    /// </summary>
+    public class BadNestedHost
+    {
+        /// <summary>嵌套的网络类：规则 1 用例。</summary>
+        [PMNetworkObject]
+        public partial class NestedNetworkObject : PMNetObject
+        {
+            /// <summary>嵌套类里的复制成员：规则 14 用例。</summary>
+            [PMReplicated]
+            public int Hp;
+        }
+
+        /// <summary>嵌套的普通类，但成员带 [PMReplicated]：规则 14 用例。</summary>
+        public class NestedReplicated
+        {
+            /// <summary>不会生效的复制成员。</summary>
+            [PMReplicated]
+            public int Mana;
+        }
+    }
 }

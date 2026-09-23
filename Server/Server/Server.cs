@@ -36,9 +36,6 @@ namespace Server
             _socket.Bind(new IPEndPoint(ip, port));
             _socket.Listen(10);
 
-            // 创建udp线程
-            LZJUDP.Instance.Init();
-
             // 启动tcp监听线程
             Thread myThread = new Thread(ListenClientConnect);
             myThread.IsBackground = true; // 设为后台线程，程序关掉时线程自动结束
@@ -54,7 +51,9 @@ namespace Server
             // 把「服务端实际支持哪些上行入口」固化到启动日志，便于跟客户端协议清单核对。
             _controllerManger.LogRegisteredHandlers();
 
-            // R3-B：按配置启用新链（默认关闭 = opt-in）。只在显式启用时才注册 PMR3 声明并拉起宿主。
+            // 旧战斗链已退役（Docs/plans/net-legacy-retirement-contract.md §A）：服务端只保留
+            // 「大厅 TCP + DS 编排」两个权威面。这里装载 DS 部署配置并拉起 Lobby 宿主；
+            // 不存在「启用/禁用旧链」的开关，配置不全或 manifest 非法时匹配会显式失败。
             InitializeDedicatedServerLobby();
         }
 
@@ -269,12 +268,13 @@ namespace Server
         #region R3-B：新链（专用服务器）宿主
 
         /// <summary>
-        /// R3-B 宿主初始化（仅启用配置时）。
+        /// DS 宿主初始化（旧战斗链退役后是**唯一**开局链路）。
         ///
         /// 关键口径：
-        /// - <c>HYLD_PMNET_DS</c> 缺省不开新链（opt-in）；一旦置位，<b>即使配置不全</b>也保留
-        ///   <see cref="PMNet.Control.PMDsLobbyHost.NewChainEnabled"/> = true，
-        ///   让匹配层 **显式失败** 而不是悄悄回退旧链（契约 §7「选新链后失败只能报失败」）；
+        /// - 新链是默认且唯一的链路：不读 <c>HYLD_PMNET_DS</c> 之类的选链开关，显式 0 也不会恢复旧链
+        ///   （旧开关被忽略，并在启动日志里明确记录）；
+        /// - 部署配置不全或内容 manifest 缺失/非法 ⇒ **不启动宿主** ⇒ 匹配层 **显式失败**
+        ///   （契约 §7「失败只能报失败」，已不存在可回退的旧链）；
         /// - 协议摘要从 Unity 组产出的 <c>PMR3Runtime</c> 取，**不接受客户端提供的 hash**；
         /// - R4-C / C3：**碰撞摘要不再固定为诊断保留值**，而是从正式内容 manifest
         ///   （<c>Client/Assets/Resources/PMNet/BattleContentV1.json</c>，或
@@ -286,20 +286,26 @@ namespace Server
         {
             PMNet.Control.PMDsLobbyHostOptions options = PMNet.Control.PMDsLobbyHostOptions.FromEnvironment();
 
-            // 启用位先落地：它决定匹配入口走哪条链，与「宿主是否真的起来」无关。
-            PMNet.Control.PMDsLobbyHost.NewChainEnabled = options.Enabled;
+            // 旧选链开关已被忽略（旧链代码已删）：显式记一条日志，避免运维以为还能回退。
+            if (options.DeprecatedLegacySwitchIgnored)
+            {
+                Logging.Debug.Log("[PMDsLobby] 忽略旧开关 HYLD_PMNET_DS=" + options.DeprecatedLegacySwitchValue
+                    + "：旧战斗链已退役，DS 新链是唯一开局链路（显式 0 也不会恢复旧链）");
+            }
 
+            // Enabled 由 FromEnvironment 恒置 true（production 只走新链）。
+            // 保留该判断只为「显式禁用宿主」的测试语义：宿主不启动 ⇒ 匹配显式失败，不回退旧链。
             if (!options.Enabled)
             {
-                Logging.Debug.Log("[PMDsLobby] 新链未启用（HYLD_PMNET_DS != 1）：保持旧匹配/旧战斗链路");
+                Logging.Debug.Log("[PMDsLobby] 宿主被显式禁用：匹配将显式失败（无旧链可回退）");
                 return;
             }
 
             if (!options.IsLaunchConfigured)
             {
-                Logging.Debug.Log("[PMDsLobby] HYLD_PMNET_DS=1 但启动配置不完整（需要 HYLD_PMNET_DS_EXE / "
+                Logging.Debug.Log("[PMDsLobby] DS 启动配置不完整（需要 HYLD_PMNET_DS_EXE / "
                     + "HYLD_PMNET_DS_WORKDIR / HYLD_PMNET_DS_BOOTSTRAP_DIR / 合法端口范围）；"
-                    + "新链不会拉起任何一局（匹配将显式失败，不回退旧链）");
+                    + "不会拉起任何一局（匹配将显式失败，不回退旧链）");
                 return;
             }
 
@@ -309,7 +315,7 @@ namespace Server
 
             // R4-C / C3：碰撞摘要来自**正式内容 manifest**（不再固定诊断保留值 0x52334201）。
             //
-            // 失败即 "拒绝拉局"：这里直接 return，而 NewChainEnabled 仍为 true（上面已置位），
+            // 失败即 "拒绝拉局"：这里直接 return（宿主不启动），
             // 因此匹配入口会显式失败而不是静默回落旧链/诊断内容。
             // 0 与保留诊断值都在 PMDsBattleContentConfig 里被拒绝（正式内容不得撞保留值）。
             PMNet.Control.PMDsBattleContentInfo content;

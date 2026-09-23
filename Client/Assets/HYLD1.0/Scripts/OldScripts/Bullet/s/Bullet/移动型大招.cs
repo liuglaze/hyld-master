@@ -4,6 +4,9 @@ using UnityEngine;
 
 public class 移动型大招 : MonoBehaviour
 {
+    // 旧链退役（契约 §B）：原取 `LocalPositionJumpTraceThreshold`(0.8f)。
+    // 该值只服务本文件的日志门限，不能为取常量而保留旧 BattleData，故内联同值常量。
+    private const float LocalPositionJumpTraceThreshold = 0.8f;
     public int playerid=-1;
 
     private float time = 0;
@@ -71,7 +74,7 @@ public class 移动型大招 : MonoBehaviour
         }
 
         float delta = Vector3.Distance(before, after);
-        if (delta < Manger.BattleData.LocalPositionJumpTraceThreshold)
+        if (delta < LocalPositionJumpTraceThreshold)
         {
             return;
         }

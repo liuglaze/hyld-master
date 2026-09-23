@@ -146,4 +146,16 @@
     </Reference>
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMProjectile/**/*.cs" LinkBase="PMProjectile" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMCombat/**/*.cs" LinkBase="PMCombat" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(UnityManagedDir)/UnityEngine/UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
 </Project>

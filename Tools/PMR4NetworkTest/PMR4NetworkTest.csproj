@@ -50,4 +50,11 @@
     <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMProjectile/**/*.cs" LinkBase="PMProjectile" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMCombat/**/*.cs" LinkBase="PMCombat" />
+    <Compile Include="../../Client/Assets/Scripts/Shared/**/*.cs" LinkBase="Shared" />
+  </ItemGroup>
 </Project>

@@ -38,6 +38,37 @@ namespace PMNetE2E
         /// <summary>复制数组的长度上限（防御越界分配；契约 §8 列为待收敛参数，R2 取 4096）。</summary>
         private const int PMGeneratedMaxArrayLength = 4096;
 
+        // ---------------- 编织版本门（冻结格式 v1；见 Docs/plans/net-rpc-weaving-contract.md）----------------
+
+        /// <summary>本类的 RPC 编织版本：0 = 编译后尚未编织；PMNetWeaver 成功编织后改为 1。</summary>
+        internal static int PMNet_GetRpcWeaveVersion()
+        {
+            return 0;
+        }
+
+        /// <summary>
+        /// 未编织程序集的守卫：版本不为 1 就抛明确异常（附上修复命令方向），否则返回 1。
+        /// PMNet_BuildEntry 的开头与实例字段初始化都会调用它。
+        /// </summary>
+        private static int PMNet_RequireRpcWeave()
+        {
+            if (PMNet_GetRpcWeaveVersion() != 1)
+            {
+                throw new System.InvalidOperationException(
+                    "PMNet RPC 未编织：本程序集仍处于编译后未处理状态。请先运行 `dotnet PMNetWeaver.dll --weave <assembly.dll>`（构建脚本应在复制 DLL 后执行）。");
+            }
+
+            return 1;
+        }
+
+        /// <summary>
+        /// 实例 guard：字段初始化就调用 Require ⇒ 未编织时 new 直接被拒。
+        /// 字段本身不需要被读取，pragma 压掉「已赋值但未使用」的 CS0414。
+        /// </summary>
+        #pragma warning disable 0414
+        private readonly int PMNet_rpcWeaveGate = PMNet_RequireRpcWeave();
+        #pragma warning restore 0414
+
         // ---------------- 复制属性注册 ----------------
 
         /// <summary>注册本类的复制属性与条件（对应 UE 的 DOREPLIFETIME_WITH_PARAMS_FAST 位置）。</summary>
@@ -201,11 +232,11 @@ namespace PMNetE2E
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 Say（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 Say 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 Say（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_Say(string p0)
+        private void PMNet_Say(string p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
@@ -263,11 +294,11 @@ namespace PMNetE2E
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 Checked（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 Checked 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 Checked（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_Checked(int p0)
+        private void PMNet_Checked(int p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
@@ -351,11 +382,11 @@ namespace PMNetE2E
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 Push（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 Push 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 Push（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_Push(float[] p0)
+        private void PMNet_Push(float[] p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Multicast, GetNetConnection() != null, false);
@@ -444,11 +475,11 @@ namespace PMNetE2E
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 Fire（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 Fire 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 Fire（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_Fire(int p0, float p1)
+        private void PMNet_Fire(int p0, float p1)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
@@ -494,11 +525,11 @@ namespace PMNetE2E
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 Notify（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 Notify 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 Notify（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_Notify(int p0)
+        private void PMNet_Notify(int p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Client, GetNetConnection() != null, false);
@@ -561,11 +592,11 @@ namespace PMNetE2E
         }
 
         /// <summary>
-        /// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，
-        /// 再按结果本地执行 / 发往远端 / 静默吞掉。
-        /// **业务请调用本方法**，不要直接调用 Warp（直接调用只本地执行、不过网）。
+        /// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 Warp 调用）。
+        /// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。
+        /// 业务请调用普通名 Warp（编织后它是网络入口），不要直接调用本方法。
         /// </summary>
-        public void PMNet_Warp(int p0)
+        private void PMNet_Warp(int p0)
         {
             PMNet.PMFunctionCallspace callspace = PMNet.PMRpcDispatch.EvaluateCallspace(
                 NetMode, Role, PMNet.PMRpcKind.Server, GetNetConnection() != null, false);
@@ -598,9 +629,14 @@ namespace PMNetE2E
         /// <summary>
         /// 本类贡献给 PMNetRegistry 的条目。
         /// 协议摘要用 PMStableHash 现算（与生成期同一实现），不写死字面量。
+        /// 第一条语句是编织门：未编织程序集在这里就被拒。
+        /// RegisterAll 会先把所有类的 BuildEntry 求值完再 RegisterClass，
+        /// 因此这里抛出时全局注册表还是空的（不会留下半注册）。
         /// </summary>
         internal static PMNet.PMNetClassEntry PMNet_BuildEntry()
         {
+            PMNet_RequireRpcWeave();
+
             PMNet.PMPropertyDescriptor[] props = new PMNet.PMPropertyDescriptor[4];
             PMNet.PMPropertyDescriptor p0 = new PMNet.PMPropertyDescriptor();
             p0.PropertyId = 15488;

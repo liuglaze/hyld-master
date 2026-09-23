@@ -1,0 +1,62 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      旧链退役（Docs/plans/net-legacy-retirement-contract.md）的**静态禁回归门禁**。
+
+      为什么需要它：
+        A/B/C/D 段把旧战斗链的源码与资产挂载删掉之后，「删干净了」这件事本身需要一条可重复、
+        可复跑、可对账的机器判据。单测/编译只能证明「剩下的代码编得过」，不能证明：
+          · 已删文件与 .meta 没有以任何形式复活；
+          · 活源码里没有旧类型标识符（且不会把注释/字符串里的说明文字误判成引用）；
+          · 权威 proto 的旧战斗消息 / MoveType / AttackType / 旧 Action 号没有复活、厅相关号没漂移；
+          · 四份 generated 产物里没有已删类型；
+          · 两个冻结 GUID 在 Client/Assets 的 *.unity / *.prefab 里为 0；
+          · 6 个「禁改输入/输出」资产的 SHA256 仍等于前报告冻结值。
+
+      与 PMDsHostCheck 的分工（不重复、不冒充）：
+        · 本门禁**只做静态事实**：文件存在性、词法剥离后的标识符、proto 声明/字段号、GUID、SHA。
+        · 「PMDsHost 缺 -bootstrap 时是否真的 Quit(1) 且不启动会话」属运行时行为，由
+          Tools/PMDsHostCheck 的替身行为门禁承担；本门禁只断言其结构事实（依赖 PMDsSessionHost、
+          无裸 socket / 旧 router），**不冒充**行为验证。
+
+      依赖与单一事实源：
+        · proto 的解析**复用生成器自己的解析器**（Tools/PMNetGen/ProtoParser.cs + ProtoModel.cs，
+          只读链接，不修改）。这样「本门禁看到的 proto 结构」与「生成器实际生成时看到的结构」
+          必然一致，不会出现两套解析口径分叉。
+        · 本工具不引 Google.Protobuf、不引 Unity、不引项目运行时。
+
+      repo 参数（写作 minus-minus repo）：
+        把检查根切到任意目录（默认自动解析仓库根）。用于在**临时沙盒**里做负向注入自测，
+        绝不修改真实生产文件；负例自测的沙盒一律建在 %TEMP% 下。
+
+      运行（自测开关同理写作 minus-minus 前缀）：
+        dotnet run -c Release [自定义 repo] [报告路径] [跳过自测]
+      语言面：net8.0 运行 + C# 7.3（与 Unity 2019.4 的编译上限一致）。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMLegacyRetirementTest</AssemblyName>
+    <RootNamespace>PMLegacyRetirementTest</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>CS0169;CS0414;CS0649;CS8981;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!--
+      只读链接生成器的 proto 解析器（单一事实源）。刻意**不**引 Roslyn / Google.Protobuf：
+      本门禁只做词法与声明级判断，不需要建 Compilation。
+    -->
+    <Compile Include="..\..\Tools\PMNetGen\ProtoModel.cs" LinkBase="PMNetGen" />
+    <Compile Include="..\..\Tools\PMNetGen\ProtoParser.cs" LinkBase="PMNetGen" />
+  </ItemGroup>
+
+</Project>

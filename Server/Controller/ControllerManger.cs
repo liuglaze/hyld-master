@@ -62,23 +62,20 @@ namespace Server.Controller
             FriendRoomController friendRoomController = new FriendRoomController();
             PingPongController pingPongController = new PingPongController();
             MatchingController matchingController = new MatchingController();
-            ClearSenceController clearSenceController = new ClearSenceController();
 
             _controllerDic.Add(friendRoomController.GetRequestCode, friendRoomController);
             _controllerDic.Add(userController.GetRequestCode, userController);
             _controllerDic.Add(friendController.GetRequestCode, friendController);
             _controllerDic.Add(pingPongController.GetRequestCode, pingPongController);
             _controllerDic.Add(matchingController.GetRequestCode, matchingController);
-            _controllerDic.Add(clearSenceController.GetRequestCode, clearSenceController);
 
             _controllerNameDic.Add(nameof(UserController), userController);
             _controllerNameDic.Add(nameof(FriendController), friendController);
             _controllerNameDic.Add(nameof(FriendRoomController), friendRoomController);
             _controllerNameDic.Add(nameof(PingPongController), pingPongController);
             _controllerNameDic.Add(nameof(MatchingController), matchingController);
-            _controllerNameDic.Add(nameof(ClearSenceController), clearSenceController);
 
-            RegisterAll(userController, friendController, friendRoomController, pingPongController, matchingController, clearSenceController);
+            RegisterAll(userController, friendController, friendRoomController, pingPongController, matchingController);
         }
 
         /// <summary>已注册的 RPC 处理函数数量（覆盖性核对用）。</summary>
@@ -105,8 +102,7 @@ namespace Server.Controller
             FriendController friend,
             FriendRoomController friendRoom,
             PingPongController pingPong,
-            MatchingController matching,
-            ClearSenceController clearSence)
+            MatchingController matching)
         {
             // User
             Register(RequestCode.User, ActionCode.Logon, user.Logon);
@@ -141,8 +137,8 @@ namespace Server.Controller
             // PingPong
             Register(RequestCode.PingPong, ActionCode.Ping, pingPong.Ping);
 
-            // ClearSence
-            Register(RequestCode.ClearSence, ActionCode.ClientSendClearSenceReady, clearSence.ClientSendClearSenceReady);
+            // ClearSence：旧清场就绪路由随旧战斗链一并退役（Docs/plans/net-legacy-retirement-contract.md §A），
+            // 不再注册。客户端若仍上行该组合，会落到 [RPC][未注册] 日志，不会被静默当成旧链处理。
         }
 
         private void Register(RequestCode requestCode, ActionCode actionCode, PmRpcHandler handler)

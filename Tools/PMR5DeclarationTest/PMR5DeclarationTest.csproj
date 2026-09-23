@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-B2a 门禁（T5B2b 的声明组验收）：**单一生成集合里的投射物声明**。
+
+      为什么需要它：
+        「新增的 3 条投射物 RPC 是否真的经生成桩走真实字节链到 DS」
+        「投射物副本的 Create 是否与**初始 snapshot** 原子到达」
+        「RepNotify 是否只通知/入队而不是就地解码」
+        「Destroy 是否真的发布全局 Destroyed」
+        「非 owner 上行是否被接收入口拒绝」「没有 driver 时上行是否 Reject（而不是假成功）」
+        「没有 driver 时下行是否**可观察丢弃**」「>4096 载荷是否在发送侧就抛、在接收侧判畸形」
+        「事件是否按 world 筛选且 Dispose 一张订阅不影响别的 world」
+        —— 这些编译期全看不出来，运行时又都长得像「投射物偶尔不同步」。
+
+      编译范围（**刻意不含 PMProjectile 纯核心与 Coordinator**）：
+        - 真实 PMNet 核心（Client/Assets/Scripts/PMNet/**）；
+        - 真实 PMR3 声明层（PMR3Player / PMR3Runtime / PMR5Projectile + PMNetGen 生成产物）。
+      这份「只编声明层也能通过」正是契约的硬要求：声明层不得反向依赖核心实现，
+      否则旧消费者（本工程、PMR3RuntimeTest、PMR3IntegrationTest）会被迫全部引入核心。
+
+      投递走真实 PMTransport 的字节链（真实分片/序号/ACK/生命周期/复制/RPC 解码），
+      链路用**手工 link**（与 PMR3RuntimeTest / PMNetSessionTest 同一手法），
+      不直接调用业务实现冒充网络投递。
+
+      运行：dotnet Tools/PMR5DeclarationTest/bin/Release/net8.0/PMR5DeclarationTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR5DeclarationTest</AssemblyName>
+    <RootNamespace>PMR5DeclarationTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+
+    <!-- 真实 PMNet 核心（含 Control/Session/Transport/World/Replication/Generated）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\**\*.cs" LinkBase="PMNet" />
+
+    <!-- R3/R5 声明层 + 生成产物（PMR3 在 PMNet 目录之外，避免注册表重名）。
+         **不引 PMProjectile / Coordinator**：声明层的可编译性本身就是被验收的属性。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Player.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR3Runtime.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\PMR5Projectile.cs" LinkBase="PMR3" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMR3\Generated\**\*.cs" LinkBase="PMR3\Generated" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只保证生成器先被构建出来（本工程不引用它的程序集，是当进程调用做声明同步校验）。 -->
+    <ProjectReference Include="..\PMNetGen\PMNetGen.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+</Project>

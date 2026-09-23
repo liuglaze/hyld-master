@@ -1,0 +1,115 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-C1/C2 门禁（Unity 投射物适配器的**真实程序集**编译面）。
+
+      为什么需要它：
+        Client/Assets/Scripts/PMUnity/PMUnityProjectileMotion.cs 与
+        Client/Assets/Scripts/PMUnity/PMUnityProjectilePresentation.cs 只在 Unity 2019.4 里编译。
+        没有自测编译手段时，一次 API 拼错（例如把 PhysicsScene.IsValid() 当成属性、
+        或写成 Physics.SphereCast 而不是 _scene.SphereCast）的代价就是用户点一轮编辑器编译。
+        本工程把那件事变成可自动跑的 CLI 门。
+
+      语言面：netstandard2.0 + C# 7.3（与 Unity 2019.4 的托管编译上限一致）。
+      这与 PMProjectileIntegrationCheck 同口径，因此能同时证明
+      「两个 Unity 适配器 + 它们依赖的纯核心」都在 Unity 的能力上限内。
+
+      它引用什么（不写任何 Unity 桩件）：
+        · D:/Unity/2019.4.8f1/Editor/Data/Managed/UnityEngine/UnityEngine*.dll —— **真实 DLL**；
+          因此能真正校验 PhysicsScene.SphereCast / OverlapSphere / IsValid、
+          PhysicsSceneExtensions.GetPhysicsScene、Collider.isTrigger / gameObject.scene
+          的签名与可用性（例如 IsValid() 是方法而不是属性）。
+
+      它编什么（真实源码，逐文件，不通配整个 Assets）：
+        · PMUnity/PMUnityProjectileMotion.cs + PMUnityProjectilePresentation.cs —— 本批的两个适配器；
+        · PMProjectile/**（共享契约 + A1/A2/A3 核心）—— 适配器实现的
+          IPMProjectileHostMotion 定义在 PMProjectileCoordinator.cs 里，且契约类型
+          （PMProjectileKey/Spec/State）在 PMProjectileContracts.cs 里；
+        · PMMover/PMMoverState.cs —— PMVector3（Y-up 米）；
+        · PMNet/PMNetIdentity.cs + PMNetRole.cs —— PMFrameId / PMNetRole；
+        · PMNet/PMNetRuntime.cs + PMNetLaunchOptions.cs —— 表现层的 DS 判定
+          （PMNetRuntime.IsDedicatedServer 是**唯一**身份来源）。
+
+      它证明什么 / 不证明什么：
+        · 证明：两个适配器能在真实 Unity 2019.4 API + netstandard2.0 + C#7.3 上编译通过；
+        · **不证明**运行期物理行为 —— 那必须在 Unity 内跑真实 PhysX。
+          受控语义回归见 Tools/PMR5UnityAdapterTest（它明确**不是** PhysX 验证）；
+          真机结论仍为 PENDING_USER（见 Docs/plans/_r5_unity_adapter_report.md）。
+        本工程是**库**（无 OutputType、无 Program.cs）：验收形式就是「编译 exit 0」。
+
+      运行：dotnet build Tools/PMR5UnityCheck/PMR5UnityCheck.csproj -c Release
+      前置：本机存在 D:/Unity/2019.4.8f1（与主计划"环境现状"一致）。
+    -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR5UnityCheck</AssemblyName>
+    <RootNamespace>PMR5UnityCheck</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Unity 的托管程序集带 NU1701 之类的包兼容提示，与"能否编译"无关，不要拿它当失败。 -->
+    <NoWarn>$(NoWarn);CS1591;NU1701;CS0618</NoWarn>
+    <UnityManagedDir Condition="'$(UnityManagedDir)' == ''">D:\Unity\2019.4.8f1\Editor\Data\Managed</UnityManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 本批的两个适配器（被验证对象）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityProjectileMotion.cs" LinkBase="PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityProjectilePresentation.cs" LinkBase="PMUnity" />
+
+    <!--
+      所需 core：IPMProjectileHostMotion 定义在 PMProjectileCoordinator.cs 里，
+      而它消费 A1（生命周期/三类 Pending）与 A2（目标历史/L0-L4 验证）。
+      逐文件列出（不用通配符）：与 PMProjectileIntegrationCheck 的依赖面**逐字一致**，
+      保证"适配器看到的接口"就是整合器门禁看到的同一份接口。
+    -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileHistory.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileValidator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCoordinator.cs" LinkBase="PMProjectile" />
+
+    <!-- PMVector3（Y-up 米；该文件自包含）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+
+    <!-- 身份/帧号/角色 + 进程网络形态（表现层 DS 判定的唯一来源）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRuntime.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetLaunchOptions.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      真实 Unity 汇编（不写桩件）：
+        · UnityEngine.dll                     —— 门面程序集（类型转发到各 Module）；
+        · UnityEngine.CoreModule.dll          —— GameObject/Transform/Object/Material/Renderer/
+                                                 Quaternion/Color/Application/Scene/SceneManager；
+        · UnityEngine.PhysicsModule.dll       —— PhysicsScene / Physics / Collider / QueryTriggerInteraction /
+                                                 PhysicsSceneExtensions；
+        · UnityEngine.SharedInternalsModule.dll —— 模块引用的内部可见性属性所在程序集，必须一并给出。
+      PhysicsSceneExtensions（GetPhysicsScene）在 PhysicsModule 里，是本批"白名单必须同物理世界"
+      校验的依赖，因此 PhysicsModule 不能省。
+    -->
+    <Reference Include="UnityEngine">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.SharedInternalsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

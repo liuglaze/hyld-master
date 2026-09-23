@@ -23,104 +23,6 @@ namespace Server.Controller
             
         }
     }
-    class ClearSenceController : BaseControllers
-    {
-        private readonly object _clearLock = new object();
-        private Dictionary<int, bool> _dic_ClearFinish;
-        public ClearSenceController()
-        {
-            requestCode = RequestCode.ClearSence;
-            _dic_ClearFinish = new Dictionary<int, bool>();
-        }
-        /// <summary>
-        /// 全员清场就绪后逐个单播通知（纯下行，客户端不会上行该 ActionCode）。
-        ///
-        /// 原名 AllClearSenceReady，与 ActionCode.AllClearSenceReady 同名，
-        /// 会被旧的「按 ActionCode 方法名反射」路由误命中，并因参数不匹配
-        /// （该方法只收 2 个参数）在 Invoke 时抛异常，冒泡后导致服务端主动断开该连接（计划 B1-1）。
-        /// 改为私有 + 改名以彻底消除该风险。
-        /// </summary>
-        private void BroadcastAllClearSenceReadyToPlayers(Server server, List<int> playeruids)
-        {
-            MainPack pack = new MainPack();
-            pack.Actioncode = ActionCode.AllClearSenceReady;
-            pack.Requestcode = RequestCode.ClearSence;
-            pack.Str = "1";
-
-            List<int> snapshotPlayerUids = new List<int>(playeruids);
-            lock (_clearLock)
-            {
-                foreach (int id in snapshotPlayerUids)
-                {
-                    _dic_ClearFinish.Remove(id);
-                }
-            }
-
-            foreach (int id in snapshotPlayerUids)
-            {
-                Client activeClient = server.GetActiveClient(id);
-                activeClient?.Send(pack);
-            }
-
-            //return pack;
-
-        }
-        public MainPack ClientSendClearSenceReady(Server server, Client client, MainPack pack)
-        {
-            int uid = int.Parse(pack.Str);
-
-            // R3-B：新链（局内专用服务器）的对局在 Lobby 侧**没有** BattleContext，
-            // 旧清场就绪不得作用到新局（新局的清场/就绪在 DS 侧由 PMR3 宿主负责）。
-            PMDsLobbyHost dsHost = PMDsLobbyHost.Instance;
-            if (dsHost != null && dsHost.IsUidInMatch(uid))
-            {
-                Logging.Debug.Log($"[ClearSence] 忽略专用服务器对局的旧 ClearSence 请求 uid={uid}");
-                return pack;
-            }
-
-            if (!BattleManage.Instance.TryGetBattleContextByUid(uid, out BattleContext battleContext))
-            {
-                Logging.Debug.Log($"ClientSendClearSenceReady 未找到 battle context, uid={uid}");
-                return pack;
-            }
-
-            List<int> playeruids = new List<int>(battleContext.PlayerUids);
-            bool isOK;
-            lock (_clearLock)
-            {
-                _dic_ClearFinish[uid] = true;
-                isOK = true;
-                foreach (int id in playeruids)
-                {
-                    if (!_dic_ClearFinish.ContainsKey(id))
-                    {
-                        isOK = false;
-                        break;
-                    }
-                }
-            }
-            if (isOK)
-            {
-                BroadcastAllClearSenceReadyToPlayers(server, playeruids);
-            }
-            return pack;
-        }
-    }
-
-
-
-    struct MatchUserInfo
-    {
-        public int uid;
-        public string userName;
-        public Hero hero;
-        public int teamid;
-        public string socketIP;
-        public override string ToString()
-        {
-            return $"[uid: {uid}  userName: {userName}  hero: {hero}  teamid: {teamid}  socketIP:{socketIP}]";
-        }
-    }
 
     struct MatchedPlayerEntry
     {
@@ -636,78 +538,30 @@ namespace Server.Controller
             }
         }
 
-        private List<MatchUserInfo> BuildMatchUsers(Server server, MatchResult matchResult)
-        {
-            Dictionary<string, int> teamID = new Dictionary<string, int>();
-            int curMaxID = 1;
-            List<MatchUserInfo> matchUsers = new List<MatchUserInfo>();
-            foreach (MatchedPlayerEntry player in matchResult.players)
-            {
-                MatchUserInfo userInfo = new MatchUserInfo();
-                userInfo.uid = player.uid;
-                Client c = server.GetActiveClient(userInfo.uid);
-                if (c == null)
-                {
-                    Logging.Debug.Log($"匹配对战时，玩家{userInfo.uid}不在线");
-                    continue;
-                }
-                userInfo.hero = c.PlayerHero;
-                userInfo.userName = c.PlayerName;
-                if (!teamID.ContainsKey(player.teamId))
-                {
-                    teamID.Add(player.teamId, curMaxID++);
-                }
-                userInfo.teamid = teamID[player.teamId];
-                userInfo.socketIP = c.socketIp;
-                matchUsers.Add(userInfo);
-                Logging.Debug.Log(userInfo);
-            }
-            return matchUsers;
-        }
-
         private void StartFighting(Server server, MatchResult matchResult)
         {
-            // R3-B：开局链路的**唯一**二分点。一次只选一条链：
-            // 新链由 HYLD_PMNET_DS=1 显式启用（默认 opt-in 关闭）；选中新链后失败只能报失败，
-            // 禁止静默回退生成第二个权威（旧链）。
-            if (PMDsLobbyHost.NewChainEnabled)
-            {
-                StartFightingDedicatedServer(server, matchResult);
-                return;
-            }
-
-            List<MatchUserInfo> matchUsers = BuildMatchUsers(server, matchResult);
-            if (matchUsers.Count == 0)
-            {
-                Logging.Debug.Log($"StartFighting 没有可用玩家，roomId={matchResult.roomId}");
-                return;
-            }
-
-            if (!BattleManage.Instance.TryBeginBattle(server, matchUsers, matchResult.fightPattern, out int battleId))
-            {
-                Logging.Debug.Log($"StartFighting 创建战斗失败，roomId={matchResult.roomId}");
-                return;
-            }
-
-            Logging.Debug.Log($"StartFighting 创建战斗成功，roomId={matchResult.roomId}, battleId={battleId}");
+            // 旧链已退役（Docs/plans/net-legacy-retirement-contract.md §A）：开局链路**只有一条** ——
+            // 由 Lobby 宿主拉起专用服务器（DS）承载整局。
+            // 不再读 HYLD_PMNET_DS 之类的选链开关；宿主未就绪/配置不全/manifest 非法时显式失败，
+            // 不生成第二个权威（旧 BattleController）。
+            StartFightingDedicatedServer(server, matchResult);
         }
 
         /// <summary>
-        /// R3-B 新链开局：由 Lobby 宿主拉起专用服务器（DS）承载整局。
+        /// DS 新链开局：由 Lobby 宿主拉起专用服务器（DS）承载整局。这是**唯一**开局实现。
         ///
         /// 硬约束（契约 §7.3）：
-        /// - 名册必须与**已认证活跃 Client** 一致；缺任何一人 ⇒ **整局拒绝**，
-        ///   不调 <c>BuildMatchUsers</c> 缩编（阽悄少人会让客户端认知与名册不一致）；
-        /// - 不调 <c>BattleManage.TryBeginBattle</c>，因此新 uid 不会进入旧 <c>_uidToBattleIds</c>，
-        ///   旧 UDP/清场路由也自然不会作用到新局；
-        /// - 宿主未就绪/配置不全时只报失败，**不回退旧链**。
+        /// - 名册必须与**已认证活跃 Client** 一致；缺任何一人 ⇒ **整局拒绝**，不缩编
+        ///   （悄悄少人会让客户端认知与名册不一致）；
+        /// - 不再有旧链可回退，也没有旧 <c>BattleManage</c>/<c>_uidToBattleIds</c> 路由可写；
+        /// - 宿主未就绪/配置不全/manifest 非法时只报失败。
         /// </summary>
         private void StartFightingDedicatedServer(Server server, MatchResult matchResult)
         {
             PMDsLobbyHost host = PMDsLobbyHost.Instance;
             if (host == null || !host.IsRunning)
             {
-                Logging.Debug.Log($"[PMDsMatch] 新链已启用但宿主未就绪，整局失败（不回退旧链） roomId={matchResult.roomId}");
+                Logging.Debug.Log($"[PMDsMatch] DS 宿主未就绪，整局失败（已无旧链可回退） roomId={matchResult.roomId}");
                 return;
             }
 

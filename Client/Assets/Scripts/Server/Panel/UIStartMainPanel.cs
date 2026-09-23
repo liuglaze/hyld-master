@@ -64,7 +64,6 @@ namespace MVC
             Requests.Add(new BaseRequest(this, RequestCode.Friend, ActionCode.FriendLogin));
             Requests.Add(new BaseRequest(this, RequestCode.Friend, ActionCode.FriendLogout));
             Requests.Add(new BaseRequest(this, RequestCode.User, ActionCode.ChangeHero));
-            Requests.Add(new BaseRequest(this, RequestCode.User, ActionCode.BattleReview));
             if (HYLDStaticValue.PlayerName != "")
             {
                 FindFriendsInfo();
@@ -76,14 +75,7 @@ namespace MVC
             base.OnResponse(pack);
             if (pack.Requestcode == RequestCode.User)
             {
-                if (pack.Actioncode == ActionCode.BattleReview)
-                {
-                    Debug.LogError(pack);
-                }
-                else
-                {
-                    ResponseUser(pack);
-                }
+                ResponseUser(pack);
             }
             else if (pack.Requestcode == RequestCode.Friend)
             {

@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      R5-C1/C2 适配器的**受控语义回归**（受控 UnityEngine 替身 + 真实适配器源码）。
+
+      为什么需要它：
+        "受阻就停在接触点、起点重叠就不推进、饱和就显式失败、trigger/非白名单被忽略、
+         按 key 消费停止标记、Dispose 后 fail closed"这些都是**状态机/判定**性质，
+        编译期完全看不出来，只有断言能钉住；而真实 PhysX 上的运行需要 Unity，
+        用户明确要求本批不启动 Unity。因此本工程用受控替身把**判定逻辑**先钉死。
+
+      它编什么（真实源码，不复制、不快照、不用替身替换被验证对象）：
+        · Client/Assets/Scripts/PMUnity/PMUnityProjectileMotion.cs（C1 被测对象）；
+        · Client/Assets/Scripts/PMUnity/PMUnityProjectilePresentation.cs（C2 被测对象）；
+        · Client/Assets/Scripts/PMProjectile/**（IPMProjectileHostMotion 与契约类型所在；
+          与 PMProjectileIntegrationCheck 的依赖面一致）；
+        · Client/Assets/Scripts/PMMover/PMMoverState.cs（PMVector3）；
+        · Client/Assets/Scripts/PMNet/{PMNetIdentity,PMNetRole,PMNetRuntime,PMNetLaunchOptions}.cs
+          （表现层的 DS 判定走真实的 PMNetRuntime，而不是替身）；
+        · Program.cs（用例）+ UnityStubs.cs（受控 UnityEngine 替身）。
+
+      **它不证明什么**（本工程最重要的边界）：
+        · UnityStubs.cs 是"球 vs 轴对齐 AABB"的一阶解析模型，**不是** PhysX、也不是 Unity；
+          它复现的是 R4-B 真实 Play 已观测的语义（起点接触 ⇒ distance=0 且 normal=-dir）。
+          真实 PhysX 的结论仍是 **PENDING_USER**（见 Docs/plans/_r5_unity_adapter_report.md）。
+        · 本工程不接整合器/网络 driver/宿主：整合器侧的 fail-closed 处置由
+          Tools/PMProjectileIntegrationTest 独立覆盖；这里只证明适配器**会**返回 false。
+        · 真实 Unity API 的编译面由 Tools/PMR5UnityCheck（引真实 2019.4 DLL）单独把关。
+
+      运行：dotnet build Tools/PMR5UnityAdapterTest -c Release
+            dotnet Tools/PMR5UnityAdapterTest/bin/Release/net8.0/PMR5UnityAdapterTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMR5UnityAdapterTest</AssemblyName>
+    <RootNamespace>PMR5UnityAdapterTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 用例 + 受控 UnityEngine 替身（替身只桩适配器/表现层真正用到的成员）。 -->
+    <Compile Include="Program.cs" />
+    <Compile Include="UnityStubs.cs" />
+
+    <!-- 被验收的两个真实适配器（不复制、不快照）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityProjectileMotion.cs" LinkBase="PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityProjectilePresentation.cs" LinkBase="PMUnity" />
+
+    <!-- 契约类型 + IPMProjectileHostMotion 定义所在的整合器（逐文件，与 IntegrationCheck 同口径）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileContracts.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileLifecycle.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectilePending.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileHistory.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileValidator.cs" LinkBase="PMProjectile" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMProjectile\PMProjectileCoordinator.cs" LinkBase="PMProjectile" />
+
+    <!-- PMVector3（Y-up 米）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
+
+    <!-- 身份/角色/进程网络形态（表现层 DS 判定用真实 PMNetRuntime）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetIdentity.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRole.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetRuntime.cs" LinkBase="PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetLaunchOptions.cs" LinkBase="PMNet" />
+  </ItemGroup>
+
+</Project>

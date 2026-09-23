@@ -65,6 +65,18 @@ namespace PMNetGen
                 facts = new PMDeclRawFacts();
             }
 
+            // ★ 扫描完整性 fail-closed（安全网，不是契约 §5 的规则）：
+            //   读取失败 / 语法错误会让声明集「看着正常但少东西」，而 EmitAll 写出的是**整套**
+            //   产物（含注册表）。EmitAll 是公开 API，CLI 之外还有门禁与编辑器便利层等调用方，
+            //   因此在**发射器本身**拒绝，比依赖每个调用方先检查 Model.Errors 可靠。
+            if (facts.SyntaxErrorCount > 0 || facts.ReadFailures.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "声明扫描不完整（语法错误 " + facts.SyntaxErrorCount + " 处 / 读取失败 "
+                    + facts.ReadFailures.Count + " 个文件）：拒绝发射产物，"
+                    + "避免用残缺声明生成的假空注册表覆盖现有产物。");
+            }
+
             List<PMGeneratedFile> files = new List<PMGeneratedFile>();
             List<PMDeclClass> classes = new List<PMDeclClass>(model.Classes);
             classes.Sort(delegate (PMDeclClass a, PMDeclClass b)
@@ -249,6 +261,10 @@ namespace PMNetGen
             }
 
             sb.Append(Lf);
+            sb.Append("            // ★ 顺序是契约的一部分：先把**每个类**的 BuildEntry 求值完（其中含 RPC 的类会在入口调"
+                + " PMNet_RequireRpcWeave），再统一 RegisterClass。").Append(Lf);
+            sb.Append("            // 这样未编织程序集（或某个 RPC 类未编织）会在**任何** RegisterClass 之前抛出，"
+                + "不会出现「非 RPC 类先登记成功、后一个 RPC 类才发现未 weave」的半注册状态。").Append(Lf);
             sb.Append("            for (int i = 0; i < entries.Length; i++)").Append(Lf);
             sb.Append("            {").Append(Lf);
             sb.Append("                PMNet.PMNetRegistry.RegisterClass(entries[i]);").Append(Lf);
@@ -269,6 +285,39 @@ namespace PMNetGen
             string key = PMDeclScanner.KeyOf(cls);
             int indexBase = 0;
             facts.PropertyIndexBase.TryGetValue(key, out indexBase);
+
+            // ---- 自动属性形态判定（契约 Docs/plans/net-property-authoring-contract.md §2 冻结接口）----
+            //
+            // `IsField == false` 只说明“这是个属性”，不足以说明“它是可编织的普通 auto-property”。
+            // 形态事实来自扫描器（语法层），且**扫描器 / 校验器 / 发射器共用同一个判据**
+            // （PMDeclPropertyFact.IsPlainAutoProperty）。
+            // 拿不到事实或形态不支持时 **fail-closed 拒绝发射**：EmitAll 是公开 API，
+            // 声明期规则 14 不是它唯一的入口（增量生成 / 编辑器内生成 / 未来工具复用），
+            // 而在这一层放行意味着产物会静默写错（例如给只读属性生成赋值、
+            // 或给自定义 setter 生成一条不存在的写入路径）。
+            int autoPropertyCount = 0;
+            for (int i = 0; i < cls.Properties.Count; i++)
+            {
+                PMDeclProperty p = cls.Properties[i];
+                if (p.IsField)
+                {
+                    continue;
+                }
+
+                PMDeclPropertyFact shape = FindPropertyFact(facts, cls, p);
+                if (shape == null || !shape.IsPlainAutoProperty)
+                {
+                    throw new InvalidOperationException(
+                        "属性 " + cls.QualifiedName + "." + p.MemberName + " 不是受支持的普通实例自动属性"
+                        + (shape == null
+                            ? "（缺少声明形态事实：无法证明它是 auto-property）"
+                            : "（" + string.Join("；", shape.DescribeUnsupportedShapes().ToArray()) + "）")
+                        + "：发射器 fail-closed（拒绝发射），不产出会静默写错的产物。"
+                        + "声明期规则 14 应已拦下这种情况。");
+                }
+
+                autoPropertyCount++;
+            }
 
             bool hasArray = false;
             for (int i = 0; i < cls.Properties.Count; i++)
@@ -293,12 +342,22 @@ namespace PMNetGen
             }
 
             StringBuilder sb = new StringBuilder(16384);
-            Header(sb, "网络对象 partial 产物",
-                "类：" + cls.QualifiedName,
-                "稳定键：" + cls.StableKey,
-                "类型 ID：" + cls.ClassId + "（0x" + cls.ClassId.ToString("X8", CultureInfo.InvariantCulture) + "）",
-                "类协议摘要：0x" + cls.ClassProtocolHash.ToString("X8", CultureInfo.InvariantCulture),
-                "复制属性：" + cls.Properties.Count + " 个 / RPC：" + cls.Rpcs.Count + " 条");
+
+            // 头注逐行拼：只有真的含自动属性时才多一行，否则与旧产物逐字一致
+            // （`--decl-check` 会对现有生产产物做逐字节比对）。
+            List<string> headerLines = new List<string>();
+            headerLines.Add("类：" + cls.QualifiedName);
+            headerLines.Add("稳定键：" + cls.StableKey);
+            headerLines.Add("类型 ID：" + cls.ClassId + "（0x" + cls.ClassId.ToString("X8", CultureInfo.InvariantCulture) + "）");
+            headerLines.Add("类协议摘要：0x" + cls.ClassProtocolHash.ToString("X8", CultureInfo.InvariantCulture));
+            headerLines.Add("复制属性：" + cls.Properties.Count + " 个 / RPC：" + cls.Rpcs.Count + " 条");
+            if (autoPropertyCount > 0)
+            {
+                headerLines.Add("自动属性（auto-property，由 PMNetWeaver 改写 setter / RawSet）："
+                    + autoPropertyCount + " 个");
+            }
+
+            Header(sb, "网络对象 partial 产物", headerLines.ToArray());
 
             EmitUsings(sb, cls, facts);
 
@@ -339,12 +398,15 @@ namespace PMNetGen
                 sb.Append(indent).Append("private const int PMGeneratedMaxArrayLength = ").Append(MaxArrayLength).Append(";").Append(Lf);
             }
 
+            EmitPropertyIndexConsts(sb, cls, indent, indexBase);
+            EmitWeaveGuard(sb, cls, indent, cls.Rpcs.Count > 0 || autoPropertyCount > 0);
             EmitRepList(sb, cls, facts, indent, indexBase);
             EmitSetters(sb, cls, facts, indent, indexBase);
+            EmitAutoPropertyHelpers(sb, cls, indent);
             EmitPropertyIO(sb, cls, facts, indent);
             EmitOnRepDispatch(sb, cls, indent);
             EmitRpcs(sb, cls, facts, indent);
-            EmitBuildEntry(sb, cls, facts, indent);
+            EmitBuildEntry(sb, cls, facts, indent, cls.Rpcs.Count > 0 || autoPropertyCount > 0);
 
             sb.Append(baseIndent).Append("}").Append(Lf);
 
@@ -386,6 +448,116 @@ namespace PMNetGen
             }
         }
 
+        /// <summary>
+        /// 发射编织版本门（契约 net-rpc-weaving-contract.md §2 的冻结格式 v1）。
+        ///
+        /// **触发条件（自动属性开工后的语义扩展）**：含 RPC **或**含自动属性的类都要发射。
+        /// 原因是同一个：这两类类都有"编译后才由 PMNetWeaver 改写"的入口
+        /// （RPC 是业务体拆分，自动属性是 setter → PMNet_PropertySet / RawSet stub → stfld），
+        /// 未经编织就必须拒给 new 与注册。名称与格式**不变**（PMNet_GetRpcWeaveVersion /
+        /// PMNet_RequireRpcWeave / PMNet_rpcWeaveGate），只扩展适用面 —— 编织器与 Editor 接线
+        /// 不需要辨识两套门，也不会因此改变 RPC 的 CLI 行为。
+        ///
+        /// 纯字段且零 RPC 的类不发射：它们没有需要保护的编织入口，
+        /// 而多出来的版本方法会让「哪些类需要编织」变得不可判定。
+        ///
+        /// 三件事缺一不可（编织器 `Tools/PMNetWeaver` 的预检会逐条验证）：
+        ///   1. `internal static int PMNet_GetRpcWeaveVersion()`：编译前返回 0，
+        ///      只有完整验证的编织器会把它改成 1（不允许用额外 define 跳过）；
+        ///   2. `private static int PMNet_RequireRpcWeave()`：版本 != 1 时抛明确异常，否则返回 1；
+        ///   3. 实例 readonly 字段初始化调用 Require ⇒ **正常 new 实例**也被拒，
+        ///      不只靠注册路径与 Editor 日志。
+        ///
+        /// 版本方法体故意写成常量返回：编织器读版本靠「恰好一个 ret / 不含调用 /
+        /// 整型常量恰好一个」三条不变式（Debug 与 Release 的 IL 形态不同，不能按固定指令序列判）。
+        /// </summary>
+        private static void EmitWeaveGuard(StringBuilder sb, PMDeclClass cls, string indent, bool needsWeaveGate)
+        {
+            if (!needsWeaveGate)
+            {
+                return;
+            }
+
+            sb.Append(Lf);
+            sb.Append(indent).Append("// ---------------- 编织版本门（冻结格式 v1；见 Docs/plans/net-rpc-weaving-contract.md）----------------").Append(Lf);
+            sb.Append(Lf);
+            sb.Append(indent).Append("/// <summary>本类的 RPC 编织版本：0 = 编译后尚未编织；PMNetWeaver 成功编织后改为 1。</summary>").Append(Lf);
+            sb.Append(indent).Append("internal static int PMNet_GetRpcWeaveVersion()").Append(Lf);
+            sb.Append(indent).Append("{").Append(Lf);
+            sb.Append(indent).Append("    return 0;").Append(Lf);
+            sb.Append(indent).Append("}").Append(Lf);
+            sb.Append(Lf);
+            sb.Append(indent).Append("/// <summary>").Append(Lf);
+            sb.Append(indent).Append("/// 未编织程序集的守卫：版本不为 1 就抛明确异常（附上修复命令方向），否则返回 1。").Append(Lf);
+            sb.Append(indent).Append("/// PMNet_BuildEntry 的开头与实例字段初始化都会调用它。").Append(Lf);
+            sb.Append(indent).Append("/// </summary>").Append(Lf);
+            sb.Append(indent).Append("private static int PMNet_RequireRpcWeave()").Append(Lf);
+            sb.Append(indent).Append("{").Append(Lf);
+            sb.Append(indent).Append("    if (PMNet_GetRpcWeaveVersion() != 1)").Append(Lf);
+            sb.Append(indent).Append("    {").Append(Lf);
+            sb.Append(indent).Append("        throw new System.InvalidOperationException(").Append(Lf);
+            sb.Append(indent).Append("            ").Append(Quote(
+                "PMNet RPC 未编织：本程序集仍处于编译后未处理状态。"
+                + "请先运行 `dotnet PMNetWeaver.dll --weave <assembly.dll>`（构建脚本应在复制 DLL 后执行）。"))
+                .Append(");").Append(Lf);
+            sb.Append(indent).Append("    }").Append(Lf);
+            sb.Append(Lf);
+            sb.Append(indent).Append("    return 1;").Append(Lf);
+            sb.Append(indent).Append("}").Append(Lf);
+            sb.Append(Lf);
+            sb.Append(indent).Append("/// <summary>").Append(Lf);
+            sb.Append(indent).Append("/// 实例 guard：字段初始化就调用 Require ⇒ 未编织时 new 直接被拒。").Append(Lf);
+            sb.Append(indent).Append("/// 字段本身不需要被读取，pragma 压掉「已赋值但未使用」的 CS0414。").Append(Lf);
+            sb.Append(indent).Append("/// </summary>").Append(Lf);
+            sb.Append(indent).Append("#pragma warning disable 0414").Append(Lf);
+            sb.Append(indent).Append("private readonly int PMNet_rpcWeaveGate = PMNet_RequireRpcWeave();").Append(Lf);
+            sb.Append(indent).Append("#pragma warning restore 0414").Append(Lf);
+        }
+
+        /// <summary>
+        /// 发射**自动属性**的复制属性序号常量（契约 §2 冻结接口的第一项）。
+        ///
+        /// 为什么要有具名常量：自动属性的赋值/标脏逻辑有两处（编织后的 setter 与
+        /// 复制层接收侧），两边必须用**同一个**序号。序号是「继承链基址 + 类内槽位」，
+        /// 靠人手抄即会在派生类上错位（PMRepList 的 index 是每对象连续的）。
+        /// 字段走旧模式，不发射常量 —— 保持既有产物逐字节不变。
+        /// </summary>
+        private static void EmitPropertyIndexConsts(StringBuilder sb, PMDeclClass cls, string indent, int indexBase)
+        {
+            bool any = false;
+            for (int i = 0; i < cls.Properties.Count; i++)
+            {
+                if (!cls.Properties[i].IsField)
+                {
+                    any = true;
+                    break;
+                }
+            }
+
+            if (!any)
+            {
+                return;
+            }
+
+            sb.Append(Lf);
+            sb.Append(indent).Append("// ---------------- 自动属性的复制属性序号（每对象连续，含继承链基址）----------------").Append(Lf);
+
+            for (int i = 0; i < cls.Properties.Count; i++)
+            {
+                PMDeclProperty p = cls.Properties[i];
+                if (p.IsField)
+                {
+                    continue;
+                }
+
+                sb.Append(Lf);
+                sb.Append(indent).Append("/// <summary>").Append(p.MemberName)
+                    .Append(" 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>").Append(Lf);
+                sb.Append(indent).Append("public const int PMGeneratedPropertyIndex_").Append(p.MemberName)
+                    .Append(" = ").Append(indexBase + i).Append(";").Append(Lf);
+            }
+        }
+
         private static void EmitRepList(StringBuilder sb, PMDeclClass cls, PMDeclRawFacts facts, string indent, int indexBase)
         {
             sb.Append(Lf);
@@ -399,10 +571,23 @@ namespace PMNetGen
             for (int i = 0; i < cls.Properties.Count; i++)
             {
                 PMDeclProperty p = cls.Properties[i];
-                sb.Append(indent).Append("    outProps.Add(").Append(indexBase + i).Append(", PMNet.PMCond.")
-                    .Append(p.Condition.ToString()).Append(", ").Append(p.PushBased ? "true" : "false")
-                    .Append("); // ").Append(p.MemberName)
-                    .Append("（PropertyId=").Append(p.PropertyId).Append("）").Append(Lf);
+                if (p.IsField)
+                {
+                    // 字段旧模式：序号直接写字面量（与旧产物逐字节一致）。
+                    sb.Append(indent).Append("    outProps.Add(").Append(indexBase + i).Append(", PMNet.PMCond.")
+                        .Append(p.Condition.ToString()).Append(", ").Append(p.PushBased ? "true" : "false")
+                        .Append("); // ").Append(p.MemberName)
+                        .Append("（PropertyId=").Append(p.PropertyId).Append("）").Append(Lf);
+                }
+                else
+                {
+                    // 自动属性：用具名常量（与 PropertySet 里的 MarkPropertyDirty 同源）。
+                    sb.Append(indent).Append("    outProps.Add(PMGeneratedPropertyIndex_").Append(p.MemberName)
+                        .Append(", PMNet.PMCond.")
+                        .Append(p.Condition.ToString()).Append(", ").Append(p.PushBased ? "true" : "false")
+                        .Append("); // ").Append(p.MemberName)
+                        .Append("（PropertyId=").Append(p.PropertyId).Append("）").Append(Lf);
+                }
             }
 
             sb.Append(indent).Append("}").Append(Lf);
@@ -421,6 +606,31 @@ namespace PMNetGen
             for (int i = 0; i < cls.Properties.Count; i++)
             {
                 PMDeclProperty p = cls.Properties[i];
+
+                if (!p.IsField)
+                {
+                    // ---- 自动属性：仅普通赋值，不在这里标脏 ----
+                    //
+                    // 标脏由 PMNetWeaver 改写后的 setter（走 PMNet_PropertySet_<P>）完成，
+                    // 这里再标一次就是重复标脏（契约 §2：「旧 public PMNet_Set<P> 对
+                    // auto-property 仅转发 P = value，不再次 Mark」）。
+                    // 保留本访问器是为了兼容既有门禁与外部工具引用点，
+                    // 生产迁移后业务不再调用它。
+                    sb.Append(Lf);
+                    sb.Append(indent).Append("/// <summary>").Append(Lf);
+                    sb.Append(indent).Append("/// 兼容访问器（自动属性）：仅转发 `").Append(p.MemberName)
+                        .Append(" = value`。").Append(Lf);
+                    sb.Append(indent).Append("/// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet_")
+                        .Append(p.MemberName).Append("，只标脏一次。").Append(Lf);
+                    sb.Append(indent).Append("/// </summary>").Append(Lf);
+                    sb.Append(indent).Append("public void PMNet_Set").Append(p.MemberName).Append("(")
+                        .Append(p.TypeName).Append(" value)").Append(Lf);
+                    sb.Append(indent).Append("{").Append(Lf);
+                    sb.Append(indent).Append("    ").Append(p.MemberName).Append(" = value;").Append(Lf);
+                    sb.Append(indent).Append("}").Append(Lf);
+                    continue;
+                }
+
                 sb.Append(Lf);
                 sb.Append(indent).Append("/// <summary>").Append(Lf);
                 sb.Append(indent).Append("/// 赋值并标脏（Push 模型，契约 D-R0-13）。").Append(Lf);
@@ -431,6 +641,109 @@ namespace PMNetGen
                 sb.Append(indent).Append("{").Append(Lf);
                 sb.Append(indent).Append("    ").Append(p.MemberName).Append(" = value;").Append(Lf);
                 sb.Append(indent).Append("    MarkPropertyDirty(").Append(indexBase + i).Append(");").Append(Lf);
+                sb.Append(indent).Append("}").Append(Lf);
+            }
+        }
+
+        /// <summary>
+        /// 发射**自动属性**的两个编织点（契约 §2 冻结接口）：
+        ///
+        ///   1. `PMNet_PropertyRawSet_&lt;P&gt;(T value)`：复制层接收侧的**唯一**写入口。
+        ///      编译后是一个抛异常的桩；PMNetWeaver 把桩体改写成
+        ///      `this, value → stfld &lt;P&gt;k__BackingField → ret`。
+        ///      之所以是实例方法而不是静态方法：stfld 需要 `this`。
+        ///   2. `PMNet_PropertySet_&lt;P&gt;(T value)`：setter 的转发目标。
+        ///      语义 = **总是**存入新值；只有值真的变化、且本副本有权威、且 PushBased
+        ///      时才 MarkPropertyDirty（不以值相等跳过真正赋值：string 引用重赋也要保留
+        ///      普通赋值语义；初始化器/构造期原值也不依赖标脏）。
+        ///
+        /// 字段（旧模式）不发射这三样中的任何一样：字段没有 setter 可改写，
+        /// 手动 Push/Poll 的语义完全保留。
+        /// </summary>
+        private static void EmitAutoPropertyHelpers(StringBuilder sb, PMDeclClass cls, string indent)
+        {
+            bool any = false;
+            for (int i = 0; i < cls.Properties.Count; i++)
+            {
+                if (!cls.Properties[i].IsField)
+                {
+                    any = true;
+                    break;
+                }
+            }
+
+            if (!any)
+            {
+                return;
+            }
+
+            sb.Append(Lf);
+            sb.Append(indent).Append("// ---------------- 自动属性：编织点（PMNetWeaver 改写）----------------").Append(Lf);
+            sb.Append(Lf);
+            sb.Append(indent).Append("// PMNet_PropertyRawSet_<P>：复制层接收侧的唯一写入口。未编织时调用即抛，")
+                .Append("不会静默写错。").Append(Lf);
+            sb.Append(indent).Append("// PMNet_PropertySet_<P>：setter 的转发目标（总是存值；只在")
+                .Append("值变化 + 有权威 + PushBased 时标脏）。").Append(Lf);
+
+            for (int i = 0; i < cls.Properties.Count; i++)
+            {
+                PMDeclProperty p = cls.Properties[i];
+                if (p.IsField)
+                {
+                    continue;
+                }
+
+                sb.Append(Lf);
+                sb.Append(indent).Append("/// <summary>").Append(Lf);
+                sb.Append(indent).Append("/// ").Append(p.MemberName)
+                    .Append(" 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。").Append(Lf);
+                sb.Append(indent).Append("/// </summary>").Append(Lf);
+                sb.Append(indent).Append("private void PMNet_PropertyRawSet_").Append(p.MemberName)
+                    .Append("(").Append(p.TypeName).Append(" value)").Append(Lf);
+                sb.Append(indent).Append("{").Append(Lf);
+                sb.Append(indent).Append("    throw new System.InvalidOperationException(")
+                    .Append(Quote("PMNet property has not been woven")).Append(");").Append(Lf);
+                sb.Append(indent).Append("}").Append(Lf);
+
+                sb.Append(Lf);
+                sb.Append(indent).Append("/// <summary>").Append(Lf);
+                sb.Append(indent).Append("/// ").Append(p.MemberName)
+                    .Append(" 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。").Append(Lf);
+                sb.Append(indent).Append("/// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。").Append(Lf);
+                sb.Append(indent).Append("/// </summary>").Append(Lf);
+                sb.Append(indent).Append("private void PMNet_PropertySet_").Append(p.MemberName)
+                    .Append("(").Append(p.TypeName).Append(" value)").Append(Lf);
+                sb.Append(indent).Append("{").Append(Lf);
+                sb.Append(indent).Append("    // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。").Append(Lf);
+                sb.Append(indent).Append("    // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。").Append(Lf);
+                // 属性一侧用 `this.` 显式限定：即使属性就叫 `value`，它与形参也不会混淆
+                // （形参名必须叫 value，因为编织后的 setter 就是 `this, value → call → ret`）。
+                // 局部名用 pmChanged 而不是 changed：属性名恰好是 changed 时不会自我引用。
+                sb.Append(indent).Append("    bool pmChanged = !System.Collections.Generic.EqualityComparer<")
+                    .Append(p.TypeName).Append(">.Default.Equals(this.").Append(p.MemberName)
+                    .Append(", value);").Append(Lf);
+                sb.Append(indent).Append("    PMNet_PropertyRawSet_").Append(p.MemberName).Append("(value);").Append(Lf);
+
+                if (p.PushBased)
+                {
+                    sb.Append(Lf);
+                    sb.Append(indent).Append("    if (pmChanged && HasAuthority)").Append(Lf);
+                    sb.Append(indent).Append("    {").Append(Lf);
+                    sb.Append(indent).Append("        MarkPropertyDirty(PMGeneratedPropertyIndex_")
+                        .Append(p.MemberName).Append(");").Append(Lf);
+                    sb.Append(indent).Append("    }").Append(Lf);
+                }
+                else
+                {
+                    // PushBased=false ⇒ 由复制层轮询（与基线比较）决定是否发送，setter 不标脏。
+                    //
+                    // 这里刻意只发射 changed + RawSet 两行，**不发射 `if (... HasAuthority)`**：
+                    // 编织器会逐条校验「PushBased=false 的属性完全不读 HasAuthority、完全不标脏」。
+                    // （局部变量不会被读也不会产生 CS0219：非恒定初值不报“赋值未使用”。）
+                    sb.Append(Lf);
+                    sb.Append(indent).Append("    // PushBased=false：本属性走复制层轮询（与基线比较），setter 不标脏、也不涉及权威判定。").Append(Lf);
+                }
+
                 sb.Append(indent).Append("}").Append(Lf);
             }
         }
@@ -461,14 +774,100 @@ namespace PMNetGen
                 sb.Append(indent).Append("}").Append(Lf);
 
                 sb.Append(Lf);
-                sb.Append(indent).Append("/// <summary>读入并赋值 ").Append(p.MemberName).Append("。注意：这是一个接收侧写入口，位于本 partial 内所以能访问私有成员。</summary>").Append(Lf);
+                if (p.IsField)
+                {
+                    // 字段旧模式：文档注释与产物逐字节与旧版一致（--decl-check 会逐字节比对）。
+                    sb.Append(indent).Append("/// <summary>读入并赋值 ").Append(p.MemberName)
+                        .Append("。注意：这是一个接收侧写入口，位于本 partial 内所以能访问私有成员。</summary>").Append(Lf);
+                }
+                else
+                {
+                    sb.Append(indent).Append("/// <summary>读入并赋值 ").Append(p.MemberName)
+                        .Append("（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>").Append(Lf);
+                }
+
                 sb.Append(indent).Append("private static void PMNet_Read_").Append(p.MemberName)
                     .Append("(PMNet.PMNetObject t, PMNet.PMNetReader r)").Append(Lf);
                 sb.Append(indent).Append("{").Append(Lf);
                 sb.Append(indent).Append("    ").Append(cls.TypeName).Append(" self = (").Append(cls.TypeName).Append(")t;").Append(Lf);
-                EmitReadBody(sb, kind, p.TypeName, element, facts, "self." + p.MemberName, indent + "    ", false);
+
+                if (p.IsField)
+                {
+                    // 字段旧模式：直接写成员（无 setter 可绕过）。
+                    EmitReadBody(sb, kind, p.TypeName, element, facts, "self." + p.MemberName, indent + "    ", false);
+                }
+                else
+                {
+                    // 自动属性：**先解码到局部值，再直接调 RawSet**，不走正常 setter。
+                    //
+                    // 为什么这一步是硬要求（契约 §2）：
+                    //   1. 走 setter 会触发 PMNet_PropertySet 的变化/权威/脏位逻辑 ⇒ 收包应用被当成
+                    //      “本地业务赋值”，产生反向标脏（客户端也变成“像权威一样”去推别人）；
+                    //   2. 初始/暂存/活对象 Apply 共享这条 Reader，必须没有 setter 副作用；
+                    //   3. 解码完再写，校验失败时不会留下半个写入。
+                    EmitRawSetReadBody(sb, kind, p.TypeName, element, facts,
+                        "self.PMNet_PropertyRawSet_" + p.MemberName, "pmValue", indent + "    ");
+                }
+
                 sb.Append(indent).Append("}").Append(Lf);
             }
+        }
+
+        /// <summary>
+        /// 发射自动属性的接收侧读入：**解码到局部值 → 调 RawSet**。
+        ///
+        /// 刻意与 <see cref="EmitReadBody"/> 分开实现（而不是给它加一个参数）：
+        /// 字段模式的产物必须逐字节不变（`--decl-check` 与已提交产物逐字节比对），
+        /// 把两种目标混在一个方法里会让“改一处、动全部”很难避免。
+        /// </summary>
+        private static void EmitRawSetReadBody(
+            StringBuilder sb,
+            PMWireKind kind,
+            string typeName,
+            string elementType,
+            PMDeclRawFacts facts,
+            string rawSetTarget,
+            string localName,
+            string indent)
+        {
+            if (kind == PMWireKind.Array)
+            {
+                string elem;
+                PMWireKind elemKind = PMTypeSet.Classify(elementType, facts, out elem);
+
+                sb.Append(indent).Append(typeName).Append(" ").Append(localName).Append(";").Append(Lf);
+                sb.Append(indent).Append("int n = r.ReadSInt32();").Append(Lf);
+                sb.Append(indent).Append("if (n < 0)").Append(Lf);
+                sb.Append(indent).Append("{").Append(Lf);
+                sb.Append(indent).Append("    ").Append(localName).Append(" = null;").Append(Lf);
+                sb.Append(indent).Append("}").Append(Lf);
+                sb.Append(indent).Append("else").Append(Lf);
+                sb.Append(indent).Append("{").Append(Lf);
+                sb.Append(indent).Append("    if (n > PMGeneratedMaxArrayLength)").Append(Lf);
+                sb.Append(indent).Append("    {").Append(Lf);
+                sb.Append(indent).Append("        // 越界长度 = 数据损坏，抛异常而不是静默截断（静默截断会掩盖协议错误）。").Append(Lf);
+                sb.Append(indent).Append("        throw new System.FormatException(")
+                    .Append(Quote("PMNet 复制数组长度越界：" + typeName)).Append(");").Append(Lf);
+                sb.Append(indent).Append("    }").Append(Lf);
+                sb.Append(Lf);
+                sb.Append(indent).Append("    ").Append(elementType).Append("[] a = new ").Append(elementType)
+                    .Append("[n];").Append(Lf);
+                sb.Append(indent).Append("    for (int i = 0; i < n; i++)").Append(Lf);
+                sb.Append(indent).Append("    {").Append(Lf);
+                sb.Append(indent).Append("        a[i] = ").Append(ReadExpression(elemKind, elementType)).Append(";").Append(Lf);
+                sb.Append(indent).Append("    }").Append(Lf);
+                sb.Append(Lf);
+                sb.Append(indent).Append("    ").Append(localName).Append(" = a;").Append(Lf);
+                sb.Append(indent).Append("}").Append(Lf);
+            }
+            else
+            {
+                sb.Append(indent).Append(typeName).Append(" ").Append(localName).Append(" = ")
+                    .Append(ReadExpression(kind, typeName)).Append(";").Append(Lf);
+            }
+
+            sb.Append(Lf);
+            sb.Append(indent).Append(rawSetTarget).Append("(").Append(localName).Append(");").Append(Lf);
         }
 
         private static void EmitOnRepDispatch(StringBuilder sb, PMDeclClass cls, string indent)
@@ -593,15 +992,19 @@ namespace PMNetGen
                 sb.Append(");").Append(Lf);
                 sb.Append(indent).Append("}").Append(Lf);
 
-                // ---- 业务可见调用桩 ----
+                // ---- 发送 helper ----
+                // ★ 契约 §2（冻结格式 v1）要求它是 **private**：业务不再调用 PMNet_<M>，
+                //   而是调用普通名 M（编织后 M 就是网络入口）。
+                //   编织器会明确拒绝 public 的发送 helper（负例已验证）。
                 sb.Append(Lf);
                 sb.Append(indent).Append("/// <summary>").Append(Lf);
-                sb.Append(indent).Append("/// 业务可见的调用桩（契约 §4.3）：先走 GetFunctionCallspace 判定，").Append(Lf);
-                sb.Append(indent).Append("/// 再按结果本地执行 / 发往远端 / 静默吞掉。").Append(Lf);
-                sb.Append(indent).Append("/// **业务请调用本方法**，不要直接调用 ").Append(rpc.MethodName)
-                    .Append("（直接调用只本地执行、不过网）。").Append(Lf);
+                sb.Append(indent).Append("/// 发送 helper（契约 §2 冻结格式 v1：**private**，只允许编织后的同类入口 ")
+                    .Append(rpc.MethodName).Append(" 调用）。").Append(Lf);
+                sb.Append(indent).Append("/// 先走 GetFunctionCallspace 判定，再按结果本地执行 / 发往远端。").Append(Lf);
+                sb.Append(indent).Append("/// 业务请调用普通名 ").Append(rpc.MethodName)
+                    .Append("（编织后它是网络入口），不要直接调用本方法。").Append(Lf);
                 sb.Append(indent).Append("/// </summary>").Append(Lf);
-                sb.Append(indent).Append("public void PMNet_").Append(rpc.MethodName).Append("(");
+                sb.Append(indent).Append("private void PMNet_").Append(rpc.MethodName).Append("(");
                 for (int k = 0; k < rpc.Parameters.Count; k++)
                 {
                     if (k > 0)
@@ -827,7 +1230,7 @@ namespace PMNetGen
                     + "不退化成「声称有校验、实际没有」。声明期规则 13 应已拦下这种情况。");
             }
         }
-        private static void EmitBuildEntry(StringBuilder sb, PMDeclClass cls, PMDeclRawFacts facts, string indent)
+        private static void EmitBuildEntry(StringBuilder sb, PMDeclClass cls, PMDeclRawFacts facts, string indent, bool needsWeaveGate)
         {
             string key = PMDeclScanner.KeyOf(cls);
 
@@ -837,9 +1240,24 @@ namespace PMNetGen
             sb.Append(indent).Append("/// <summary>").Append(Lf);
             sb.Append(indent).Append("/// 本类贡献给 PMNetRegistry 的条目。").Append(Lf);
             sb.Append(indent).Append("/// 协议摘要用 PMStableHash 现算（与生成期同一实现），不写死字面量。").Append(Lf);
+            if (needsWeaveGate)
+            {
+                sb.Append(indent).Append("/// 第一条语句是编织门：未编织程序集在这里就被拒。").Append(Lf);
+                sb.Append(indent).Append("/// RegisterAll 会先把所有类的 BuildEntry 求值完再 RegisterClass，").Append(Lf);
+                sb.Append(indent).Append("/// 因此这里抛出时全局注册表还是空的（不会留下半注册）。").Append(Lf);
+            }
+
             sb.Append(indent).Append("/// </summary>").Append(Lf);
             sb.Append(indent).Append("internal static PMNet.PMNetClassEntry PMNet_BuildEntry()").Append(Lf);
             sb.Append(indent).Append("{").Append(Lf);
+
+            if (needsWeaveGate)
+            {
+                // ★ 注册入口的编织门必须是**第一条语句**（冻结格式 v1，
+                //   编织器的预检会断言 PMNet_BuildEntry 确实调用了它）。
+                sb.Append(indent).Append("    PMNet_RequireRpcWeave();").Append(Lf);
+                sb.Append(Lf);
+            }
 
             sb.Append(indent).Append("    PMNet.PMPropertyDescriptor[] props = new PMNet.PMPropertyDescriptor[")
                 .Append(cls.Properties.Count).Append("];").Append(Lf);
@@ -1105,6 +1523,18 @@ namespace PMNetGen
         }
 
         // ------------------------------------------------------------------ 工具
+
+        /// <summary>按类限定名 + 成员名取声明形态事实；取不到返回 null。</summary>
+        private static PMDeclPropertyFact FindPropertyFact(PMDeclRawFacts facts, PMDeclClass cls, PMDeclProperty p)
+        {
+            PMDeclPropertyFact fact;
+            if (facts != null && facts.PropertyFacts.TryGetValue(cls.QualifiedName + "." + p.MemberName, out fact))
+            {
+                return fact;
+            }
+
+            return null;
+        }
 
         private static void Header(StringBuilder sb, string kind, params string[] lines)
         {

@@ -88,3 +88,6 @@
 # 大厅服务端本地启动器的输出（run_lobby.bat 由 Start-Process 重定向到这里）
 /Server/_lobby.out
 /Server/_lobby.err
+
+# PMNet editor-only external tool output
+/Tools/**/editor-tool/

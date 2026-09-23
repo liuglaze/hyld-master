@@ -133,7 +133,6 @@ GameObject:
   - component: {fileID: 413438268}
   - component: {fileID: 413438267}
   - component: {fileID: 413438270}
-  - component: {fileID: 413438271}
   - component: {fileID: 413438272}
   - component: {fileID: 413438273}
   - component: {fileID: 413438274}
@@ -285,20 +284,6 @@ MonoBehaviour:
   - {fileID: 2441630343798789936, guid: 9e68e7a22ea095148b11b906758c16bd, type: 3}
   - {fileID: 2441630343798789936, guid: 12e25ba29a3e67c48b0123bc35708a86, type: 3}
   ToolBox: {fileID: 5475558749627779941, guid: 35a4edaea5126f94194f784ac7f377e8, type: 3}
---- !u!114 &413438271
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 413438266}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: eec213bc5141674488046b737aede2bf, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  moden: BaoShiZhengBa
-  isTest: 0
 --- !u!114 &413438272
 MonoBehaviour:
   m_ObjectHideFlags: 0

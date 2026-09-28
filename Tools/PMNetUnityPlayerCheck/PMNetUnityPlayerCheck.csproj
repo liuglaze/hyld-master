@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 与真实 Player 脚本同一源码，故意不定义 UNITY_EDITOR；只证明 Player C#7.3 API 编译面。 -->
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMNetUnityPlayerCheck</AssemblyName>
+    <DefineConstants>UNITY_2019_4;UNITY_2019_4_OR_NEWER;UNITY_2019_1_OR_NEWER</DefineConstants>
+    <NoWarn>$(NoWarn);CS1591;NU1701;CS0618</NoWarn>
+    <!-- 关键：必须引用 **Player 变体** 的引擎程序集与包程序集，否则会重演
+         “Editor 能编、Build Player 报 CS1061” 这类漏检（用户 14:49 真实故障）。
+         Player 变体是扁平目录（无 UnityEngine/ 子层）；UI 包的 Player DLL 从
+         Library/PlayerDataCache/Win64/Data/Managed 取。PlayerScriptAssemblies 会在
+         用户停止 Play/打包后被清理，不能把它当持久目录；缺缓存则明确失败，不退回 Editor DLL。 -->
+    <PlayerManagedDir Condition="'$(PlayerManagedDir)' == ''">D:\Unity\2019.4.8f1\Editor\Data\PlaybackEngines\windowsstandalonesupport\Variations\win64_nondevelopment_mono\Data\Managed</PlayerManagedDir>
+    <UnityUiAssembly Condition="'$(UnityUiAssembly)' == ''">$(MSBuildThisFileDirectory)..\..\Client\Library\PlayerDataCache\Win64\Data\Managed\UnityEngine.UI.dll</UnityUiAssembly>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../Client/Assets/Scripts/PMUnity/**/*.cs" LinkBase="PMUnity" />
+    <Compile Include="../../Client/Assets/Scripts/PMMover/**/*.cs" LinkBase="PMMover" />
+    <Compile Include="../../Client/Assets/Scripts/PMPrediction/**/*.cs" LinkBase="PMPrediction" />
+    <Compile Include="../../Client/Assets/Scripts/PMNet/**/*.cs" LinkBase="PMNet" />
+    <Compile Include="../../Client/Assets/Scripts/PMR3/**/*.cs" LinkBase="PMR3" />
+    <Compile Include="../../Client/Assets/Scripts/Shared/**/*.cs" LinkBase="Shared" />
+    <Compile Include="../../Client/Assets/Scripts/PMProjectile/**/*.cs" LinkBase="PMProjectile" />
+    <Compile Include="../../Client/Assets/Scripts/PMCombat/**/*.cs" LinkBase="PMCombat" />
+    <Compile Include="../../Client/Assets/Scripts/Log/Loging.cs" LinkBase="Log" />
+    <Compile Include="../../Client/Assets/Scripts/Server/Boot/PMDsLobbyAgent.cs" LinkBase="Boot" />
+    <Compile Include="../../Client/Assets/Scripts/Server/Boot/PMDsSessionHost.cs" LinkBase="Boot" />
+    <Compile Include="../../Client/Assets/Scripts/Server/Boot/PMClientSessionHost.cs" LinkBase="Boot" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="UnityEngine"><HintPath>$(PlayerManagedDir)/UnityEngine.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.CoreModule"><HintPath>$(PlayerManagedDir)/UnityEngine.CoreModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.PhysicsModule"><HintPath>$(PlayerManagedDir)/UnityEngine.PhysicsModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.InputLegacyModule"><HintPath>$(PlayerManagedDir)/UnityEngine.InputLegacyModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.AnimationModule"><HintPath>$(PlayerManagedDir)/UnityEngine.AnimationModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule"><HintPath>$(PlayerManagedDir)/UnityEngine.JSONSerializeModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.AudioModule"><HintPath>$(PlayerManagedDir)/UnityEngine.AudioModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TerrainPhysicsModule"><HintPath>$(PlayerManagedDir)/UnityEngine.TerrainPhysicsModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.SharedInternalsModule"><HintPath>$(PlayerManagedDir)/UnityEngine.SharedInternalsModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.IMGUIModule"><HintPath>$(PlayerManagedDir)/UnityEngine.IMGUIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UIModule"><HintPath>$(PlayerManagedDir)/UnityEngine.UIModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextRenderingModule"><HintPath>$(PlayerManagedDir)/UnityEngine.TextRenderingModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UI"><HintPath>$(UnityUiAssembly)</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.UnityWebRequestModule"><HintPath>$(PlayerManagedDir)/UnityEngine.UnityWebRequestModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.AssetBundleModule"><HintPath>$(PlayerManagedDir)/UnityEngine.AssetBundleModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ImageConversionModule"><HintPath>$(PlayerManagedDir)/UnityEngine.ImageConversionModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule"><HintPath>$(PlayerManagedDir)/UnityEngine.ParticleSystemModule.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="UnityEngine.TextCoreModule"><HintPath>$(PlayerManagedDir)/UnityEngine.TextCoreModule.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

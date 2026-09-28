@@ -119,7 +119,7 @@ def _script(name: str, tags: tuple, description: str, script: tuple,
 
 
 def smoke_plan() -> list:
-    """smoke：12 个可运行门禁 + 2 个 build-only 编译门（顺序即执行顺序）。"""
+    """smoke：16 个可运行门禁 + 3 个 build-only 编译门（顺序即执行顺序）。"""
     return [
         _test("PMDeclCheck", (TAG_BUILD,),
               "声明/生成器门禁：真实生成 + 非法声明 fail-closed + C# 7.3 沙盒编译"),
@@ -129,10 +129,14 @@ def smoke_plan() -> list:
               "端到端：声明→生成→零反射注册表→复制收敛→RPC 双向真实字节链"),
         _test("PMR3RuntimeTest", (TAG_WIRE,),
               "R3 运行时接线 + 真实 Transport 字节链 + 真实 loopback 控制通道"),
+        _test("PMEntryInboxTest", (TAG_ALGORITHM,),
+              "早到的PMDSR1/PMDS1通知有界暂存→主线程一次交付、断线清理与0票据日志"),
         _test("PMR3IntegrationTest", (TAG_WIRE,),
               "R3 集成：会话/控制代理/半包/MAC/结果重发的真实链路"),
         _test("PMR4NetworkTest", (TAG_WIRE, TAG_ALGORITHM),
               "R4 运动字节链：codec 边界、预测与权威快照、NaN/越界拒绝"),
+        _test("PMR4UnityAdapterTest", (TAG_ALGORITHM,),
+              "输入方向/世界瞄准线纯几何/摇杆优先和宿主接线的可执行反例（不验Unity渲染）"),
         _test("PMR5NetworkTest", (TAG_WIRE,),
               "R5 投射物字节链：Spawn/Verify/Hit/Decision 与幂等裁决"),
         _test("PMR6NetworkTest", (TAG_WIRE,),
@@ -145,10 +149,16 @@ def smoke_plan() -> list:
               "旧链退役静态禁回归门禁（Client/Assets + Server 扫描 + 负例自测）"),
         _test("PMNetWeavingEditorTest", (TAG_WEAVING,),
               "编织便利层：真实子进程执行器/策略/指纹，不启动 Unity"),
+        _test("PMLoginLifecycleTest", (TAG_ALGORITHM,),
+              "大厅账号身份：UID0别名清理、并发占用和旧连接迟到关闭；不启动真实Lobby"),
+        _test("PMCombatHudTest", (TAG_ALGORITHM,),
+              "可信终局弹窗：ACK门、返回按钮、陈旧回调/结果保留；IMGUI用受控替身不冒称实机"),
         _build("PMClientCheck", (TAG_BUILD,),
                "客户端全玩法层替身编译门（netstandard2.0 + C# 7.3，不运行）"),
         _build("PMR4UnityCheck", (TAG_BUILD,),
                "真实 Unity 2019 DLL 编译门（两个宿主 + HUD；不启动 Unity、不运行）"),
+        _build("PMNetUnityPlayerCheck", (TAG_BUILD,),
+               "真实 Unity 2019 **Player 变体** DLL 编译门（不定义 UNITY_EDITOR，专抓 Build Player 才暴露的 CS1061 分叉）"),
     ]
 
 
@@ -768,7 +778,18 @@ def write_report(run_dir: Path, report: dict) -> None:
                        ("summary.md", render_markdown(report))):
         temporary = run_dir / (name + ".tmp")
         temporary.write_text(text, encoding="utf-8", newline="\n")
-        os.replace(temporary, run_dir / name)
+        # Windows 上杀毒/索引器可能在临时文件刚关闭时短暂持有句柄，
+        # os.replace 偶发 WinError5/32。只重试**报告发布**（不重试build/run、
+        # 不改变测试判定）；持续失败仍抛出，绝不写虚假的 PASS。
+        for attempt in range(10):
+            try:
+                os.replace(temporary, run_dir / name)
+                break
+            except PermissionError as ex:
+                if (os.name != "nt" or getattr(ex, "winerror", None) not in (5, 32)
+                        or attempt == 9):
+                    raise
+                time.sleep(0.05 * (attempt + 1))
 
 
 # =====================================================================================

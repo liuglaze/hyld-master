@@ -75,6 +75,13 @@ namespace PMR6NetworkTest
             Section("T. 冲突 outcome 保持终局（fail closed）", TestConflictingOutcomeIsTerminal);
             Section("U. Unbind 允许少一个等待 Ack", TestDisconnectedOwnerDoesNotBlockResult);
             Section("V. 第三方订阅者异常 → R5 退回缓冲 → Drain 兜底仍不双扣", TestDrainFallbackIsIdempotent);
+            Section("W. T-PLAY4 UI 瞄准向量同源（planner == 上行 == DS 方向槽）", TestUiAimVectorSameSource);
+            Section("X. T-LOOP5 断线宽限的 core 事实（不 Disconnect 即可受伤/不判负；Disconnect 才判负）",
+                TestDisconnectGraceCoreFacts);
+            Section("Y. T-LOOP 高危2：续局攻击 ID（新客户端实例从复制水位起分配 / uint 上限不回绕）",
+                TestResumeActivationHighWater);
+            Section("Z. T-LIVE3 瞄准指示长度/扇形与真实计划同源（含反例）",
+                TestAimIndicatorPlanFacts);
 
             Console.WriteLine();
             if (_failures.Count == 0)
@@ -1525,6 +1532,201 @@ namespace PMR6NetworkTest
         ///   · core 的「每 key-target 只结算一次」保证 **HP 不会被二次扣除**；
         ///   · 驱动的观测值（缓冲计数）回到 0，不会无界积累。
         /// </summary>
+        // =================================================================================
+        //  W. T-PLAY4：UI 瞄准向量在真实字节链里“同源”（planner == 上行 == DS 方向槽）
+        // =================================================================================
+        //
+        //  为什么需要这一节：宿主（PMClientSessionHost）的 UI 入口需要真实 Unity 会话，
+        //  本工程不能运行它（与 PMR4UnityAdapterTest 的边界声明同口径）。但“一次攻击的方向 /
+        //  枪口 / planner / 上行声明必须是同一个向量”这条契约可以在**真实 R6 字节链**上验证：
+        //  把 UI 摇杆换出来的世界方向当成宿主要用的那个方向（用户选型：相机世界 yaw −90，
+        //  screen up → world −X），于是可断言：
+        //    · planner 的每颗弹方向都落在该向量上（不是另一个方向）；
+        //    · DS 按该向量授权（方向槽匹配）；
+        //    · 与它垂直的向量（旧 Mover yaw 兼底会给出的世界 +Z）必须被拒 ——
+        //      这就是“只改 UI 显示、上行还用旧方向”的反例门；
+        //    · 整条命中链仍能正常结算（同一向量贯穿 planner→上行→DS→命中）。
+        private static void TestUiAimVectorSameSource()
+        {
+            CombatHarness h = CombatHarness.Build(0x6B17u, Roster(
+                new RosterEntry(171, 1, PMHeroId.KeErTe),
+                new RosterEntry(172, 2, PMHeroId.XueLi)));
+            using (h)
+            {
+                // UI 瞄准：screen up（相对相机 yaw −90）→ 世界 −X。
+                h.AimDir = new PMVector3(-1f, 0f, 0f);
+
+                PMR3Player ap = h.LocalReplica(0);
+                PMR3Player sp = h.ReplicaOn(0, 1);
+
+                PMCombatAttackPlan plan;
+                PMCombatRejectReason reason;
+                CheckTrue(PMCombatWeaponPlanner.TryBuild(ap.CombatHeroId, false, -1f, 0f, out plan, out reason),
+                    "W1 UI 瞄准向量（screen up ⇒ world −X）能生成计划：" + reason);
+                if (plan == null) { return; }
+
+                bool allMatch = plan.Directions.Length > 0;
+                bool allNegativeX = plan.Directions.Length > 0;
+                for (int i = 0; i < plan.Directions.Length; i++)
+                {
+                    PMVector3 d = plan.Directions[i];
+                    if (!PMCombatWeaponPlanner.IsSameDirection(d.X, d.Z, -1f, 0f)) { allMatch = false; }
+                    if (!(d.X < 0f)) { allNegativeX = false; }
+                }
+
+                CheckTrue(allMatch, "W2 planner 的每颗弹方向都用同一个 UI 瞄准向量（方向容差内）");
+                CheckTrue(allNegativeX, "W3 计划方向由 UI 瞄准（−X）决定，而不是旧 Mover yaw 兼底（+Z）");
+
+                uint activationId;
+                string error;
+                PMProjectileKey[] keys = h.AttackAndKeys(0, false, out activationId, out error);
+                CheckTrue(keys != null && keys.Length == plan.Directions.Length,
+                    "W4 UI 瞄准攻击经真实上行成功（N=" + plan.Directions.Length + "）：" + (error ?? "ok"));
+                if (keys == null) { return; }
+
+                h.Tick(6);
+                CheckEq(h.DsProjectiles.ServerSpawnsAuthorized, plan.Directions.Length,
+                    "W5 DS 按同一 UI 方向授权了全部预测弹（方向槽匹配）");
+
+                // 【反例】把方向换成“旧路径会给”的世界 +Z（与 UI 瞄准垂直）：必须拒，且不生成权威对象。
+                int authorityBefore = h.DsProjectiles.AuthorityObjectCount;
+                long rejectedBefore = h.DsProjectiles.ServerSpawnsRejected;
+                PMProjectileKey forged = new PMProjectileKey(h.Epoch, ap.NetId.Value,
+                    keys[keys.Length - 1].ProjectileId + 11u, PMProjectileOrigin.ClientPredicted);
+                CheckTrue(h.ReplaySpawnRpc(0, forged, activationId, new PMVector3(0f, 0f, 1f)),
+                    "W6 【反例】换成正交方向（旧 yaw 兼底的世界 +Z）的上行载荷已发出");
+                h.Tick(6);
+
+                CheckTrue(h.DsProjectiles.ServerSpawnsRejected > rejectedBefore,
+                    "W7 【反例】方向不符的 spawn 被拒（“只改 UI 显示、上行用旧方向”过不了 DS 方向槽）");
+                CheckEq(h.DsProjectiles.AuthorityObjectCount, authorityBefore,
+                    "W8 【反例】被拒的 spawn 不生成权威对象");
+
+                // 同源结论：命中链仍能结算（方向向量贯穿 planner→上行→DS→命中）。
+                int hpBefore = sp.CombatHp;
+                string hitError;
+                CheckTrue(h.HitAll(0, keys, sp.NetId.Value, out hitError),
+                    "W9 UI 瞄准攻击的命中上报成功：" + (hitError ?? "ok"));
+                h.Tick(8);
+
+                PMCombatPlayerSnapshot victim = h.Model.GetPlayer(sp.NetId.Value);
+                CheckTrue(victim != null && victim.Hp < hpBefore,
+                    "W10 UI 瞄准方向上的命中被真实结算（HP 下降）");
+                CheckTrue(!h.Ds.IsFaulted, "W11 整个 UI 瞄准链路无会话 fault");
+            }
+        }
+
+        // =================================================================================
+        //  Z. T-LIVE3：瞄准指示器的“长度 / 扇形”只能来自本次攻击的同一份计划
+        //
+        //  实机反馈「普攻/大招摇杆按住时看不到世界瞄准线」。冻结接口要求新的
+        //  PMUnityBattleAimIndicator 在**宿主侧**按同一份 PMCombatWeaponPlanner.TryBuild 计划绘制：
+        //  长度 = Spec.SpeedMps × Spec.LifetimeMs / 1000，扇形 = Plan.Directions（每股一颗弹）。
+        //
+        //  本工程不跑 Unity / LineRenderer，但可以在**真实 R6 字节链**上钉住这些同源事实：
+        //    · 计划股数 = 普通攻击 SpawnBulletCount，逐股都落在 ±LaunchAngle/2 内（首尾包含）；
+        //    · 计划寿命换算出的长度必须覆盖 ShootDistance（弹真能飞到它该飞的距离）；
+        //    · 反例：速度用错一半 / 漏掉 /1000 的长度会偏离射程 ⇒ 本轮断言能抓住；
+        //    · 同一条向量真实上行后被 DS 按 N 个方向槽授权、命中能结算；
+        //    · 单发（LaunchAngle=0）时股数=1 且方向就是基准 ⇒ 指示器退化为一条直线。
+        //
+        //  口径：本节的长度公式是本文件的**镜像**（本工程编不到 PMUnity 源码），断言的是
+        //  「计划本身给出的速度×寿命确实覆盖射程」；真实纯数学由 PMR4UnityAdapterTest 的 O1 节守护。
+        // =================================================================================
+        private static void TestAimIndicatorPlanFacts()
+        {
+            CombatHarness h = CombatHarness.Build(0x7A13u, Roster(
+                new RosterEntry(181, 1, PMHeroId.XueLi),
+                new RosterEntry(182, 2, PMHeroId.PeiPei)));
+            using (h)
+            {
+                // 雪梨：普通攻击 5 股、LaunchAngle 30（真实扇形）——正是“指示器画扇形”的真实形态。
+                h.AimDir = new PMVector3(1f, 0f, 0f);
+
+                PMR3Player ap = h.LocalReplica(0);
+                ResolvedAttack resolved = BattleNumericConfig.ResolveAttack(ap.CombatHeroId, false);
+
+                PMCombatAttackPlan plan;
+                PMCombatRejectReason reason;
+                CheckTrue(PMCombatWeaponPlanner.TryBuild(ap.CombatHeroId, false, 1f, 0f, out plan, out reason),
+                    "Z1 雪梨普通攻击计划可生成：" + reason);
+                if (plan == null) { return; }
+
+                CheckEq(plan.Directions.Length, resolved.SpawnBulletCount,
+                    "Z2 扇形股数 = 普通攻击 SpawnBulletCount（指示器画 N 股，不多不少）");
+                CheckTrue(plan.Directions.Length >= 2 && resolved.LaunchAngle > 0f,
+                    "Z3 本节选到的英雄确实是多股扇形（N=" + plan.Directions.Length.ToString()
+                    + " LaunchAngle=" + resolved.LaunchAngle.ToString() + "）");
+
+                // 长度 = SpeedMps × LifetimeMs / 1000（与 PMUnityBattleAimMath.TryDistanceMeters 同公式）。
+                float distance = plan.Spec.SpeedMps * plan.Spec.LifetimeMs / 1000f;
+                CheckTrue(distance >= resolved.ShootDistance - 1e-4f,
+                    "Z4 ★ 计划寿命换算出的指示长度覆盖射程（length=" + distance.ToString()
+                    + " >= ShootDistance=" + resolved.ShootDistance.ToString() + "）");
+
+                float halfSpeedDistance = plan.Spec.SpeedMps * 0.5f * plan.Spec.LifetimeMs / 1000f;
+                CheckTrue(halfSpeedDistance < resolved.ShootDistance,
+                    "Z5 【反例】速度用错一半得到的长度短于射程（" + halfSpeedDistance.ToString()
+                    + " < " + resolved.ShootDistance.ToString() + "）⇒ 长度用错时本轮断言会红");
+
+                float noDivideDistance = plan.Spec.SpeedMps * plan.Spec.LifetimeMs;
+                CheckTrue(noDivideDistance > distance * 100f,
+                    "Z6 【反例】漏掉 /1000 得到的长度比真实长度大两个数量级以上，不可能通过同一条断言");
+
+                // 逐股方向都落在 ±LaunchAngle/2 内（与 PMBattleSim.SpreadDirection 同口径）。
+                bool withinFan = true;
+                for (int i = 0; i < plan.Directions.Length; i++)
+                {
+                    PMVector3 d = plan.Directions[i];
+                    double dot = (double)d.X * 1.0 + (double)d.Z * 0.0;
+                    if (dot > 1.0) { dot = 1.0; }
+                    if (dot < -1.0) { dot = -1.0; }
+                    double angleDeg = Math.Acos(dot) * 180.0 / Math.PI;
+                    if (angleDeg > resolved.LaunchAngle * 0.5 + 0.01) { withinFan = false; }
+                }
+
+                PMVector3 first = plan.Directions[0];
+                PMVector3 last = plan.Directions[plan.Directions.Length - 1];
+                bool firstLastSymmetric = Math.Abs(first.X - last.X) < 1e-4f && Math.Abs(first.Z + last.Z) < 1e-4f;
+
+                CheckTrue(withinFan, "Z7 每股方向都落在 ±LaunchAngle/2 内（指示器画出的扇形与真实弹道一致）");
+                CheckTrue(firstLastSymmetric, "Z8 首尾两股关于基准方向镜像（扇形对称，不是单边偏移）");
+
+                // 真实字节链：同一条向量上行 → DS 按 N 个方向槽授权 → 命中结算。
+                uint activationId;
+                string error;
+                PMProjectileKey[] keys = h.AttackAndKeys(0, false, out activationId, out error);
+                CheckTrue(keys != null && keys.Length == plan.Directions.Length,
+                    "Z9 指示向量经真实上行成功（N=" + plan.Directions.Length.ToString() + "）：" + (error ?? "ok"));
+                if (keys == null) { return; }
+
+                h.Tick(6);
+                CheckEq(h.DsProjectiles.ServerSpawnsAuthorized, plan.Directions.Length,
+                    "Z10 DS 按同一扇形授权了全部预测弹（方向槽匹配）");
+
+                PMR3Player sp = h.ReplicaOn(0, 1);
+                int hpBefore = sp.CombatHp;
+                string hitError;
+                CheckTrue(h.HitAll(0, keys, sp.NetId.Value, out hitError), "Z11 命中上报成功：" + (hitError ?? "ok"));
+                h.Tick(8);
+
+                PMCombatPlayerSnapshot victim = h.Model.GetPlayer(sp.NetId.Value);
+                CheckTrue(victim != null && victim.Hp < hpBefore, "Z12 扇形弹道上的命中被真实结算（HP 下降）");
+                CheckTrue(!h.Ds.IsFaulted, "Z13 整条瞄准线→攻击链路无会话 fault");
+
+                // 单发英雄：股数 = 1 且方向就是基准（指示器退化成一条直线，不扇形）。
+                PMR3Player single = h.ReplicaOn(0, 1);
+                PMCombatAttackPlan singlePlan;
+                PMCombatRejectReason singleReason;
+                CheckTrue(PMCombatWeaponPlanner.TryBuild(single.CombatHeroId, false, 1f, 0f, out singlePlan, out singleReason),
+                    "Z14 单发英雄计划可生成：" + singleReason);
+                CheckTrue(singlePlan != null && singlePlan.Directions.Length == 1
+                    && Math.Abs(singlePlan.Directions[0].X - 1f) < 1e-5f
+                    && Math.Abs(singlePlan.Directions[0].Z) < 1e-5f,
+                    "Z15 单发（LaunchAngle=0）时股数=1 且方向就是基准 ⇒ 指示器只画一条直线");
+            }
+        }
+
         private static void TestDrainFallbackIsIdempotent()
         {
             CombatHarness h = CombatHarness.Build(0x6B1Cu, Roster(
@@ -1574,6 +1776,271 @@ namespace PMR6NetworkTest
                 {
                     h.DsProjectiles.Settlement -= hostile;
                 }
+            }
+        }
+
+        // =================================================================================
+        //  X. T-LOOP5：断线宽限的**核心事实**（不 Disconnect ⇒ 不判 Forfeit 且仍可被击杀；
+        //     Disconnect 才退出命中集合并判负；断线者不得再造成伤害）
+        // =================================================================================
+        //
+        //  为什么这一节归 R6：宽限窗口本身是宿主（PMDsSessionHost）的时序，需要 Unity；
+        //  但宿主能这么做的**前提判据**全在 core：
+        //    · 不调 Disconnect ⇒ core 仍认为该玩家 Connected ⇒ History.Alive 仍为 true、
+        //      ApplySettlement 仍扣它的 HP（= 『角色原地仍可被打死』）；
+        //    · 一调 Disconnect ⇒ StartMatch 后只剩唯一在线队伍就立即 Forfeit（= 『超期才走原判负』）；
+        //    · attacker.Connected == false ⇒ 迟到命中不重算伤害（= 『不给离线玩家写伤害』）。
+        //  这三条就是宿主宽限期/清理期的写入口径，用可执行反例钉住，避免以后有人把「一断线就 Unbind」
+        //  当成等价重构（那会让离线角色变成无敌，并提前判负）。
+        private static void TestDisconnectGraceCoreFacts()
+        {
+            // ---- X1..X5：1v2，队1 的唯一成员「离线但未 Disconnect」（宿主宽限期的口径） ----
+            CombatHarness h = CombatHarness.Build(0x6B1Bu, Roster(
+                new RosterEntry(311, 1, PMHeroId.KeErTe),
+                new RosterEntry(312, 2, PMHeroId.XueLi),
+                new RosterEntry(313, 2, PMHeroId.KeErTe)));
+            using (h)
+            {
+                PMR3Player offline = h.DsPlayers[0];
+                uint offlineNetId = offline.NetId.Value;
+
+                CheckTrue(h.Model.GetPlayer(offlineNetId).Connected,
+                    "X1 宽限期口径：core 仍认为该玩家 Connected（没有 Unbind/Disconnect）");
+                CheckTrue(!h.Model.Ended, "X2 ★ 宽限开始时未判 Forfeit");
+
+                // 推进 29s 墙钟：只有 Disconnect 才判负，时间本身不判负。
+                h.Advance(29000);
+                CheckTrue(!h.Model.Ended, "X3 ★ 29s 内不判 Forfeit（不因未收到输入而终局）");
+
+                int hpBefore = h.Model.GetPlayer(offlineNetId).Hp;
+                CheckTrue(hpBefore > 0, "X4 受害者初始 HP > 0（HP=" + hpBefore + "）");
+
+                // 真实字节链：队2 的客户端发起攻击 + 命中上报 → R5 → R6 → core。
+                h.KillVictim(1, 0);
+
+                PMCombatPlayerSnapshot after = h.Model.GetPlayer(offlineNetId);
+                CheckTrue(after.Hp < hpBefore,
+                    "X5 ★★ 离线（未 Disconnect）角色仍被权威结算扣血：HP " + hpBefore + " → " + after.Hp);
+                CheckTrue(after.Dead, "X5b ★★ 离线角色可被击杀（原地留在战场，无断线无敌）");
+                CheckTrue(h.Model.Ended && h.Model.Outcome.WinnerTeamId == 2,
+                    "X5c 终局来自真实击杀（winner=2 = 名册真实 TeamId）");
+                CheckEq((int)h.Model.Outcome.Reason, (int)PMCombatEndReason.FirstKill,
+                    "X5d ★ 终局原因 = FirstKill（不是断线 Forfeit）");
+                CheckTrue(h.Ds.SettlementsApplied > 0, "X5e 结算走了 R6 唯一消费点");
+            }
+
+            // ---- X6：反例 —— 同样的名册，但真正 Disconnect（= 宿主宽限到期后的原清理口径） ----
+            CombatHarness h2 = CombatHarness.Build(0x6B1Cu, Roster(
+                new RosterEntry(321, 1, PMHeroId.KeErTe),
+                new RosterEntry(322, 2, PMHeroId.XueLi),
+                new RosterEntry(323, 2, PMHeroId.KeErTe)));
+            using (h2)
+            {
+                PMR3Player victim = h2.DsPlayers[0];
+                CheckTrue(!h2.Model.Ended, "X6 反例前置：断线前未终局");
+
+                CheckTrue(h2.Ds.UnbindPlayer(victim), "X6b 宿主到期清理路径：UnbindPlayer（内含 core.Disconnect）");
+                CheckTrue(!h2.Model.GetPlayer(victim.NetId.Value).Connected, "X6c core 已标记断线");
+                CheckTrue(h2.Model.Ended,
+                    "X6d ★★ 一 Disconnect 就立即判 Forfeit（⇒ 宽限必须『不 Disconnect』才可能成立）");
+                CheckEq(h2.Model.Outcome.WinnerTeamId, 2, "X6e Forfeit 胜者 = 唯一在线队伍（真实 TeamId=2）");
+                CheckEq((int)h2.Model.Outcome.Reason, (int)PMCombatEndReason.Forfeit, "X6f 终局原因 = Forfeit");
+            }
+
+            // ---- X7：2v2 断一人不终局 ⇒ 断线者的迟到命中不得改受害者 HP ----
+            CombatHarness h3 = CombatHarness.Build(0x6B1Du, Roster(
+                new RosterEntry(331, 1, PMHeroId.KeErTe),
+                new RosterEntry(332, 1, PMHeroId.XueLi),
+                new RosterEntry(333, 2, PMHeroId.KeErTe),
+                new RosterEntry(334, 2, PMHeroId.XueLi)));
+            using (h3)
+            {
+                uint activationId;
+                string error;
+                PMProjectileKey[] keys = h3.AttackAndKeys(0, false, out activationId, out error);
+                CheckTrue(keys != null && keys.Length > 0, "X7 攻击已上行（" + (error ?? "ok") + "）");
+                if (keys == null || keys.Length == 0) { return; }
+
+                h3.Tick(6);
+
+                uint attackerNetId = h3.DsPlayers[0].NetId.Value;
+                uint victimNetId = h3.DsPlayers[2].NetId.Value;
+                int victimHpBefore = h3.Model.GetPlayer(victimNetId).Hp;
+                long appliedBefore = h3.Ds.SettlementsApplied;
+                long rejectedBefore = h3.Ds.SettlementsRejected;
+
+                CheckTrue(h3.Model.Disconnect(attackerNetId), "X7b 攻击者被标记断线");
+                CheckTrue(!h3.Model.Ended, "X7c 2v2 断一人不判 Forfeit（队1 仍有在线成员）");
+
+                string hitError;
+                h3.HitAll(0, new[] { keys[0] }, victimNetId, out hitError);
+                h3.Tick(6);
+
+                CheckEq(h3.Model.GetPlayer(victimNetId).Hp, victimHpBefore,
+                    "X7d ★★ 断线攻击者的命中不改受害者 HP（core 拒纪 attacker.Connected=false）");
+                CheckEq(h3.Ds.SettlementsApplied, appliedBefore, "X7e 没有新的结算被应用");
+                CheckTrue(h3.Ds.SettlementsRejected > rejectedBefore,
+                    "X7f ★ 拒绝在 core 的 Disconnected 门上可见（rejected=" + h3.Ds.SettlementsRejected + "）");
+            }
+        }
+
+        // =================================================================================
+        //  Y. T-LOOP 高危2：续局攻击 ID
+        // =================================================================================
+
+        /// <summary>
+        /// 续局攻击 ID（修前红）：「旧客户端断线、新的客户端实例在同一 DS / 同一 NetId 上重连」时，
+        /// 本地 activationId 分配器不能从 0 重开。
+        ///
+        /// <para>修前行为（红）：新实例的 <c>_nextActivationByOwner</c> 为空 ⇒ 第一枪拿 ID=1；
+        /// 而 <c>PMCombatSession</c> 对同一 NetId 的 <c>HighWaterActivationId</c> 跨断线保留（=1）。
+        /// 两种失败形态都真实存在：
+        /// ① 账单还在 TTL 内 ⇒ core 走 duplicate 回显，把「一次全新攻击」当成旧请求原结论（弹不会真被授权）；
+        /// ② 账单已被 TTL 回收（断线 30s 的真实形态）⇒ <c>StaleId</c> 拒绝，客户端甚至会把刚发出的假弹反向撤销。
+        /// 本用例走②（先用另一名玩家的新攻击触发 core 的 TTL 回收巡检，再断言 ID=1 已是 StaleId）。</para>
+        ///
+        /// <para>修后：新实例在 <c>BindPlayer</c>／每次攻击前从**复制到的 OwnerOnly 水位**播种（取 max，
+        /// 旧包不得压低已发 ID），第一枪 ID=2 ⇒ 被接受。非 owner 副本读到的水位恒 0（不泄）。</para>
+        ///
+        /// <para>本测试用的是真实字节链（真实 Transport / 真实可靠 RPC / 真实 core / 真实 R5+R6 驱动）；
+        /// 「重连」以「同一 DS 世界、同一 NetId、客户端侧全新 R5/R6 驱动实例」建模 ——
+        /// DS 侧权威对象**不** Unbind/Disconnect（T-LOOP1 v1：断线不即时清理，水位与 NetId 保留）。</para>
+        /// </summary>
+        private static void TestResumeActivationHighWater()
+        {
+            // ---- Y1..Y14：断线后新客户端实例在同 DS 同 NetId 的首枪不冲突 ----
+            CombatHarness h = CombatHarness.Build(0x6C01u, Roster(
+                new RosterEntry(411, 1, PMHeroId.XueLi),
+                new RosterEntry(412, 2, PMHeroId.KeErTe)));
+            using (h)
+            {
+                PMR3Player dsPlayer = h.DsPlayers[0];
+                uint ownerNetId = dsPlayer.NetId.Value;
+
+                // 第一枪：客户端实例 A（全新会话，从 1 开始）。
+                uint firstActivation;
+                string error;
+                PMProjectileKey[] keys = h.AttackAndKeys(0, false, out firstActivation, out error);
+                CheckTrue(keys != null && firstActivation != 0u,
+                    "Y1 客户端 A 首枪已上行（activationId=" + firstActivation + "，" + (error ?? "ok") + "）");
+                CheckEq(firstActivation, 1u, "Y2 客户端 A 的首枪 activationId = 1（全新会话从 1 开始）");
+
+                h.Tick(6);
+                CheckTrue(h.Clients[0].WasActivationConfirmed(ownerNetId, firstActivation),
+                    "Y3 DS 已接受首枪（客户端 A 收到终态 Accepted）");
+
+                uint coreHighWater;
+                CheckTrue(h.Model.TryGetActivationHighWater(ownerNetId, out coreHighWater),
+                    "Y4 core 只读水位可查（owner 有名册记录）");
+                CheckEq(coreHighWater, 1u, "Y5 core 水位 = 1（跨断线保留，不回落）");
+                CheckTrue(!h.Model.TryGetActivationHighWater(999999u, out coreHighWater),
+                    "Y5b ★ 未知 netId 水位查询返回 false（纯只读，不隐式建档）");
+
+                h.Tick(4);
+                PMR3Player ownerReplica = h.ReplicaOn(0, 0);
+                PMR3Player observerReplica = h.ReplicaOn(0, 1);
+                CheckEq(ownerReplica.CombatActivationHighWater, 1u,
+                    "Y6 owner 副本经真实字节链收到水位 = 1");
+                CheckTrue(observerReplica == null || observerReplica.CombatActivationHighWater == 0u,
+                    "Y6b ★★ 非 owner 副本读不到水位（OwnerOnly，恒 0）");
+
+                // ---- 断线期间的真实对局：账单被 TTL 回收（水位保留），ID=1 从「重复回显」变成「旧 ID」----
+                //
+                // core 只在「一个新 ID 的请求」里做 TTL 回收巡检（EnsureCapacity → PurgeExpired），
+                // 而真实对局里别的玩家一直在开枪，所以这里用同一字节链上的另一名玩家来触发回收。
+                h.Advance(6000);
+
+                uint otherActivation;
+                string otherError;
+                PMProjectileKey[] otherKeys = h.AttackAndKeys(1, false, out otherActivation, out otherError);
+                CheckTrue(otherKeys != null,
+                    "Y6c 断线期间另一名玩家正常开枪（触发 core 的 TTL 回收巡检）：" + (otherError ?? "ok"));
+                h.Tick(6);
+
+                PMCombatAttackDecision probe = h.Model.RequestAttack(
+                    ownerNetId, 1u, false, h.AimDir.X, h.AimDir.Z, h.Rig.Now);
+                CheckEq((int)probe.Reason, (int)PMCombatRejectReason.StaleId,
+                    "Y6d ★★ 账单回收后 ID=1 已是 StaleId（不是 duplicate 回显）—— 修复前新实例的首枪就撞在这里");
+                CheckTrue(h.Model.TryGetActivationHighWater(ownerNetId, out coreHighWater) && coreHighWater == 1u,
+                    "Y6e ★ 账单回收不回落水位（水位仍为 1）");
+
+                // ---- 模拟「旧客户端进程结束、新的客户端实例在同一 DS / 同一 NetId 上重连」----
+                h.Clients[0].Dispose();
+                h.ClientProjectiles[0].Dispose();
+                h.ClientProjectiles[0] = new PMR5ProjectileDriver(
+                    h.Rig.ClientWorld(0), h.Rig.ClientBridge(0), h.Epoch, new PMProjectileHistory(h.Epoch));
+                h.Clients[0] = new PMR6CombatDriver(
+                    h.Rig.ClientWorld(0), h.Rig.ClientBridge(0), h.Epoch, h.ClientProjectiles[0], null);
+
+                for (int i = 0; i < h.ClientPlayers[0].Count; i++)
+                {
+                    PMR3Player replica = h.ClientPlayers[0][i];
+                    if (replica == null) { continue; }
+                    h.ClientProjectiles[0].BindPlayer(replica);
+                    h.Clients[0].BindPlayer(replica);
+                }
+
+                CheckEq(h.Clients[0].LocalActivationHighWater(ownerNetId), 1u,
+                    "Y7 ★★ 新客户端实例的分配器在水位 1 之后（BindPlayer 从复制初值播种，不是从 0 重开）");
+                CheckTrue(h.Clients[0].ActivationHighWaterAbsorbCount > 0,
+                    "Y7b ★ BindPlayer 的播种走了单调吸收路径（次数="
+                    + h.Clients[0].ActivationHighWaterAbsorbCount + "）");
+
+                uint resumeActivation;
+                string resumeError;
+                bool resumed = h.Clients[0].TryAttack(
+                    h.LocalReplica(0), false, h.AimDir.X, h.AimDir.Z, h.Muzzle, 0, h.Rig.Now,
+                    out resumeActivation, out resumeError);
+                CheckTrue(resumed, "Y8 ★★ 续局后的第一枪被本地接受（" + (resumeError ?? "ok") + "）");
+                CheckEq(resumeActivation, 2u, "Y9 ★★ 续局首枪 activationId = 2（> 水位 1，不复用不回绕）");
+
+                h.Tick(6);
+                CheckTrue(h.Clients[0].WasActivationConfirmed(ownerNetId, resumeActivation),
+                    "Y10 ★★ DS 接受续局首枪（没有 StaleId，也没有 AlreadyTerminal 反向撤弹）");
+                CheckTrue(!h.Clients[0].WasActivationRevoked(ownerNetId, resumeActivation),
+                    "Y11 ★★ 续局首枪没有被撤销（假弹没有因旧结论被反向撤掉）");
+                CheckTrue(!h.Clients[0].WasActivationRevoked(ownerNetId, 1u),
+                    "Y12 ★★ 旧 ID=1 从未进入本实例的 pending 表（新实例没有复用已终态的 ID）");
+                CheckEq(h.Clients[0].AttackRejections, 0L, "Y13 续局首枪没有触发任何攻击级拒绝");
+                CheckEq(h.Clients[0].AttackResultsLateAfterTerminal, 0L, "Y14 没有命中「终态后迟到裁决」");
+            }
+
+            // ---- Y15..Y21：uint 上限显式拒绝下一攻击，绝不回绕 ----
+            CombatHarness h2 = CombatHarness.Build(0x6C02u, Roster(
+                new RosterEntry(421, 1, PMHeroId.XueLi),
+                new RosterEntry(422, 2, PMHeroId.KeErTe)));
+            using (h2)
+            {
+                PMR3Player ap = h2.LocalReplica(0);
+                uint ownerNetId = h2.DsPlayers[0].NetId.Value;
+
+                // 用真实可靠 RPC 把权威水位直接推到 uint.MaxValue（模拟原局 ID 空间已被耗尽）。
+                try
+                {
+                    ap.ServerCombatAttackV1(uint.MaxValue, false, h2.AimDir.X, h2.AimDir.Z);
+                }
+                catch (Exception ex)
+                {
+                    Check(false, "Y15 上行 uint.MaxValue 攻击抛异常：" + ex.Message);
+                }
+
+                h2.Tick(6);
+
+                uint water;
+                CheckTrue(h2.Model.TryGetActivationHighWater(ownerNetId, out water), "Y16 core 水位可查");
+                CheckEq(water, uint.MaxValue, "Y17 ★ core 水位推进到 uint.MaxValue（该攻击被真正处理）");
+                CheckEq(h2.ReplicaOn(0, 0).CombatActivationHighWater, uint.MaxValue,
+                    "Y18 ★★ 新实例吸收到水位 = uint.MaxValue（复制链真的把上限带到了客户端）");
+
+                uint wrappedActivation;
+                string wrapError;
+                bool accepted = h2.Clients[0].TryAttack(
+                    ap, false, h2.AimDir.X, h2.AimDir.Z, h2.Muzzle, 0, h2.Rig.Now,
+                    out wrappedActivation, out wrapError);
+                CheckTrue(!accepted, "Y19 ★★ uint.MaxValue 后下一攻击被显式拒绝（不回绕到 1）");
+                CheckEq(wrappedActivation, 0u, "Y20 被拒时不外泄 activationId（恒 0）");
+                CheckTrue(!string.IsNullOrEmpty(wrapError), "Y21 拒绝带可读错误：" + (wrapError ?? "<null>"));
+                CheckEq(h2.Model.AttackRecordCount, 1, "Y22 ★ core 只有那一笔 MaxValue 攻击（回绕没有产生第二笔记录）");
             }
         }
 

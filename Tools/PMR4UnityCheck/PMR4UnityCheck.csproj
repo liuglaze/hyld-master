@@ -41,6 +41,21 @@
     <!-- Unity 的托管程序集带 NU1701 之类的包兼容提示，与"能否编译"无关，不要拿它当失败。 -->
     <NoWarn>$(NoWarn);CS1591;NU1701;CS0618</NoWarn>
     <UnityManagedDir Condition="'$(UnityManagedDir)' == ''">D:\Unity\2019.4.8f1\Editor\Data\Managed</UnityManagedDir>
+    <!--
+      T-PLAY4：局内操控 UI（PMUnityBattleControls）引用**真实** UnityEngine.UI。
+
+      为什么是项目 Library 而不是引擎目录：com.unity.ugui（UnityEngine.UI.dll + 其中的
+      UnityEngine.EventSystems）是**包**，不在 Editor/Data/Managed/UnityEngine 下；
+      用户工程比更新（Unity 已导入该包）后，真实编译产物就落在
+      Client/Library/ScriptAssemblies/UnityEngine.UI.dll。
+      这与 Unity 自己的 Assembly-CSharp 编译引用一致，不是“把包拷进引擎目录”那类操作：
+      本工程只**读**它，不写、不覆盖。
+      同时必须补 UI 依赖的引擎模块：UIModule（Canvas/RenderMode/CanvasRenderer）与
+      TextRenderingModule（Text/Font）。
+      它证明什么 / 不证明什么：证明本文件能在真实 Unity 2019 的 uGUI 类型面上编译通过；
+      **不**证明编辑器/Player 运行期的 UI 行为（那要用户实机，见报告 T-PLAY5）。
+    -->
+    <UnityUiAssembly Condition="'$(UnityUiAssembly)' == ''">$(MSBuildThisFileDirectory)..\..\Client\Library\ScriptAssemblies\UnityEngine.UI.dll</UnityUiAssembly>
   </PropertyGroup>
 
   <ItemGroup>
@@ -134,6 +149,22 @@
     </Reference>
     <Reference Include="UnityEngine.TerrainPhysicsModule">
       <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.TerrainPhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!--
+      T-PLAY4：uGUI 真实类型面（Canvas/RenderMode 在 UIModule；Text/Font 在 TextRenderingModule；
+      Image/CanvasScaler/GraphicRaycaster/EventSystems 在 UnityEngine.UI 包程序集）。
+    -->
+    <Reference Include="UnityEngine.UIModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(UnityManagedDir)\UnityEngine\UnityEngine.TextRenderingModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UI">
+      <HintPath>$(UnityUiAssembly)</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.SharedInternalsModule">

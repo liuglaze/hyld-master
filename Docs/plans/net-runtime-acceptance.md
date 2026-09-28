@@ -1,4 +1,4 @@
-# 网络运行准入测试集（实机操作规范）
+﻿# 网络运行准入测试集（实机操作规范）
 
 本文件是**执行规范**，不是状态源。进度/决策/验收唯一源仍是
 `Docs/plans/net-architecture-migration.md`（尤其末尾「运行准入测试集开工（本轮）」段）。
@@ -27,6 +27,7 @@
    - Lobby：`dotnet build D:/UGit/hyld-master/Server/Server.csproj`（用户 Lobby 在跑时加 `-o <独立输出目录>`）；
      然后 `Server/run_lobby.bat --check-only`（**只检查路径存在**，不启服务、不证明二进制新鲜或协议一致）。
 2. **编织 reload/repair（失败即停止，不得带着未编织映像入局）**
+   - 首次实机曾报缺 `DOTween.dll`：Editor 编织器已改从 Unity 编译引用清单提供该插件真实路径。更新 Editor 源码后先等 Unity 重编译/域重载，后续菜单才会使用新版本；别手动复制插件 DLL 到 `Library`。
    - 菜单 `Tools/PMNet/Weaving/Log Status`：确认「编织状态=Ok」且「待重载=false」。
    - 未织/待重载时按序：`Refresh Generated Metadata (decl-check/decl-gen)` → 等 Unity 重编译完成 →
      仍要求则 `Repair: Weave Assembly-CSharp Now` → `Request Script Reload (after repair)` → **等脚本重载真正结束**
@@ -92,7 +93,7 @@ python Tools/run_net_acceptance.py --timeout-seconds 900  # 每次build/run各�
 | 构建时间 | 各产物 mtime / 记录时刻（本地时区） |
 | 程序集 | `Assembly-CSharp.dll`、`Server.dll`、`HyldDS.exe` 的 SHA256 |
 | 内容 manifest | `Client/Assets/Resources/PMNet/BattleContentV1.json` 的 `contentDigest`/`collisionDigest`/`worldVersion` |
-| 协议 | `ProtocolHash`（应为 `0xE6130FAA`）、ID 锁 SHA256（`47f0ad21…40fece8`）。注意：hash 相同**不证明**二进制新鲜，必须与上表其它项联合判定 |
+| 协议 | `ProtocolHash`（T-LOOP新版本应为 `0xAEA98336`）、ID 锁 SHA256（`767c6e0d…19217826`）。注意：hash 相同**不证明**二进制新鲜，必须与上表其它项联合判定 |
 | 实际路径 | Lobby 日志打印的 DS exe/workdir/bootstrap dir/manifest；本次客户端 A/B 与 DS 的真实绝对路径 |
 
 ---
@@ -211,7 +212,7 @@ run-id / 日期 / 执行人：
 源码身份：HEAD=<sha> dirty=<条数> diff摘要=<一句话>
 构建身份：Assembly-CSharp.dll=<sha256> Server.dll=<sha256> HyldDS.exe=<sha256>
           构建时间=<...> manifest contentDigest=<...> collisionDigest=<...> worldVersion=<...>
-          ProtocolHash=<0xE6130FAA> ID锁SHA256=<47f0ad21…40fece8>
+          ProtocolHash=<0xAEA98336> ID锁SHA256=<767c6e0d…19217826>
 实际路径：DS exe=<...> workdir=<...> bootstrap dir=<...> manifest=<...> 客户端A/B=<...>
 Runner：suite=smoke|full run=<run> 结论=<PASS/FAIL/NOT_RUN> summary=Tools/NetAcceptance/bin/<run>/summary.json
 步骤实际值：U__ <操作> → <观察> → <结论>（逐项一行）
@@ -234,3 +235,50 @@ STOP原因（如适用）：<...>
 - 本文件不新增状态；T-GATE1..4、T-AUD1..6、T-W6、T-P6、T46/T47 的原始状态只在主计划登记。
 - 实机无证据的子项始终 PENDING/BLOCKED；不使用「HUD 看起来对」替代 OwnerOnly/OnRep/丢包等不可观测项的证明。
 - 旧功能欠账（特殊技能/抛物线/AoE/道具/完整 UI/回放/完整 Modifier/长局性能）不因本文件通过而消失。
+
+
+## 9. 首次画面缺陷后的复测（T-VIS1..5）
+- **先退出Play才同步本轮源码**，等Unity自动编译/域重载并Verify通过，再同源打包客户端。不要保存上次在Play里手动关闭Canvas的状态，不加载旧HYLDGame场景。接下来的验收看`[TVIS1]`抑制/恢复和`[TVIS1b]`安全关栈日志；入局匹配UI不遮地图，退局回主菜单，第二局匹配按钮可用。
+- 左右键连续切换/停顿；新Owner相机跟位移但方位角固定，不随角色瞬间旋转；靠墙从不同方位接近时镜头收短（极近可能贴身，记录截图/位置）；退局仅恢复一个旧相机，第二局无累计。纯几何99/0不是实机PhysX通过。
+- 地图截图纹理与角色几何已显示但偏暗；镜头先修复再对比旧截图，若仍暗，另测本局光照，不直接改原Scene/Prefab/全局RenderSettings。Map prefab未带场景级GI/lightmap数据，HYLDStart场景有Directional Light但是否给当前叠加隔离场景提供足够照明仍需实机观测。
+- 资产冻结门G8当前因用户工作区BattleMapV1.prefab和EditorBuildSettings.asset真实差异报1失败，不得忽略或自动更改锚以让full绿色；先核正式内容重新烘焙是否与manifest/DS/Client同源并记录决策。其它代码门与17条旧链负例通过不代表G8已恢复。
+
+
+## 10. 旧玩法视觉/操控恢复后的实机复测（T-PLAY5）
+- **前置**：退出Play后等Unity编译；Tools/PMNet/Weaving/Verify通过且待重载false。完整代码门禁旧链G8目前因用户重烘资产/BuildSettings差异仍FAIL，不能写full PASS。统一重建含新源码/同内容摘要的DS、客户端B与Lobby；旧已打包的客户端不会自动带上新UI/灯/相机，禁止混用。
+- **镜头**：两端同场景A/D、左右方向键或左侧PlayerMove摇杆向上下左右拖，检查可见角色Capsule随移动Yaw转、相机本体不随角色朝向急转；旧透视FOV60、固定yaw−90、高俯角约68°，靠墙不穿墙。不是上一轮yaw0/pitch12近地面测试镜头；原旧相机位置差约1米、Z轴改为跟随角色保留新地图3个出生槽在屏幕内。记录左右/近墙/出生/终局四张截图。
+- **固定地图**：地图内边界墙、树、障碍仍用同一个map2 seed/manifest（不会每局重新随机），客户端本局地图隔离场景应出现独立`[PMNetBattleLights]` 1蓝方向光+2青聚光、DS零灯；蓝色观感应较前次灰棕改善，但不是原场景逐像素Lightmap/天空盒恢复，记录同位置同相机截图。不能把贴墙纯黑直接认成“缺灯”。
+- **旧皮肤新UI**：局内应出现独立`[PMUnityBattleControls]` Canvas，左下PlayerMove、右下FireNormal/FireSuper、只读HP/Mana/Energy；旧inactive `Resources/Prefabs/GameUI`仅只读取4张Sprite+几何，旧TouchLogic/EasyTouch及旧网络脚本不得激活。左摇杆按住连续移动、松手停并恢复WASD；两人不同方向移动时用右普通摇杆向目标拖拽**松手**发一次攻击（独立瞄准，角色朝向仍随移动），普通扣蓝/伤害由DS裁决；能量满200且英雄有已支持直线大招时Super摇杆才可用。F/G仍键盘兑底，但其瞄准是上次移动Yaw，不等同右摇杆方向。观察无双发/同一次planner、上行和枪口不分裂。场景终局或失败UI应禁输入/退场销毁，返回大厅并第二次入局不叠控件。
+- **失败标记**：UI不可见/不接受pointer、光源数不为3、两端视角/角色朝向不一致、攻击瞄准与松手方向不同、退场残留第二UI、任何旧BattleData或旧UDP复活均停测并保留ClientA/B/DS/Lobby四端日志。此处所有实机状态仍PENDING_USER；纯源码测试/真实Unity DLL编译不替代本节。
+
+- 门禁新增Player编译门：`PMNetUnityPlayerCheck`（真实Player变体程序集、不定义UNITY_EDITOR）。它属于smoke清单；曾漏测导致“Editor能跑、Build Player报CS1061”。打包前若该门红，说明源码在Player面编不过，先修再打包，不要靠Editor能Play判断。
+- 已知G8阻断：`PMLegacyRetirementTest`的6个冻结资产锚里有2个与工作区不同（地图prefab与EditorBuildSettings），会让smoke在该项终止、后续项NOT_RUN。主侧只读比对证明地图**内容等价**（277/277路径的TRS/mesh/collider/材质一致，差异仅Unity fileID），BuildSettings差异是清掉已删除的TestUDP条目；是否更新锚由用户决定，未更新前不要宣称full绿。
+
+- `PMR3RuntimeTest` 的 H 段是**注入时钟 + 真实 loopback socket**：代理用后台线程收帧，因此夹具必须“等真实投递”（`expectTrustedDelivery`）。套内常驻 H37–H41 用 `DeliveryDelayPumps` 确定性复现“虚拟时钟跑赢真实投递”的误报，H42–H46 证明修复。若这两组红/绿反转，先看夹具是否被改回不等投递，而不是怀疑代理。
+- 全文 `--suite full` 目前 **35/35 PASS**（含 smoke 15 项、新 `PMNetUnityPlayerCheck` Player 编译门）；这仍是 CODE_ONLY 结论，Unity 实机项见 §10。
+
+
+### T-MOVE 用户实机双向位移定位（未通过前不得宣称修复）
+1. Editor 退出 Play 后让脚本重新编译，重建同源码 DS 与客户端包；Player/Editor编译门代码侧已过，用户真实 Build/Play 仍须确认。
+2. Editor 与包各入一人，Editor 先不动，包端持续向右/上（每个方向各>10秒）。记录 Editor Console 的两条间隔约5秒的 `PMClientSessionHost heartbeat`，截出 `rigChain=[netN/SP ... rawFrame=... raw=(x,y,z) ... shown=(x,y,z) root=(x,y,z)]`；同时包端日志截同一 netN/AP 两条（Unity Player.log）。重点比较同 netId 且 stream 一致。需要时在 Editor Hierarchy 查 `PMUnityBattlePresentation[uid.../netN|SimulatedProxy]` 的根坐标。
+3. 倒过来让 Editor 动、包观察同一个角色。用键盘 W/S/A/D、箭头与屏幕摇杆比方向：W/上世界−X、S/下+X、D/右+Z、A/左−Z，斜向不加速；UI在推时键盘不叠加，松开后恢复。各自发射一次，区分本地预测弹与 DS 复制弹，不以弹的起点推断远端角色复制正常。
+4. raw 不动而包AP在动→继续查 DS 入站/快照；raw动 shown不动→SP 接纳/插值；shown动 root不动→表现 Transform；三者都动但画面停住→检查场景里是否看的是旧/重复模型、相机/Renderer。把带时间戳两端日志和对应截图发回，不临时改资产哈希或禁用检查。
+
+
+### T-LOOP 实机原局续玩/结算复测（状态见主计划，以下仅操作方法）
+**先确保Editor退出Play，然后手动重建同一源码版本的Lobby、HyldDS、客户端Player；AI不启停用户服务。** 本版声明ProtocolHash 0xAEA98336，不可拿上局旧包/旧DS混跑。`python -B Tools/run_net_acceptance.py --suite full` 的37/37只代表代码侧。
+1. 双端入正式局、先分别攻击但**不击杀**（证明本端攻击ID已有历史）；断开客户端A的整个进程/网络，大厅保持运行，客户端B观察A原地可受伤且30s内DS不判负、不立刻退出。A用原账号重新启动/登录（不点匹配），应自动收到PMDSR1并回同一MatchId/原角色位置、血/蓝/能量与已在世投射物；重连后第一枪应被DS接受且activationId高于先前水位，不出StaleId/AlreadyTerminal。分别记录A/DS/Lobby日志中的match、UID、NetId、stream、窗口/新票（只记录是否新，不贴票字节）。
+2. A再次断开并在窗口内重登录，新票必须不同于上次已使用票且仍能回同NetId；重复同一连接的通知不能反复刷新窗口。另测超过30s仍未回来、以及断线期间被B击杀：均不能复活旧对局/状态，DS按原规则结算；旧票跨端不能用。终局居中弹窗须显示胜/负/平、返回大厅按钮能点，点击后回大厅且结论仍可见；不点则≤7s自动回大厅。A在终局后重新登录只看可信PMDS-END1上局结果，不重新连已结束DS。再开新局时旧结果不得盖在新局上。
+3. 旧包/坏密码/错uid/错match/已终局票必须拒绝；不同新账号不能接管A座位。若客户端登录成功却没有自动续局，请抓同一局Lobby的`ResumeOutcome`、客户端`UIMatchingPanel` PMDSR1日志、DS握手拒绝计数；注意ClientHello续局最多80×250ms、普通初次24×250ms。当前新进程重登录路径已接线；同一进程在大厅TCP完全断开后的自动重建仍需单独验收，不将本套代码测试冒称其通过。
+
+
+### T-LIVE 用户复测（四项，必须同版包；代码full39/39不是实机）
+1. 确认Editor不在Play后等待Unity编译/Weaving Verify，再重新Build**客户端包**；Lobby/DS仍须是同ProtocolHash `0xAEA98336`，本次只改客户端表现与通知接收，无需为此重签游戏协议。不要贴Editor.log/Player.log中任何`Str=PMDS1:/PMDSR1:`原始字串：它含可用票据；只给非秘密`matchId/uid/错误类型/时间`。
+2. 先双端入局、不要击杀，退出其中一个客户端并在30s内用同账号重新登录（无需再点匹配）。检查Lobby“新Nonce票已发送”→客户端“早到暂存→面板注册→恰好一次入局”→DS握手/原NetId完整Create/恢复；若仍卡住，只截脱敏后的RequestManger入箱计数/主线程开面板原因与DS握手拒绝分类。
+3. 在另一局击杀：可信胜负弹窗仍出现，点“返回大厅”后**左上HUD和居中弹窗都消失**；不点应在7s有界自动退场，退场后也无残留。结果只在Host只读快照里保留，不再占大厅画面；第二局无旧按钮。
+4. 按住/拖动**普攻摇杆**，本地角色前方应有半透明白色世界瞄准线（直线英雄与散射英雄方向/距离和实际子弹同向）；松开/取消立即消失且只发一次攻击。能量达到200时再测支持的直线大招摇杆；死亡/断线/终局无残留指示器，DS/对手不看到我的本地线。若线完全不出现，截`PMUnityBattleAimIndicator ShaderFound`/Create错误（不要贴票据）。
+5. 能量盘应为旧圆形底/径向Fill/小图标，0→200平滑比例、按钮可用性只读权威；不再是纯色大方块与大数字。对比截图或录屏；颜色/遮挡/图像丢失属Unity实机视觉验收，离线门不能判通过。所有观察结论回填主计划T-LIVE5；当前PENDING_USER。
+
+
+### T-AIM 本地瞄准覆盖带实机复测（PENDING_USER）
+保持Unity Editor退出Play→重新编译/Verify→重新Build**客户端包**（Lobby/DS只要同0xAEA98336版本无需因纯视觉修改重启）。用支持的直线普攻英雄和散射英雄分别按住拖动摇杆：应同时看到白色0.06m中心线和半透明浅蓝“约1.6m宽”的标准玩家几何覆盖带，扇形每股与弹道方向一致；松手/Cancel/死亡/终局/换局两层同时消失。此带只提示标准目标的**近似侧向范围**，不是承诺带内命中：DS墙可能提前截弹，目标Scale/高度/历史时帧也会改变判定。若边带仍看不见或色块遮住地图，带截图及`PMUnityBattleAimIndicator.ShaderFound/Describe`非秘密信息复核；别贴原始票据或PMDS1/PMDSR1完整Str。

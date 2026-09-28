@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 //  PMBattleContentSceneFactsCheck —— R4-C / C1 崩溃修复的**源真相门禁**
 // ============================================================================
 //
@@ -67,6 +67,153 @@ namespace PMBattleContentSceneFactsCheck
         private const string SceneRelativePath = "Client/Assets/Scenes/HYLDGame.unity";
         private const string BuildScriptRelativePath = "Client/Assets/Editor/PMBattleContentBuild.cs";
 
+        // T-PLAY3（客户端专有光照）的源真相与契约源码路径
+        private const string LightingSourceHierarchyPath = "HYLDGameTatal/MAP/lights";
+        private const string LightingModuleRelativePath = "Client/Assets/Scripts/PMUnity/PMUnityBattleLighting.cs";
+        private const string LightingMapRelativePath = "Client/Assets/Scripts/PMUnity/PMUnityBattleMap.cs";
+        private const string LightingTableBeginMarker = ">>> PMLIGHT-DEFINITION-TABLE-BEGIN";
+        private const string LightingTableEndMarker = "<<< PMLIGHT-DEFINITION-TABLE-END";
+
+        /// <summary>源 lights 容器的序列化 localPosition（父链两级都是单位 TRS ⇒ 即世界位置）。</summary>
+        private const double ExpectedLightingContainerY = -8.1;
+
+        /// <summary>定义表的数值列数（name 之外的 20 列：kind..shadowNearPlane）。</summary>
+        private const int LightingValueCount = 20;
+
+        // ---- T-PLAY4（局内操控 UI）的源真相与契约源码路径 ----
+
+        private const string GameUiPrefabRelativePath =
+            "Client/Assets/HYLD1.0/Resources/Prefabs/GameUI.prefab";
+
+        private const string GameUiPrefabMetaRelativePath =
+            "Client/Assets/HYLD1.0/Resources/Prefabs/GameUI.prefab.meta";
+
+        private const string GameUiPrefabGuid = "af998dab9af610e4986aa70670bf2cc6";
+
+        private const string BattleControlsRelativePath =
+            "Client/Assets/Scripts/PMUnity/PMUnityBattleControls.cs";
+
+        private const string BattleControlsMetaRelativePath =
+            "Client/Assets/Scripts/PMUnity/PMUnityBattleControls.cs.meta";
+
+        // ---- T-LIVE3（世界空间瞄准指示器）的契约源码路径 ----
+
+        private const string AimIndicatorRelativePath =
+            "Client/Assets/Scripts/PMUnity/PMUnityBattleAimIndicator.cs";
+
+        private const string R4UnityCheckCsprojRelativePath = "Tools/PMR4UnityCheck/PMR4UnityCheck.csproj";
+
+        private const string UnityUiAssemblyRelativePath = "Client/Library/ScriptAssemblies/UnityEngine.UI.dll";
+
+        private const string SessionHostRelativePath = "Client/Assets/Scripts/Server/Boot/PMClientSessionHost.cs";
+
+        // 旧 prefab 里那三根 EasyJoystick 的冻结布局字段值（本工具对着 prefab 文本逐字核对）
+        private const int LegacyJoystickZoneRadius = 100;
+        private const int LegacyJoystickDeadZone = 20;
+        private const int LegacyMoveJoystickAnchor = 7;
+        private const int LegacyFireJoystickAnchor = 9;
+
+        /// <summary>J 段要求**必须**出现在 UI 源码里的标记（缺失即失败）：只列“少了它就不可能守住契约”的那几处。</summary>
+        private static readonly string[] UiRequiredTokens = new string[]
+        {
+            "Prefabs/GameUI",
+            "Resources.Load<GameObject>(LegacyPrefabResourceKey)",
+            "PMNetRuntime.IsDedicatedServer",
+            "PMUnityBattleMoveInputHandler",
+            "PMUnityBattleAttackInputHandler",
+            "PMUnityBattleStatusQuery",
+            "public void Dispose()",
+            "TryNormalizeStick",
+            "MinAimLength",
+            "ScreenPointToLocalPointInRectangle",
+            "EventSystem.current",
+            "PMUnityBattleControlsPointerRelay",
+            "PMNet.Shared.BattleNumericConfig.ManaMax",
+            "PMNet.Shared.BattleNumericConfig.SuperEnergyMax",
+            "#if UNITY_2019_1_OR_NEWER || UNITY_EDITOR",
+            "#else",
+            "public const bool UguiImplementationCompiled = true;",
+            "public const bool UguiImplementationCompiled = false;",
+            "LegacyJoystickZoneRadiusPixels = 100f",
+            "LegacyJoystickDeadZoneRatio = 0.2f",
+            "LegacyMoveJoystickAnchor = 7",
+            "LegacyFireJoystickAnchor = 9",
+            "LegacyPrefabRootWasInactive",
+            "JoystickState.NoPointer",
+        };
+
+        /// <summary>
+        /// J 段要求**绝不**出现在 UI 源码（去注释后）里的标记：旧脚本、旧联网、RPC/权威写、旧场景加载。
+        /// 这些名字在旧 prefab 文本里确实存在（正是“零激活”必须由结构保证的原因），
+        /// 所以任何一处落进可执行代码都必须让门禁失败。
+        /// </summary>
+        private static readonly string[] UiForbiddenTokens = new string[]
+        {
+            "Instantiate",
+            "SetActive",
+            "SendMessage",
+            "FindObjectOfType",
+            "FindObjectsOfType",
+            "LoadScene",
+            "SceneManager",
+            "EasyTouch",
+            "EasyJoystick",
+            "EasyButton",
+            "TouchLogic",
+            "GameUITeamGemLogic",
+            "HYLDHeropropertyUI",
+            "BattleData",
+            "BattleManger",
+            "CommandManger",
+            "UDPSocketManger",
+            "HYLDManger",
+            "HYLDStaticValue",
+            "PMNet_",
+            "ServerCombatAttackV1",
+            "ClientCombatAttackResultV1",
+            "PMR6CombatDriver",
+            "HYLDCameraManger",
+            "PlayerLogic",
+        };
+
+        /// <summary>J 段：UI 只读复用的 4 张 Sprite（节点路径 / Sprite guid / 源图相对路径）。</summary>
+        private static readonly string[][] UiRequiredSprites = new string[][]
+        {
+            new string[] { "能量条/Background", "1ecc8b15ae5d98c41a0ecf57a4f118ed",
+                           "Client/Assets/HYLD1.0/HYLDResource/SuperFireUI/FullBG.png" },
+            new string[] { "能量条/Fill Area/Fill", "8e6b3e0a7f62eb044a849332e3c9a18b",
+                           "Client/Assets/HYLD1.0/HYLDResource/SuperFireUI/FullPower.png" },
+            new string[] { "能量条/Image", "ab50dae53b97cce488f2b49b637fe5dc",
+                           "Client/Assets/HYLD1.0/HYLDResource/SuperFireUI/UnFullImage.png" },
+            new string[] { "GemSelfTeamUI/Image", "6c515d343436ee4469a93989e49ec0a6",
+                           "Client/Assets/HYLD1.0/Images/Gem 1.png" },
+        };
+
+        /// <summary>J 段：旧 prefab 里**确实挂着**的旧脚本（它们是“零激活”负例的事实依据）。</summary>
+        private static readonly string[][] UiLegacyScripts = new string[][]
+        {
+            new string[] { "Android/PlayerMove", "6cb67c6dcb4e4d74eb7aed04254e4089", "EasyJoystick" },
+            new string[] { "Android/FireNormal", "6cb67c6dcb4e4d74eb7aed04254e4089", "EasyJoystick" },
+            new string[] { "Android/FireSuper", "6cb67c6dcb4e4d74eb7aed04254e4089", "EasyJoystick" },
+            new string[] { "Android/FireNormalButton", "8011f44b5b7e78b4883c2c7968fe5e73", "EasyButton" },
+            new string[] { "Android", "aed5e2a9afa81fc43a1fb0a943c8353e", "TouchLogic" },
+            new string[] { "Android/EasyTouch", "42241010c6f9ddc46b78abdc21d505c5", "EasyTouch" },
+            new string[] { "", "fc3a7e8d1250bcb4fbf3ec233416059a", "GameUITeamGemLogic（根）" },
+            new string[] { "", "e2f754aa29fcc75459937c178b61f38f", "HYLDHeropropertyUI（根，带 backStart）" },
+        };
+
+        /// <summary>浮点字段对照容差（相对；远大于 float↔double 的十进制舍入，远小于任何真实参数差异）。</summary>
+        private const double LightingTolerance = 1e-5;
+
+        /// <summary>定义表列名（顺序 = PMBattleLightDefinition 构造函数参数顺序）。</summary>
+        private static readonly string[] LightingColumnNames =
+        {
+            "kind", "colorR", "colorG", "colorB", "intensity", "range", "spotAngle", "innerSpotAngle",
+            "localPosition.x", "localPosition.y", "localPosition.z",
+            "localRotation.x", "localRotation.y", "localRotation.z", "localRotation.w",
+            "shadowType", "shadowStrength", "shadowBias", "shadowNormalBias", "shadowNearPlane",
+        };
+
         // Unity classID：Collider 家族（判"模板子树里有没有碰撞"用；CharacterController 不是 Collider）
         private static readonly HashSet<int> ColliderClassIds = new HashSet<int> { 64, 65, 135, 136, 146, 154 };
 
@@ -134,6 +281,12 @@ namespace PMBattleContentSceneFactsCheck
 
             Section("H. 第四轮显式拷贝：源数据组件类型 ⊆ 支持集 + 禁用通用序列化写入");
             CheckTemplateComponentSupport(scene, logic, repoRoot, scenePath);
+
+            Section("I. T-PLAY3 客户端专有光照：源 YAML 逐字段对照 + 身份/隔离/释放静态门");
+            CheckClientLightingSource(scene, repoRoot);
+
+            Section("J. T-PLAY4 局内操控 UI：旧 GameUI 只读事实 + 零激活 + 指针/释放纯逻辑反例");
+            CheckBattleControlsSource(repoRoot);
 
             return Finish();
         }
@@ -1368,6 +1521,55 @@ namespace PMBattleContentSceneFactsCheck
                 return count;
             }
 
+            /// <summary>按 fileID 取任意文档（找不到返回 null）。</summary>
+            public SceneDocument FindDocument(long fileId)
+            {
+                SceneDocument doc;
+                return _byFileId.TryGetValue(fileId, out doc) ? doc : null;
+            }
+
+            /// <summary>GameObject 的 Transform fileID（没有则返回 0）。</summary>
+            public long TransformFileIdOf(long gameObjectFileId)
+            {
+                long transform;
+                return _transformOfGameObject.TryGetValue(gameObjectFileId, out transform) ? transform : 0;
+            }
+
+            /// <summary>Transform 所属 GameObject 的 fileID（没有则返回 0）。</summary>
+            public long GameObjectFileIdOfTransform(long transformFileId)
+            {
+                long owner;
+                return _gameObjectOfTransform.TryGetValue(transformFileId, out owner) ? owner : 0;
+            }
+
+            /// <summary>该 GameObject 上指定 classID 的**第一个**组件 fileID（没有则返回 0）。</summary>
+            public long ComponentFileIdOfClass(long gameObjectFileId, int classId)
+            {
+                SceneDocument go = FindGameObject(gameObjectFileId);
+                if (go == null)
+                {
+                    return 0;
+                }
+
+                Match components = Regex.Match(go.Text, @"(?s)m_Component:\s*\r?\n((?:\s*-\s*component:\s*\{fileID:\s*-?\d+\}\r?\n?)+)");
+                if (!components.Success)
+                {
+                    return 0;
+                }
+
+                foreach (Match m in Regex.Matches(components.Groups[1].Value, @"component:\s*\{fileID:\s*(-?\d+)\}"))
+                {
+                    long fileId = long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+                    SceneDocument component;
+                    if (_byFileId.TryGetValue(fileId, out component) && component.ClassId == classId)
+                    {
+                        return fileId;
+                    }
+                }
+
+                return 0;
+            }
+
             /// <summary>该 GameObject 的组件 classID 列表（按 m_Component 顺序）。</summary>
             public List<int> ComponentClassIdsOf(long gameObjectFileId)
             {
@@ -1426,6 +1628,1986 @@ namespace PMBattleContentSceneFactsCheck
             }
         }
 
+
+        // ==================================================================== I
+
+        /// <summary>
+        /// T-PLAY3 客户端专有光照的**源真相门禁**（纯文本/纯数据，不加载引擎）：
+        ///   A) 源场景 HYLDGameTatal/MAP/lights 的层级、父链与三盏灯的**真实序列化值**（文本 YAML）；
+        ///   B) 新模块 PMUnityBattleLighting.cs 冻结定义表的**逐字段对照**（必须与 A 同值）；
+        ///   C) 对照函数本身的**负例**（改一个字段必须被判为不一致，防止"永远通过"）；
+        ///   D) 身份门（DS 零灯）/隔离场景/独立根节点/不参与物理/不改全局光照/精确释放的静态结构断言。
+        ///
+        /// 口径（不许被读成实机证据）：A 是源数据，B 是"表是否照抄源"，C 是"对照真的会失败"，
+        /// D 是**文本级结构断言**。它们都**不**证明 Unity 里渲染出什么颜色、也不证明 DS 运行期真的 0 盏灯
+        /// （那要真实 Unity2019 + 双端实机，见报告 T-PLAY5 段）。本工程不加载引擎、不跑 PhysX、不启动 Unity。
+        /// </summary>
+        private static void CheckClientLightingSource(SceneModel scene, string repoRoot)
+        {
+            // ================================================================ A. 源场景层级与父链
+            long lightsGo = scene.FindGameObjectByPath(LightingSourceHierarchyPath);
+            Check(lightsGo != 0, "源场景存在 GameObject「" + LightingSourceHierarchyPath + "」（fileID="
+                                 + lightsGo.ToString(CultureInfo.InvariantCulture) + "）");
+            if (lightsGo == 0)
+            {
+                return;
+            }
+
+            // 父链两级都是单位 TRS —— 这是模块头部"容器 local TRS 即世界 TRS"推导的前提。
+            CheckUnitTransform(scene, "HYLDGameTatal", "源父节点 HYLDGameTatal 是单位 TRS（pos 0 / rot identity / scale 1）");
+            CheckUnitTransform(scene, "HYLDGameTatal/MAP", "源父节点 HYLDGameTatal/MAP 是单位 TRS（pos 0 / rot identity / scale 1）");
+
+            long lightsTransform = scene.TransformFileIdOf(lightsGo);
+            SceneDocument lightsTransformDoc = scene.FindDocument(lightsTransform);
+            Check(lightsTransformDoc != null, "「lights」有 Transform 文档（fileID="
+                                             + lightsTransform.ToString(CultureInfo.InvariantCulture) + "）");
+
+            double[] containerPosition = null;
+            double[] containerRotation = null;
+            bool hasContainerPosition = lightsTransformDoc != null
+                                        && TryReadStructComponents(lightsTransformDoc.Text, "m_LocalPosition", out containerPosition);
+            bool hasContainerRotation = lightsTransformDoc != null
+                                        && TryReadStructComponents(lightsTransformDoc.Text, "m_LocalRotation", out containerRotation);
+
+            Check(hasContainerPosition && containerPosition.Length == 3, "「lights」Transform 有 m_LocalPosition（x/y/z）");
+            Check(hasContainerRotation && containerRotation.Length == 4, "「lights」Transform 有 m_LocalRotation（x/y/z/w）");
+
+            if (hasContainerPosition)
+            {
+                Check(Math.Abs(containerPosition[1] - ExpectedLightingContainerY) <= 1e-4,
+                      "「lights」容器 localPosition.y = " + containerPosition[1].ToString("R", CultureInfo.InvariantCulture)
+                      + "（期望 " + ExpectedLightingContainerY.ToString("R", CultureInfo.InvariantCulture) + "）");
+            }
+
+            if (hasContainerRotation)
+            {
+                Check(Math.Abs(containerRotation[0]) <= 1e-4 && Math.Abs(containerRotation[1]) <= 1e-4
+                      && Math.Abs(containerRotation[2]) <= 1e-4 && Math.Abs(containerRotation[3] - 1.0) <= 1e-4,
+                      "「lights」容器 localRotation 是单位旋转（0,0,0,1）");
+            }
+
+            // 源 m_Children 顺序 = 定义表行顺序（模块注释已写明依赖它，这里把它钉成事实）。
+            List<long> childTransformIds = new List<long>();
+            if (lightsTransformDoc != null)
+            {
+                ReadFileIdArray(lightsTransformDoc.Text, "m_Children", childTransformIds);
+            }
+
+            Check(childTransformIds.Count == 3, "「lights」有 3 个直系子对象（实际 "
+                                                + childTransformIds.Count.ToString(CultureInfo.InvariantCulture) + " 个）");
+
+            List<SourceLight> sources = new List<SourceLight>();
+            for (int i = 0; i < childTransformIds.Count; i++)
+            {
+                long childGo = scene.GameObjectFileIdOfTransform(childTransformIds[i]);
+                SceneDocument childGoDoc = scene.FindGameObject(childGo);
+                SceneDocument childTransformDoc = scene.FindDocument(scene.TransformFileIdOf(childGo));
+                long childLightId = scene.ComponentFileIdOfClass(childGo, 108);
+                SceneDocument childLightDoc = scene.FindDocument(childLightId);
+
+                string childTag = "「lights」第 " + i.ToString(CultureInfo.InvariantCulture) + " 个子对象";
+                Check(childGoDoc != null && childTransformDoc != null && childLightDoc != null,
+                      childTag + "有 GameObject/Transform/Light 三份文档（gameObject="
+                      + childGo.ToString(CultureInfo.InvariantCulture) + "，light="
+                      + childLightId.ToString(CultureInfo.InvariantCulture) + "）");
+                if (childGoDoc == null || childTransformDoc == null || childLightDoc == null)
+                {
+                    continue;
+                }
+
+                SourceLight source = new SourceLight();
+                source.Name = ReadName(childGoDoc.Text);
+                source.LightComponentCount = CountComponentsOfClass(scene, childGo, 108);
+                source.Type = ReadInt(childLightDoc.Text, "m_Type", -1);
+                source.Lightmapping = ReadInt(childLightDoc.Text, "m_Lightmapping", -1);
+                source.RenderMode = ReadInt(childLightDoc.Text, "m_RenderMode", -1);
+                source.UseColorTemperature = ReadInt(childLightDoc.Text, "m_UseColorTemperature", -1);
+                source.CullingMaskBits = ReadLongField(childLightDoc.Text, "m_Bits", long.MinValue);
+                source.Values = ReadLightValues(childLightDoc.Text, childTransformDoc.Text);
+
+                Check(source.LightComponentCount == 1, childTag + "（" + source.Name + "）恰好 1 个 Light 组件（实际 "
+                                                       + source.LightComponentCount.ToString(CultureInfo.InvariantCulture) + "）");
+                Check(source.CullingMaskBits == 4294967295L, childTag + "（" + source.Name
+                                                        + "）m_CullingMask.m_Bits = 4294967295（即运行期的 ~0，实际 "
+                                                        + source.CullingMaskBits.ToString(CultureInfo.InvariantCulture) + "）");
+                Check(source.Lightmapping == 4, childTag + "（" + source.Name + "）m_Lightmapping = 4（Realtime，实际 "
+                                                + source.Lightmapping.ToString(CultureInfo.InvariantCulture) + "）");
+                Check(source.RenderMode == 0, childTag + "（" + source.Name + "）m_RenderMode = 0（Auto，实际 "
+                                              + source.RenderMode.ToString(CultureInfo.InvariantCulture) + "）");
+                Check(source.UseColorTemperature == 0, childTag + "（" + source.Name
+                                                       + "）m_UseColorTemperature = 0（6570K 不生效，实际 "
+                                                       + source.UseColorTemperature.ToString(CultureInfo.InvariantCulture) + "）");
+
+                sources.Add(source);
+            }
+
+            // ================================================================ B. 模块冻结定义表 ↔ 源 YAML
+            string modulePath = Path.Combine(repoRoot, LightingModuleRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            string mapPath = Path.Combine(repoRoot, LightingMapRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+            Check(File.Exists(modulePath), "光照模块存在：" + LightingModuleRelativePath);
+            if (!File.Exists(modulePath))
+            {
+                return;
+            }
+
+            string moduleCode = File.ReadAllText(modulePath, Encoding.UTF8);
+            string moduleNoComments = StripComments(moduleCode);
+
+            CheckContains(moduleCode, LightingTableBeginMarker, "光照模块定义表起锚点");
+            CheckContains(moduleCode, LightingTableEndMarker, "光照模块定义表止锚点");
+
+            List<ParsedLightDefinition> definitions = ParseLightDefinitions(moduleCode);
+            Check(definitions.Count == 3, "定义表恰好 3 行（实际 "
+                                          + definitions.Count.ToString(CultureInfo.InvariantCulture) + " 行）");
+
+            double containerX = 0.0, containerY = 0.0, containerZ = 0.0;
+            double containerRotX = 0.0, containerRotY = 0.0, containerRotZ = 0.0, containerRotW = 0.0;
+            bool hasContainerXY = TryReadConstFloat(moduleCode, "ContainerPositionX", out containerX);
+            bool hasContainerYY = TryReadConstFloat(moduleCode, "ContainerPositionY", out containerY);
+            bool hasContainerZY = TryReadConstFloat(moduleCode, "ContainerPositionZ", out containerZ);
+            bool hasContainerRX = TryReadConstFloat(moduleCode, "ContainerRotationX", out containerRotX);
+            bool hasContainerRY = TryReadConstFloat(moduleCode, "ContainerRotationY", out containerRotY);
+            bool hasContainerRZ = TryReadConstFloat(moduleCode, "ContainerRotationZ", out containerRotZ);
+            bool hasContainerRW = TryReadConstFloat(moduleCode, "ContainerRotationW", out containerRotW);
+
+            Check(hasContainerXY && hasContainerYY && hasContainerZY,
+                  "模块声明 ContainerPositionX/Y/Z 三个常量");
+            Check(hasContainerRX && hasContainerRY && hasContainerRZ && hasContainerRW,
+                  "模块声明 ContainerRotationX/Y/Z/W 四个常量");
+            CheckContains(moduleCode, "public const int ExpectedLightCount = 3;", "模块声明 ExpectedLightCount = 3");
+            CheckContains(moduleCode, "public const float BounceIntensity = 1f;", "模块声明 BounceIntensity = 1f");
+
+            // 容器常量必须等于源 lights Transform 的 local TRS（父链已证明是单位 TRS ⇒ 同世界 TRS）。
+            if (hasContainerPosition && hasContainerXY && hasContainerYY && hasContainerZY)
+            {
+                Check(Math.Abs(containerX - containerPosition[0]) <= 1e-4
+                      && Math.Abs(containerY - containerPosition[1]) <= 1e-4
+                      && Math.Abs(containerZ - containerPosition[2]) <= 1e-4,
+                      "模块容器位置常量 == 源 lights localPosition ("
+                      + containerPosition[0].ToString("R", CultureInfo.InvariantCulture) + ", "
+                      + containerPosition[1].ToString("R", CultureInfo.InvariantCulture) + ", "
+                      + containerPosition[2].ToString("R", CultureInfo.InvariantCulture) + ")");
+            }
+
+            if (hasContainerRotation && hasContainerRX && hasContainerRY && hasContainerRZ && hasContainerRW)
+            {
+                Check(Math.Abs(containerRotX - containerRotation[0]) <= 1e-4
+                      && Math.Abs(containerRotY - containerRotation[1]) <= 1e-4
+                      && Math.Abs(containerRotZ - containerRotation[2]) <= 1e-4
+                      && Math.Abs(containerRotW - containerRotation[3]) <= 1e-4,
+                      "模块容器旋转常量 == 源 lights localRotation（0,0,0,1）");
+            }
+
+            CheckContains(moduleCode, "public const string SourceSceneRelativePath = \"Client/Assets/Scenes/HYLDGame.unity\";",
+                          "模块写明参数来源场景路径");
+            CheckContains(moduleCode, "public const string SourceHierarchyPath = \"HYLDGameTatal/MAP/lights\";",
+                          "模块写明参数来源层级路径");
+
+            List<string> mismatches = new List<string>();
+            int compareCount = Math.Min(definitions.Count, sources.Count);
+            for (int i = 0; i < compareCount; i++)
+            {
+                string mismatch = CompareLightDefinitionToSource(definitions[i], sources[i]);
+                if (mismatch != null)
+                {
+                    mismatches.Add("第 " + i.ToString(CultureInfo.InvariantCulture) + " 盏：" + mismatch);
+                }
+            }
+
+            Check(mismatches.Count == 0 && definitions.Count == sources.Count,
+                  "模块定义表逐字段等于源场景 MAP/lights 的真实序列化值（3 盏 × 20 列"
+                  + (mismatches.Count == 0 ? "" : "；不一致：" + string.Join(" | ", mismatches.ToArray())) + "）");
+
+            // 表里唯一允许"不抄"的是明确登记的惰性字段（cookie/flare/halo/shape/colorTemperature）：
+            // 代码里必须仍然写着这条边界，避免后来者以为"已经逐字段等价"。
+            CheckContains(moduleCode, "未复制", "模块明确登记未复制的源字段（不伪称逐字段等价）");
+            CheckContains(moduleCode, "HYLDStart", "模块写明 HYLDStart 暖方向光仍在叠加");
+            CheckContains(moduleCode, "不等于", "模块写明不等于原场景逐像素结果");
+
+            // ================================================================ C. 负例：对照必须真的会失败
+            if (definitions.Count == 3 && sources.Count == 3)
+            {
+                Check(CompareLightDefinitionToSource(definitions[0], sources[0]) == null,
+                      "负例前置：未改动的方向光定义与源一致（对照函数不是恒真）");
+
+                Check(NegativeLightingCase(definitions[0], sources[0], 4, 999.0, "intensity"),
+                      "负例：方向光 intensity 被改 ⇒ 对照必须判为不一致");
+                Check(NegativeLightingCase(definitions[1], sources[1], 6, 1.0, "spotAngle"),
+                      "负例：聚光 #1 的 spotAngle 被改 ⇒ 对照必须判为不一致");
+                Check(NegativeLightingCase(definitions[1], sources[1], 2, 0.5, "colorG"),
+                      "负例：聚光 #1 的 colorG 被改 ⇒ 对照必须判为不一致");
+                Check(NegativeLightingCase(definitions[0], sources[0], 11, 1.0, "localRotation.x"),
+                      "负例：方向光旋转 x 被改成单位值 ⇒ 对照必须判为不一致");
+                Check(NegativeLightingCase(definitions[2], sources[2], 18, 9.0, "shadowNormalBias"),
+                      "负例：聚光 #2 的 shadowNormalBias 被改 ⇒ 对照必须判为不一致");
+                Check(NegativeLightingCase(definitions[2], sources[2], 9, -999.0, "localPosition.y"),
+                      "负例：聚光 #2 的 localPosition.y 被改 ⇒ 对照必须判为不一致");
+
+                ParsedLightDefinition renamed = definitions[0];
+                renamed.Name = "Directional Light(改)";
+                Check(CompareLightDefinitionToSource(renamed, sources[0]) != null,
+                      "负例：方向光名称被改 ⇒ 对照必须判为不一致");
+            }
+
+            // ================================================================ D. 身份/隔离/物理/释放 静态门
+            // 编译面（受写入边界限制的妥协）必须写明，避免后来者以为 #if 是"编辑器专用"。
+            CheckContains(moduleCode, "#if UNITY_2019_1_OR_NEWER || UNITY_EDITOR",
+                          "光照实现区用 UNITY_2019_1_OR_NEWER || UNITY_EDITOR 圈定（真实 Unity 构建含 Player 仍编入）");
+            CheckContains(moduleCode, "UnityStubs.cs",
+                          "光照模块注明桩件缺 Light 的编译面理由（登记项，不是静默绕过）");
+
+            // DS 零灯：身份判定必须出现在创建任何 Unity 对象之前。
+            CheckContains(moduleNoComments, "PMNet.PMNetRuntime.IsDedicatedServer", "光照模块实现 DS 身份门");
+            CheckOrder(moduleNoComments, "IsDedicatedServer", "new GameObject(",
+                       "光照模块：DS 判定先于任何 new GameObject/Light");
+
+            // 隔离场景 + 独立根（不挂地图 prefab 根 ⇒ 不进 Collider 白名单、不进场景摘要）。
+            CheckContains(moduleCode, "SceneManager.MoveGameObjectToScene(container, scene)",
+                          "光照模块把容器显式迁入本局隔离场景");
+            CheckContains(moduleCode, "container.scene.handle != scene.handle",
+                          "光照模块校验容器真的进了目标场景（scene mismatch 即失败）");
+            Check(!moduleCode.Contains("container.transform.parent ="),
+                  "光照容器是独立根节点（源码里没有把容器挂到别的 Transform 下）");
+            CheckContains(moduleCode, "ContainerObjectName = \"[PMNetBattleLights]\"",
+                          "光照容器对象名与地图根前缀 [PMNetBattleMap] 不同（便于实机核对）");
+
+            // 不参与物理 / 不改全局光照与渲染设置 / 不写资产 / 不加载旧场景。
+            CheckLightingCodeHasNoForbiddenSymbols(moduleNoComments);
+            CheckContains(moduleCode, "light.cullingMask = ~0;", "光照模块复制剔除掩码（= ~0，源 4294967295）");
+            CheckContains(moduleCode, "light.renderMode = LightRenderMode.Auto;", "光照模块复制渲染模式（源 0=Auto）");
+            CheckContains(moduleCode, "light.lightmapBakeType = LightmapBakeType.Realtime;", "光照模块复制 lightmapBakeType（源 4=Realtime）");
+            // ★ 回归门（来自用户 14:49 的真实 Build Player 失败）：该赋值只能存在于 **UNITY_EDITOR** 内。
+            // `Light.lightmapBakeType` 在 Player 变体的 UnityEngine 程序集里不存在，无条件赋值会让
+            // Build Player 以 CS1061 失败（Editor 播放却正常，属于最容易漏检的一类分叉）。
+            // 断言用「赋值点前一小段窗口内必须出现 #if UNITY_EDITOR」，不依赖换行符形态（源文件是 CRLF）。
+            int bakeCount = 0;
+            int bakeScan = 0;
+            while (true)
+            {
+                int hit = moduleCode.IndexOf("light.lightmapBakeType", bakeScan, StringComparison.Ordinal);
+                if (hit < 0) { break; }
+                bakeCount++;
+                int windowStart = hit - 160;
+                if (windowStart < 0) { windowStart = 0; }
+                string window = moduleCode.Substring(windowStart, hit - windowStart);
+                Check(window.Contains("#if UNITY_EDITOR"),
+                      "光照 lightmapBakeType 第 " + bakeCount.ToString() + " 处赋值位于 UNITY_EDITOR 内"
+                      + "（Player 无此成员：无条件赋值会在 Build Player 报 CS1061）");
+                bakeScan = hit + 1;
+            }
+            Check(bakeCount == 1, "lightmapBakeType 只在唯一的编辑器分叉处出现（实际 " + bakeCount.ToString() + " 处）");
+            CheckContains(moduleCode, "light.bounceIntensity = PMBattleLightingSource.BounceIntensity;", "光照模块复制弹射强度（源 1）");
+            CheckContains(moduleCode, "light.useColorTemperature = false;", "光照模块保留 useColorTemperature=0 口径");
+            CheckContains(moduleCode, "public static bool TryValidateDefinitions(out string error)",
+                          "光照模块提供纯数据自检（运行期与门禁同一口径）");
+
+            // 释放：幂等 + 销毁整个容器。
+            CheckContains(moduleCode, "public void Dispose()", "光照模块提供 Dispose");
+            CheckContains(moduleCode, "if (_disposed)", "光照模块 Dispose 幂等");
+            CheckContains(moduleCode, "GameObject container = _container;",
+                          "光照模块 Dispose 取的是自己持有的容器（不是别的对象）");
+
+            // 只在 Dispose 区里做顺序断言：DestroyObject(container) 在 TryCreate 的失败清理路径里也出现，
+            // 全文件 IndexOf 会命中那一次（本轮真被它骗过一次，故写成"先截区再断言"）。
+            int disposeStart = moduleCode.IndexOf("public void Dispose()", StringComparison.Ordinal);
+            string disposeRegion = disposeStart < 0 ? string.Empty : moduleCode.Substring(disposeStart);
+            CheckOrder(disposeRegion, "GameObject container = _container;", "DestroyObject(container);",
+                       "光照模块 Dispose 销毁自己持有的容器（3 盏子灯随之销毁）");
+
+            // 地图接线：只在正式地图加载成功后创建；DS 先判；先销毁灯再销毁地图根。
+            Check(File.Exists(mapPath), "地图模块存在：" + LightingMapRelativePath);
+            if (!File.Exists(mapPath))
+            {
+                return;
+            }
+
+            string mapCode = File.ReadAllText(mapPath, Encoding.UTF8);
+
+            CheckContains(mapCode, "created.ApplyClientLighting();", "地图模块在正式地图加载路径调用光源创建");
+            CheckOrder(mapCode, "ValidateManifestConsistency(out error)", "created.ApplyClientLighting();",
+                       "地图模块：光照创建发生在 manifest/结构自检之后");
+            CheckOrder(mapCode, "created.ApplyClientLighting();", "map = created;",
+                       "地图模块：光照创建发生在发布 map 之前");
+            CheckContains(mapCode, "private void ApplyClientLighting()",
+                          "光照创建是 void（结构上不可能让 TryLoad 返回失败 ⇒ 表现层不阻断权威对局）");
+            CheckOrder(mapCode, "private void ApplyClientLighting()", "PMNet.PMNetRuntime.IsDedicatedServer",
+                       "地图模块：DS 判定在 ApplyClientLighting 内");
+            CheckOrder(mapCode, "PMNet.PMNetRuntime.IsDedicatedServer", "PMUnityBattleLighting.TryCreate",
+                       "地图模块：DS 判定先于光源创建（DS 零灯）");
+            CheckContains(mapCode, "public int ClientLightCount", "地图模块暴露 ClientLightCount（可观察口径）");
+            CheckContains(mapCode, "public string LightingError", "地图模块暴露 LightingError（失败可见）");
+            CheckOrder(mapCode, "lighting.Dispose()", "DestroyObject(root)",
+                       "地图模块 Dispose：先销毁光源容器，再销毁地图根");
+            Check(!mapCode.Contains("CollectAndValidate(container"),
+                  "光照容器不进地图 Collider 白名单遍历（白名单仍只扫地图 prefab 子树）");
+
+            // 唯一引用者：诊断模式（PMR3TestScene / PMUnityMoverPresentation）不得触碰光照模块。
+            CheckLightingReferencedOnlyByMap(repoRoot);
+        }
+
+        /// <summary>源场景一盏灯的真实序列化值（含与该灯对应的 Transform 与 Light 口径字段）。</summary>
+        private struct SourceLight
+        {
+            public string Name;
+            public int LightComponentCount;
+            public int Type;
+            public int Lightmapping;
+            public int RenderMode;
+            public int UseColorTemperature;
+            public long CullingMaskBits;
+
+            /// <summary>20 列，顺序 = <see cref="LightingColumnNames"/>。</summary>
+            public double[] Values;
+        }
+
+        /// <summary>模块定义表里解析出来的一行。</summary>
+        private struct ParsedLightDefinition
+        {
+            public string Name;
+            public double[] Values;
+        }
+
+        /// <summary>该 GameObject 上指定 classID 的组件个数（白名单外的"重复组件"用）。</summary>
+        private static int CountComponentsOfClass(SceneModel scene, long gameObjectFileId, int classId)
+        {
+            SceneDocument go = scene.FindGameObject(gameObjectFileId);
+            if (go == null)
+            {
+                return 0;
+            }
+
+            Match components = Regex.Match(go.Text, @"(?s)m_Component:\s*\r?\n((?:\s*-\s*component:\s*\{fileID:\s*-?\d+\}\r?\n?)+)");
+            if (!components.Success)
+            {
+                return 0;
+            }
+
+            int count = 0;
+            foreach (Match m in Regex.Matches(components.Groups[1].Value, @"component:\s*\{fileID:\s*(-?\d+)\}"))
+            {
+                long fileId = long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture);
+                SceneDocument component = scene.FindDocument(fileId);
+                if (component != null && component.ClassId == classId)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        /// <summary>GameObject 路径的 Transform 必须是单位 TRS（pos 全 0 / rot identity / scale 全 1）。</summary>
+        private static void CheckUnitTransform(SceneModel scene, string gameObjectPath, string label)
+        {
+            long go = scene.FindGameObjectByPath(gameObjectPath);
+            if (go == 0)
+            {
+                Check(false, label + "（找不到 " + gameObjectPath + "）");
+                return;
+            }
+
+            SceneDocument transform = scene.FindDocument(scene.TransformFileIdOf(go));
+            if (transform == null)
+            {
+                Check(false, label + "（找不到 Transform）");
+                return;
+            }
+
+            double[] position = null;
+            double[] rotation = null;
+            double[] scale = null;
+            bool ok = TryReadStructComponents(transform.Text, "m_LocalPosition", out position)
+                      && TryReadStructComponents(transform.Text, "m_LocalRotation", out rotation)
+                      && TryReadStructComponents(transform.Text, "m_LocalScale", out scale)
+                      && position != null && position.Length == 3
+                      && rotation != null && rotation.Length == 4
+                      && scale != null && scale.Length == 3;
+
+            if (!ok)
+            {
+                Check(false, label + "（字段读不到）");
+                return;
+            }
+
+            bool unit = Math.Abs(position[0]) <= 1e-4 && Math.Abs(position[1]) <= 1e-4 && Math.Abs(position[2]) <= 1e-4
+                        && Math.Abs(rotation[0]) <= 1e-4 && Math.Abs(rotation[1]) <= 1e-4
+                        && Math.Abs(rotation[2]) <= 1e-4 && Math.Abs(rotation[3] - 1.0) <= 1e-4
+                        && Math.Abs(scale[0] - 1.0) <= 1e-4 && Math.Abs(scale[1] - 1.0) <= 1e-4
+                        && Math.Abs(scale[2] - 1.0) <= 1e-4;
+
+            Check(unit, label + "（pos=(" + position[0].ToString("R", CultureInfo.InvariantCulture) + ", "
+                       + position[1].ToString("R", CultureInfo.InvariantCulture) + ", "
+                       + position[2].ToString("R", CultureInfo.InvariantCulture) + "), rot=("
+                       + rotation[0].ToString("R", CultureInfo.InvariantCulture) + ", "
+                       + rotation[1].ToString("R", CultureInfo.InvariantCulture) + ", "
+                       + rotation[2].ToString("R", CultureInfo.InvariantCulture) + ", "
+                       + rotation[3].ToString("R", CultureInfo.InvariantCulture) + "), scale=("
+                       + scale[0].ToString("R", CultureInfo.InvariantCulture) + ", "
+                       + scale[1].ToString("R", CultureInfo.InvariantCulture) + ", "
+                       + scale[2].ToString("R", CultureInfo.InvariantCulture) + ")）");
+        }
+
+        /// <summary>
+        /// 从 Light 组件文本 + 它的 Transform 文本读出定义表的 20 列（顺序 = <see cref="LightingColumnNames"/>）。
+        /// 读不到的字段填 NaN ⇒ 与表的对照必然失败（不静默当 0）。
+        /// </summary>
+        private static double[] ReadLightValues(string lightText, string transformText)
+        {
+            double[] values = new double[LightingValueCount];
+            for (int i = 0; i < values.Length; i++)
+            {
+                values[i] = double.NaN;
+            }
+
+            string shadows = ExtractShadowsBlock(lightText);
+
+            double[] color = null;
+            double[] position = null;
+            double[] rotation = null;
+            TryReadStructComponents(lightText, "m_Color", out color);
+            TryReadStructComponents(transformText, "m_LocalPosition", out position);
+            TryReadStructComponents(transformText, "m_LocalRotation", out rotation);
+
+            values[0] = ReadFloatField(lightText, "m_Type", double.NaN);
+            if (color != null && color.Length >= 3)
+            {
+                values[1] = color[0];
+                values[2] = color[1];
+                values[3] = color[2];
+            }
+
+            values[4] = ReadFloatField(lightText, "m_Intensity", double.NaN);
+            values[5] = ReadFloatField(lightText, "m_Range", double.NaN);
+            values[6] = ReadFloatField(lightText, "m_SpotAngle", double.NaN);
+            values[7] = ReadFloatField(lightText, "m_InnerSpotAngle", double.NaN);
+
+            if (position != null && position.Length == 3)
+            {
+                values[8] = position[0];
+                values[9] = position[1];
+                values[10] = position[2];
+            }
+
+            if (rotation != null && rotation.Length == 4)
+            {
+                values[11] = rotation[0];
+                values[12] = rotation[1];
+                values[13] = rotation[2];
+                values[14] = rotation[3];
+            }
+
+            values[15] = ReadFloatField(shadows, "m_Type", double.NaN);
+            values[16] = ReadFloatField(shadows, "m_Strength", double.NaN);
+            values[17] = ReadFloatField(shadows, "m_Bias", double.NaN);
+            values[18] = ReadFloatField(shadows, "m_NormalBias", double.NaN);
+            values[19] = ReadFloatField(shadows, "m_NearPlane", double.NaN);
+            return values;
+        }
+
+        /// <summary>Light 文档里的 m_Shadows 块（到 m_CullingMatrixOverride 之前）。</summary>
+        private static string ExtractShadowsBlock(string lightText)
+        {
+            Match m = Regex.Match(lightText, @"(?s)m_Shadows:\s*\r?\n(.*?)m_CullingMatrixOverride:");
+            return m.Success ? m.Groups[1].Value : string.Empty;
+        }
+
+        /// <summary>定义表 ↔ 源灯逐字段对照；一致返回 null，不一致返回可读原因（负例直接复用本函数）。</summary>
+        private static string CompareLightDefinitionToSource(ParsedLightDefinition definition, SourceLight source)
+        {
+            if (!string.Equals(definition.Name, source.Name, StringComparison.Ordinal))
+            {
+                return "名称 表=\"" + (definition.Name ?? "<null>") + "\" 源=\"" + (source.Name ?? "<null>") + "\"";
+            }
+
+            if (definition.Values == null || source.Values == null
+                || definition.Values.Length != LightingValueCount || source.Values.Length != LightingValueCount)
+            {
+                return "数值列数不对（表=" + (definition.Values == null ? -1 : definition.Values.Length)
+                       + "，源=" + (source.Values == null ? -1 : source.Values.Length)
+                       + "，期望=" + LightingValueCount + "）";
+            }
+
+            for (int i = 0; i < LightingValueCount; i++)
+            {
+                double table = definition.Values[i];
+                double raw = source.Values[i];
+                bool isEnum = i == 0 || i == 15;   // kind / shadowType：枚举必须精确相等
+
+                if (double.IsNaN(table) || double.IsNaN(raw))
+                {
+                    return LightingColumnNames[i] + " 读不到（表=" + table.ToString("R", CultureInfo.InvariantCulture)
+                           + "，源=" + raw.ToString("R", CultureInfo.InvariantCulture) + "）";
+                }
+
+                if (isEnum)
+                {
+                    if (Math.Abs(table - raw) > 0.5)
+                    {
+                        return LightingColumnNames[i] + " 枚举不等（表=" + table.ToString("R", CultureInfo.InvariantCulture)
+                               + "，源=" + raw.ToString("R", CultureInfo.InvariantCulture) + "）";
+                    }
+
+                    continue;
+                }
+
+                double scale = Math.Max(1.0, Math.Abs(raw));
+                if (Math.Abs(table - raw) > LightingTolerance * scale)
+                {
+                    return LightingColumnNames[i] + " 不等（表=" + table.ToString("R", CultureInfo.InvariantCulture)
+                           + "，源=" + raw.ToString("R", CultureInfo.InvariantCulture)
+                           + "，容差=" + LightingTolerance.ToString("R", CultureInfo.InvariantCulture) + "）";
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>负例：把表里的某一列改成别的值，对照**必须**失败。</summary>
+        private static bool NegativeLightingCase(ParsedLightDefinition definition, SourceLight source,
+                                                 int column, double wrongValue, string columnName)
+        {
+            ParsedLightDefinition mutated = definition;
+            mutated.Values = (double[])definition.Values.Clone();
+            mutated.Values[column] = wrongValue;
+            string mismatch = CompareLightDefinitionToSource(mutated, source);
+
+            if (mismatch == null)
+            {
+                Console.WriteLine("      （负例未被拒绝：column=" + columnName + " ⇒ " + wrongValue.ToString("R", CultureInfo.InvariantCulture) + "）");
+                return false;
+            }
+
+            return mismatch.StartsWith(LightingColumnNames[column], StringComparison.Ordinal);
+        }
+
+        /// <summary>解析模块里的冻结定义表（起止锚点之间的一条定义一行格式）。</summary>
+        private static List<ParsedLightDefinition> ParseLightDefinitions(string moduleCode)
+        {
+            List<ParsedLightDefinition> result = new List<ParsedLightDefinition>();
+
+            int begin = moduleCode.IndexOf(LightingTableBeginMarker, StringComparison.Ordinal);
+            int end = moduleCode.IndexOf(LightingTableEndMarker, StringComparison.Ordinal);
+            if (begin < 0 || end <= begin)
+            {
+                return result;
+            }
+
+            string region = moduleCode.Substring(begin, end - begin);
+            foreach (Match m in Regex.Matches(region,
+                        @"new\s+PMBattleLightDefinition\s*\(\s*""([^""]*)""\s*,([^)]*)\)", RegexOptions.Singleline))
+            {
+                ParsedLightDefinition entry = new ParsedLightDefinition();
+                entry.Name = m.Groups[1].Value;
+
+                List<double> values = new List<double>();
+                foreach (Match v in Regex.Matches(m.Groups[2].Value, @"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?[fF]?"))
+                {
+                    string token = v.Value;
+                    if (token.EndsWith("f", StringComparison.OrdinalIgnoreCase))
+                    {
+                        token = token.Substring(0, token.Length - 1);
+                    }
+
+                    double parsed;
+                    if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                    {
+                        values.Add(parsed);
+                    }
+                }
+
+                entry.Values = values.ToArray();
+                result.Add(entry);
+            }
+
+            return result;
+        }
+
+        /// <summary>读 `public const float NAME = 1.5f;`。</summary>
+        private static bool TryReadConstFloat(string code, string name, out double value)
+        {
+            value = 0.0;
+            Match m = Regex.Match(code, @"public\s+const\s+float\s+" + Regex.Escape(name) + @"\s*=\s*(-?\d+(?:\.\d+)?)f\s*;");
+            if (!m.Success)
+            {
+                return false;
+            }
+
+            return double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        /// <summary>读 `field: {x: 1, y: 2, z: 3}` / `field: {r: .., g: .., b: .., a: ..}`（保持序列化顺序）。</summary>
+        private static bool TryReadStructComponents(string text, string field, out double[] values)
+        {
+            values = null;
+            Match m = Regex.Match(text, @"(?m)^\s*" + Regex.Escape(field) + @":\s*\{([^}]*)\}");
+            if (!m.Success)
+            {
+                return false;
+            }
+
+            List<double> list = new List<double>();
+            foreach (Match part in Regex.Matches(m.Groups[1].Value, @"([A-Za-z]+)\s*:\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"))
+            {
+                double parsed;
+                if (double.TryParse(part.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+                {
+                    list.Add(parsed);
+                }
+            }
+
+            values = list.ToArray();
+            return values.Length > 0;
+        }
+
+        /// <summary>读单个整数字段为 long（m_Bits 这类 4294967295 用 Int32 会溢出）。</summary>
+        private static long ReadLongField(string text, string field, long fallback)
+        {
+            Match m = Regex.Match(text, @"(?m)^\s*" + Regex.Escape(field) + @":\s*(-?\d+)\s*$");
+            if (!m.Success)
+            {
+                return fallback;
+            }
+
+            long parsed;
+            return long.TryParse(m.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsed)
+                       ? parsed
+                       : fallback;
+        }
+
+        /// <summary>读单个浮点字段（`field: 1.5`）。</summary>
+        private static double ReadFloatField(string text, string field, double fallback)
+        {
+            Match m = Regex.Match(text, @"(?m)^\s*" + Regex.Escape(field) + @":\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*$");
+            if (!m.Success)
+            {
+                return fallback;
+            }
+
+            double parsed;
+            return double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed)
+                       ? parsed
+                       : fallback;
+        }
+
+        /// <summary>读内联结构 `field: {x: a, y: b}` 的两个分量（找不到返回 false）。</summary>
+        private static bool TryReadVector2Field(string text, string field, out double x, out double y)
+        {
+            x = 0.0;
+            y = 0.0;
+
+            Match m = Regex.Match(text, @"(?m)^\s*" + Regex.Escape(field)
+                + @":\s*\{x:\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?),\s*y:\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\}");
+            if (!m.Success)
+            {
+                return false;
+            }
+
+            return double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out x)
+                   && double.TryParse(m.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out y);
+        }
+
+        /// <summary>读 Image 的 `m_Color: {r: .., g: .., b: .., a: ..}`（找不到返回 false）。</summary>
+        private static bool TryReadColorField(string text, out double r, out double g, out double b, out double a)
+        {
+            r = 0.0;
+            g = 0.0;
+            b = 0.0;
+            a = 0.0;
+
+            Match m = Regex.Match(text,
+                @"(?m)^\s*m_Color:\s*\{r:\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?),\s*g:\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?),\s*b:\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?),\s*a:\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\}");
+            if (!m.Success)
+            {
+                return false;
+            }
+
+            return double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out r)
+                   && double.TryParse(m.Groups[2].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out g)
+                   && double.TryParse(m.Groups[3].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out b)
+                   && double.TryParse(m.Groups[4].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out a);
+        }
+
+        /// <summary>
+        /// 光照实现区（已剥注释）不得出现：物理类型、全局渲染/光照设置、资产写入、旧场景加载、材质/postprocessing。
+        /// "灯不参与物理、不改地图源与全局光照"这条契约在文本级被钉住。
+        /// </summary>
+        private static void CheckLightingCodeHasNoForbiddenSymbols(string moduleNoComments)
+        {
+            string[] forbidden =
+            {
+                "Collider", "Rigidbody", "Physics.", "PhysicsScene",
+                "RenderSettings", "LightmapSettings", "QualitySettings", "Skybox",
+                "Material", "PostProcess", "Volume",
+                "AssetDatabase", "PrefabUtility", "SceneManager.LoadScene", "UnityEditor",
+            };
+
+            for (int i = 0; i < forbidden.Length; i++)
+            {
+                Check(!moduleNoComments.Contains(forbidden[i]),
+                      "光照实现区不含「" + forbidden[i] + "」（灯不参与物理/不改全局光照与资产/不加载旧场景）");
+            }
+        }
+
+        /// <summary>
+        /// 光照模块只允许被正式地图模块引用：诊断模式（PMR3TestScene / PMUnityMoverPresentation）不得触碰它。
+        /// </summary>
+        private static void CheckLightingReferencedOnlyByMap(string repoRoot)
+        {
+            string directory = Path.Combine(repoRoot, "Client", "Assets", "Scripts", "PMUnity");
+            if (!Directory.Exists(directory))
+            {
+                Check(false, "找不到 PMUnity 目录：" + directory);
+                return;
+            }
+
+            string[] files = Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories);
+            List<string> unexpected = new List<string>();
+            bool mapFound = false;
+
+            for (int i = 0; i < files.Length; i++)
+            {
+                string file = files[i];
+                string name = Path.GetFileName(file);
+                string code = File.ReadAllText(file, Encoding.UTF8);
+                if (code.IndexOf("PMUnityBattleLighting", StringComparison.Ordinal) < 0)
+                {
+                    continue;
+                }
+
+                if (string.Equals(name, "PMUnityBattleLighting.cs", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (string.Equals(name, "PMUnityBattleMap.cs", StringComparison.Ordinal))
+                {
+                    mapFound = true;
+                    continue;
+                }
+
+                unexpected.Add(name);
+            }
+
+            Check(mapFound, "光照模块被正式地图模块引用（PMUnityBattleMap.cs）");
+            Check(unexpected.Count == 0,
+                  "光照模块只被 PMUnityBattleMap 引用（其它引用者："
+                  + (unexpected.Count == 0 ? "<无>" : string.Join(", ", unexpected.ToArray()))
+                  + "；诊断模式不经本模块）");
+        }
+
+        // ==================================================================== J（T-PLAY4 局内操控 UI）
+
+        /// <summary>
+        /// J 段总入口（T-PLAY4）。四块：J1 旧 GameUI.prefab 只读事实；J2 UI 源码零激活/零权威静态负例；
+        /// J3 摇杆去重/释放的可执行纯逻辑反例（镜像）；J4 交付面事实（编码/meta guid/真实 UI 引用/宿主未改）。
+        ///
+        /// 口径（不许夸大）：本段只把 .prefab 当**文本 YAML** 读，不加载 Unity ⇒ 它不证明 Unity 能反序列化
+        /// 这张 prefab，也不证明新 UI 在编辑器/Player 里显示正确（要用户实机，见报告 T-PLAY5）。
+        /// J3 是**规则镜像**（本文件独立实现的可执行模型），不是“跑同一个实现”——本工具只编 Program.cs、
+        /// 编不到 UI 源码；常量一致性由 J3 的源码常量交叉核对守住，结构一致性由 J2 的标记断言守住。
+        /// </summary>
+        private static void CheckBattleControlsSource(string repoRoot)
+        {
+            string prefabPath = Path.Combine(repoRoot,
+                GameUiPrefabRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+            Check(File.Exists(prefabPath), "旧局内 UI 预制体存在：" + GameUiPrefabRelativePath);
+            if (!File.Exists(prefabPath))
+            {
+                Console.WriteLine("  跳过 J 段其余断言：源预制体不在，无法核对只读事实。");
+                return;
+            }
+
+            string prefabText = File.ReadAllText(prefabPath, Encoding.UTF8);
+            Check(prefabText.StartsWith("%YAML", StringComparison.Ordinal),
+                  "旧局内 UI 预制体是 ForceText（YAML）序列化：可当文本读，不需要加载 Unity");
+
+            UiPrefabModel prefab = UiPrefabModel.Load(prefabText);
+            Check(prefab.NodesById.Count >= 20, "旧 UI 预制体解析出 GameObject 数 ≥ 20（实际=" + prefab.NodesById.Count.ToString(CultureInfo.InvariantCulture) + "，父边=" + prefab.ParentEdgeCount.ToString(CultureInfo.InvariantCulture) + "，根数=" + prefab.RootIds.Count.ToString(CultureInfo.InvariantCulture) + "，Transform文档=" + prefab.TransformDocCount.ToString(CultureInfo.InvariantCulture) + "）");
+
+            UiNode root = FindRoot(prefab);
+            Check(root != null && string.Equals(root.Name, "GameUI", StringComparison.Ordinal),
+                  "旧 UI 根 GameObject 名恰为 GameUI（实际=" + (root == null ? "<无根>" : root.Name) + "）");
+            Check(root != null && !root.Active,
+                  "旧 UI 根序列化为 **inactive**（m_IsActive: 0）—— 这正是“不得加载/激活它”的源依据");
+
+            string[] requiredNodes = new string[]
+            {
+                "Android", "Android/EasyTouch", "Android/PlayerMove", "Android/FireNormal",
+                "Android/FireNormalButton", "Android/FireSuper", "Android/Singleton of VirtualScreen",
+                "Button", "GemSelfTeamUI", "GemSelfTeamUI/Image", "GemEnemyTeamUI", "GemEnemyTeamUI/Image",
+                "能量条", "能量条/Background", "能量条/Fill Area/Fill", "能量条/Image",
+            };
+
+            for (int i = 0; i < requiredNodes.Length; i++)
+            {
+                Check(prefab.NodesByPath.ContainsKey("/GameUI/" + requiredNodes[i]),
+                      "旧 UI 关键节点存在：/" + requiredNodes[i]);
+            }
+
+            UiNode fireSuper = prefab.Find("GameUI/Android/FireSuper");
+            Check(fireSuper != null && !fireSuper.Active,
+                  "旧 UI FireSuper 节点序列化为 inactive（新 UI 用 SuperReady 决定可用性，不自动恢复旧节点）");
+
+            for (int i = 0; i < UiLegacyScripts.Length; i++)
+            {
+                string relative = UiLegacyScripts[i][0];
+                string guid = UiLegacyScripts[i][1];
+                string label = UiLegacyScripts[i][2];
+                UiNode node = relative.Length == 0 ? root : prefab.Find("GameUI/" + relative);
+
+                Check(node != null && prefab.HasScriptGuid(node, guid),
+                      "旧 UI 仍挂着旧脚本 " + label + "（@" + (relative.Length == 0 ? "<根>" : relative)
+                      + "）：因此“零激活”必须由结构保证，不能靠自觉");
+            }
+
+            UiNode buttonNode = prefab.Find("GameUI/Button");
+            string buttonText = buttonNode == null ? string.Empty : buttonNode.ComponentText;
+            Check(buttonText.IndexOf("m_MethodName: backStart", StringComparison.Ordinal) >= 0,
+                  "旧 UI Button 挂着 UnityEvent 持久监听（m_MethodName: backStart）：本 UI 绝不调用它");
+            Check(buttonText.IndexOf("m_TargetGraphic", StringComparison.Ordinal) >= 0,
+                  "旧 UI Button 的 UnityEvent 目标有序列化引用（“只禁脚本”也仍是被旧资源驱动的活对象）");
+
+            for (int i = 0; i < UiRequiredSprites.Length; i++)
+            {
+                string nodePath = UiRequiredSprites[i][0];
+                string spriteGuid = UiRequiredSprites[i][1];
+                string sourcePath = UiRequiredSprites[i][2];
+
+                UiNode node = prefab.Find("GameUI/" + nodePath);
+                string actual = node == null ? null : prefab.SpriteGuid(node);
+
+                Check(node != null && string.Equals(actual, spriteGuid, StringComparison.Ordinal),
+                      "只读 Sprite 引用命中：" + nodePath + " → guid " + spriteGuid
+                      + "（实际=" + (actual ?? "<无>") + "）");
+
+                string absolute = Path.Combine(repoRoot, sourcePath.Replace('/', Path.DirectorySeparatorChar));
+                Check(File.Exists(absolute), "Sprite 源图存在：" + sourcePath);
+            }
+
+            // ---- J1b（T-LIVE4）：大招能量条的旧 YAML 事实（圆盘底图 + 径向填充 + 小图标） ----
+            CheckEnergyGaugeLegacyFacts(prefab, prefabText);
+
+            UiNode moveNode = prefab.Find("GameUI/Android/PlayerMove");
+            UiNode normalNode = prefab.Find("GameUI/Android/FireNormal");
+            int zoneRadius = moveNode == null ? 0 : ReadInt(moveNode.ComponentText, "zoneRadius", 0);
+            int deadZone = moveNode == null ? 0 : ReadInt(moveNode.ComponentText, "deadZone", 0);
+            int moveAnchor = moveNode == null ? -1 : ReadInt(moveNode.ComponentText, "joyAnchor", -1);
+            int normalAnchor = normalNode == null ? -1 : ReadInt(normalNode.ComponentText, "joyAnchor", -1);
+            int superAnchor = fireSuper == null ? -1 : ReadInt(fireSuper.ComponentText, "joyAnchor", -1);
+
+            Check(zoneRadius == LegacyJoystickZoneRadius,
+                  "旧 EasyJoystick zoneRadius == " + LegacyJoystickZoneRadius.ToString(CultureInfo.InvariantCulture)
+                  + "（实际=" + zoneRadius.ToString(CultureInfo.InvariantCulture) + "）：新 UI 摇杆半径常量的来源");
+            Check(deadZone == LegacyJoystickDeadZone,
+                  "旧 EasyJoystick deadZone == " + LegacyJoystickDeadZone.ToString(CultureInfo.InvariantCulture)
+                  + "（实际=" + deadZone.ToString(CultureInfo.InvariantCulture)
+                  + "）：新 UI 死区比例 0.2 = deadZone/zoneRadius 的来源");
+            Check(LegacyJoystickDeadZone * 5 == LegacyJoystickZoneRadius,
+                  "死区比例派生的算术前提成立：deadZone*5 == zoneRadius ⇒ deadZone/zoneRadius == 0.2");
+            Check(moveAnchor == LegacyMoveJoystickAnchor,
+                  "旧 PlayerMove joyAnchor == " + LegacyMoveJoystickAnchor.ToString(CultureInfo.InvariantCulture)
+                  + "（JoystickAnchor.LowerLeft；实际=" + moveAnchor.ToString(CultureInfo.InvariantCulture) + "）");
+            Check(normalAnchor == LegacyFireJoystickAnchor && superAnchor == LegacyFireJoystickAnchor,
+                  "旧 FireNormal/FireSuper joyAnchor == " + LegacyFireJoystickAnchor.ToString(CultureInfo.InvariantCulture)
+                  + "（JoystickAnchor.LowerRight；实际=" + normalAnchor.ToString(CultureInfo.InvariantCulture)
+                  + "/" + superAnchor.ToString(CultureInfo.InvariantCulture) + "）");
+
+            int scalerMode = root == null ? -1 : ReadInt(root.ComponentText, "m_UiScaleMode", -1);
+            int scalerFactor = root == null ? -1 : ReadInt(root.ComponentText, "m_ScaleFactor", -1);
+            int scalerRefX = root == null ? -1 : ReadScalerReferenceResolutionX(root.ComponentText);
+
+            Check(scalerMode == 0,
+                  "旧 CanvasScaler 是 ConstantPixelSize（m_UiScaleMode=0；实际="
+                  + scalerMode.ToString(CultureInfo.InvariantCulture) + "）：新 UI 直接copy它的缩放口径");
+            Check(scalerFactor == 1, "旧 CanvasScaler scaleFactor == 1（实际="
+                  + scalerFactor.ToString(CultureInfo.InvariantCulture) + "）");
+            Check(scalerRefX == 800, "旧 CanvasScaler referenceResolution.x == 800（实际="
+                  + scalerRefX.ToString(CultureInfo.InvariantCulture) + "）");
+
+            // ---- J1 负例：篡改“必需 Sprite / 根 inactive”，同一个提取器必须报失败 ----
+            string mutatedMissingSprite = ReplaceFirstOccurrence(prefabText,
+                "m_Sprite: {fileID: 21300000, guid: ab50dae53b97cce488f2b49b637fe5dc, type: 3}",
+                "m_Sprite: {fileID: 0}");
+            UiPrefabModel mutatedModel = UiPrefabModel.Load(mutatedMissingSprite);
+            UiNode mutatedNode = mutatedModel.Find("GameUI/能量条/Image");
+            Check(mutatedNode == null
+                  || !string.Equals(mutatedModel.SpriteGuid(mutatedNode),
+                                    "ab50dae53b97cce488f2b49b637fe5dc", StringComparison.Ordinal),
+                  "负例：抹掉 UnFullImage 的 Sprite 引用后，J1 的 Sprite 断言会失败（提取器不是空转）");
+
+            UiPrefabModel activeModel = UiPrefabModel.Load(BumpGameUiRootActiveFlag(prefabText));
+            UiNode activeRoot = FindRoot(activeModel);
+            Check(activeRoot != null && activeRoot.Active,
+                  "负例：把根的 m_IsActive 改成 1 后，J1 的“根 inactive”断言会失败（该断言不是恒真）");
+
+            // ---- J2 UI 源码：零激活 / 零权威（去注释扫描 + 变异负例）----
+            string uiSourcePath = Path.Combine(repoRoot,
+                BattleControlsRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Check(File.Exists(uiSourcePath), "新 UI 源码存在：" + BattleControlsRelativePath);
+            if (!File.Exists(uiSourcePath))
+            {
+                Console.WriteLine("  跳过 J2/J3/J4：新 UI 源码不在。");
+                return;
+            }
+
+            string uiSource = File.ReadAllText(uiSourcePath, Encoding.UTF8);
+            string uiCode = StripComments(uiSource);
+
+            for (int i = 0; i < UiRequiredTokens.Length; i++)
+            {
+                CheckContains(uiSource, UiRequiredTokens[i], "UI 源码必须含标记：" + UiRequiredTokens[i]);
+            }
+
+            int forbiddenFound = 0;
+            for (int i = 0; i < UiForbiddenTokens.Length; i++)
+            {
+                if (uiCode.IndexOf(UiForbiddenTokens[i], StringComparison.Ordinal) >= 0)
+                {
+                    forbiddenFound++;
+                    Check(false, "UI 源码（去注释后）**不得**出现旧脚本/旧联网/权威写标记："
+                                 + UiForbiddenTokens[i]);
+                }
+            }
+
+            Check(forbiddenFound == 0,
+                  "UI 去注释源码对旧脚本/旧联网/RPC/旧场景加载的禁用标记命中 0 处（共查 "
+                  + UiForbiddenTokens.Length.ToString(CultureInfo.InvariantCulture) + " 个标记）");
+
+            int mutatedHits = 0;
+            for (int i = 0; i < UiForbiddenTokens.Length; i++)
+            {
+                string injected = uiCode + "\n" + UiForbiddenTokens[i] + "();\n";
+                if (injected.IndexOf(UiForbiddenTokens[i], StringComparison.Ordinal) >= 0) { mutatedHits++; }
+            }
+
+            Check(mutatedHits == UiForbiddenTokens.Length,
+                  "负例：把每个禁用标记注入源码文本后扫描器 100% 命中（"
+                  + mutatedHits.ToString(CultureInfo.InvariantCulture) + "/"
+                  + UiForbiddenTokens.Length.ToString(CultureInfo.InvariantCulture) + "）⇒ 0 命中不是空转");
+
+            // ---- J2 结构顺序：DS 拒绝 → 只读读取 → 建自己的对象；Dispose 先清输入再销毁 ----
+            CheckContains(uiSource, "绝不激活旧资源", "UI 头注释登记“绝不激活旧资源”");
+            CheckContains(uiSource, "只读", "UI 头注释登记只读复用（Sprite/布局）");
+            CheckOrder(uiCode, "PMNetRuntime.IsDedicatedServer",
+                       "Resources.Load<GameObject>(LegacyPrefabResourceKey)",
+                       "DS 拒绝发生在读取旧 prefab **之前**");
+            CheckOrder(uiCode, "Resources.Load<GameObject>(LegacyPrefabResourceKey)",
+                       "AddComponent<PMUnityBattleControls>",
+                       "只读读取旧 prefab 发生在建自己的对象**之前**（旧 prefab 只做数据源）");
+            CheckOrder(uiCode, "AddComponent<Canvas>", "AddComponent<PMUnityBattleControlsPointerRelay>",
+                       "Canvas 先于指针转发器创建（转发器挂在 Canvas 根上）");
+            CheckContains(uiCode, "image.raycastTarget = raycast;", "只读控件按参数控制命中（装饰件不抢指针）");
+            CheckContains(uiCode, "text.raycastTarget = false;", "文本不参与射线命中（不挡摇杆）");
+            CheckContains(uiCode, "image.raycastTarget = false;", "条状填充不参与射线命中（不挡摇杆）");
+
+            string disposeRegion = Region(uiCode, "public void Dispose()", "private void SetNoticeLocal(");
+            Check(disposeRegion.Length > 0, "能定位 UI Dispose 区域（结构符合预期）");
+            CheckOrder(disposeRegion, "CancelStick(_moveStick", "UnityEngine.Object.Destroy(host)",
+                       "Dispose 先清掉摇杆输入，再销毁自己的对象");
+            CheckOrder(disposeRegion, "_setMove = null;", "UnityEngine.Object.Destroy(host)",
+                       "Dispose 先摘掉宿主出口，再销毁对象（防销毁瞬间回调仍生效）");
+            CheckContains(disposeRegion, "if (_disposed) { return; }", "Dispose 幂等");
+            CheckContains(disposeRegion, "_ownsEventSystem", "Dispose 只收回本局专属创建的事件系统");
+
+            // ---- J3 指针事件去重/释放（镜像 + 源码常量交叉核对）----
+            CheckUiPointerSemantics(uiSource);
+
+            // ---- J3b（T-LIVE4）：能量表必须改用旧素材的径向填充，不得再是纯色矩形 ----
+            CheckEnergyGaugeRadialSource(uiCode);
+
+            // ---- J4 交付面 ----
+            CheckBattleControlsEncodingAndMeta(repoRoot, uiSourcePath);
+            CheckR4UnityCheckUiReferences(repoRoot);
+            CheckBattleControlsHostWiring(repoRoot);
+
+            // ---- J5（T-LIVE3）：新瞄准指示器文件的交付面（编码 / meta / 零 RPC / DS 拒绝）----
+            CheckAimIndicatorSource(repoRoot);
+        }
+
+        /// <summary>
+        /// J1b（T-LIVE4）：旧 GameUI 里「大招能量条」的**只读事实**。
+        ///
+        /// 实机反馈：新链把能量画成纯色矩形 + 22 号数字，而旧 UI 是
+        /// FullBG 圆盘底图 + FullPower 的 <c>Image.Type=Filled</c> / <c>FillMethod=Radial360</c> 径向填充
+        /// + UnFullImage 小图标。本方法把这三条钉在**源 YAML** 上（含负例：把 m_Type 改成 Simple、
+        /// 把 m_FillMethod 改成别的，提取器必须报出不同值）。
+        ///
+        /// 口径：只当文本 YAML 读 ⇒ 证明「旧资源配置如此」，不证明新 UI 渲染出来就是那个观感（要实机截图）。
+        /// </summary>
+        private static void CheckEnergyGaugeLegacyFacts(UiPrefabModel prefab, string prefabText)
+        {
+            UiNode gauge = prefab.Find("GameUI/能量条");
+            UiNode frame = prefab.Find("GameUI/能量条/Background");
+            UiNode fill = prefab.Find("GameUI/能量条/Fill Area/Fill");
+            UiNode icon = prefab.Find("GameUI/能量条/Image");
+
+            Check(gauge != null && frame != null && fill != null && icon != null,
+                  "T-LIVE4 旧能量条四个节点都在（能量条 / Background / Fill Area/Fill / Image）");
+            if (gauge == null || frame == null || fill == null || icon == null) { return; }
+
+            // 根几何：新 UI 的 gauge 布局只读copy自它（不自行发明坐标）。
+            double sizeX;
+            double sizeY;
+            double posX;
+            double posY;
+            bool gaugeSize = TryReadVector2Field(gauge.ComponentText, "m_SizeDelta", out sizeX, out sizeY);
+            bool gaugePos = TryReadVector2Field(gauge.ComponentText, "m_AnchoredPosition", out posX, out posY);
+
+            Check(gaugeSize && Math.Abs(sizeX - 218.78491) < 0.01 && Math.Abs(sizeY - 181.83447) < 0.01,
+                  "T-LIVE4 旧能量条 sizeDelta ≈ (218.78491, 181.83447)（实际="
+                  + (gaugeSize ? (sizeX.ToString(CultureInfo.InvariantCulture) + "," + sizeY.ToString(CultureInfo.InvariantCulture)) : "<读不到>")
+                  + "）：新 UI 的 gauge 几何只读来源");
+            Check(gaugePos && Math.Abs(posX - 351.5) < 0.01 && Math.Abs(posY - (-296.6)) < 0.01,
+                  "T-LIVE4 旧能量条 anchoredPosition ≈ (351.5, −296.6)（实际="
+                  + (gaugePos ? (posX.ToString(CultureInfo.InvariantCulture) + "," + posY.ToString(CultureInfo.InvariantCulture)) : "<读不到>")
+                  + "）");
+
+            int frameType = ReadInt(frame.ComponentText, "m_Type", int.MinValue);
+            int frameAspect = ReadInt(frame.ComponentText, "m_PreserveAspect", int.MinValue);
+            Check(frameType == 0, "T-LIVE4 旧底图 Background 是 Simple（m_Type=0；实际=" + frameType.ToString(CultureInfo.InvariantCulture) + "）：圆盘底图不做填充");
+            Check(frameAspect == 1, "T-LIVE4 旧底图 Background preserveAspect=1（实际=" + frameAspect.ToString(CultureInfo.InvariantCulture) + "）：圆盘不被拉伸");
+
+            int fillType = ReadInt(fill.ComponentText, "m_Type", int.MinValue);
+            int fillMethod = ReadInt(fill.ComponentText, "m_FillMethod", int.MinValue);
+            int fillOrigin = ReadInt(fill.ComponentText, "m_FillOrigin", int.MinValue);
+            int fillClockwise = ReadInt(fill.ComponentText, "m_FillClockwise", int.MinValue);
+            int fillAmount = ReadInt(fill.ComponentText, "m_FillAmount", int.MinValue);
+
+            Check(fillType == 3, "T-LIVE4 ★ 旧填充 Fill 是 Image.Type.Filled（m_Type=3；实际=" + fillType.ToString(CultureInfo.InvariantCulture) + "）");
+            Check(fillMethod == 4, "T-LIVE4 ★ 旧填充 Fill 是 Radial360（m_FillMethod=4；实际=" + fillMethod.ToString(CultureInfo.InvariantCulture) + "）");
+            Check(fillOrigin == 0, "T-LIVE4 旧填充 Fill 的 m_FillOrigin=0（Bottom；实际=" + fillOrigin.ToString(CultureInfo.InvariantCulture) + "）");
+            Check(fillClockwise == 1, "T-LIVE4 旧填充 Fill 顺时针（m_FillClockwise=1；实际=" + fillClockwise.ToString(CultureInfo.InvariantCulture) + "）");
+            Check(fillAmount == 1, "T-LIVE4 旧填充 Fill 初值 m_FillAmount=1（实际=" + fillAmount.ToString(CultureInfo.InvariantCulture) + "）");
+
+            double fr;
+            double fg;
+            double fb;
+            double fa;
+            bool fillColor = TryReadColorField(fill.ComponentText, out fr, out fg, out fb, out fa);
+            Check(fillColor && fa > 0.99 && (fr + fg + fb) > 0.1,
+                  "T-LIVE4 旧填充色是不透明可见色（不是全 0 的隐形 tint；实际 a=" + (fillColor ? fa.ToString(CultureInfo.InvariantCulture) : "<读不到>") + "）");
+
+            int iconType = ReadInt(icon.ComponentText, "m_Type", int.MinValue);
+            double iconW;
+            double iconH;
+            double iconX;
+            double iconY;
+            bool iconSize = TryReadVector2Field(icon.ComponentText, "m_SizeDelta", out iconW, out iconH);
+            bool iconPos = TryReadVector2Field(icon.ComponentText, "m_AnchoredPosition", out iconX, out iconY);
+
+            Check(iconType == 0 && iconSize
+                  && Math.Abs(iconW - 125.32214) < 0.01 && Math.Abs(iconH - 126.7554) < 0.01
+                  && iconPos && Math.Abs(iconX - (-1.67)) < 0.01 && Math.Abs(iconY - (-0.48)) < 0.01,
+                  "T-LIVE4 旧 UnFullImage 小图标节点是 Simple + sizeDelta ≈ (125.32, 126.76) @ (−1.67, −0.48)（实际="
+                  + iconType.ToString(CultureInfo.InvariantCulture) + "/"
+                  + (iconSize ? (iconW.ToString(CultureInfo.InvariantCulture) + "," + iconH.ToString(CultureInfo.InvariantCulture)) : "<读不到>") + "）");
+
+            // ---- 负例：变异后同一个提取器必须报出不同值（断言不是恒真） ----
+            UiPrefabModel mutatedType = UiPrefabModel.Load(
+                ReplaceFirstOccurrence(prefabText, "m_Type: 3", "m_Type: 0"));
+            UiNode mutatedFill = mutatedType.Find("GameUI/能量条/Fill Area/Fill");
+            Check(mutatedFill != null && ReadInt(mutatedFill.ComponentText, "m_Type", -1) != 3,
+                  "T-LIVE4 负例：把 Fill 的 m_Type 从 3（Filled）改成 0（Simple）后，上面的 Filled 断言会失败");
+
+            // 旧 prefab 是 CRLF（ForceText + CRLF），因此定位串必须用 "\r\n"。
+            UiPrefabModel mutatedMethod = UiPrefabModel.Load(
+                ReplaceFirstOccurrence(prefabText,
+                    "m_Type: 3\r\n  m_PreserveAspect: 0\r\n  m_FillCenter: 1\r\n  m_FillMethod: 4",
+                    "m_Type: 3\r\n  m_PreserveAspect: 0\r\n  m_FillCenter: 1\r\n  m_FillMethod: 0"));
+            UiNode mutatedMethodFill = mutatedMethod.Find("GameUI/能量条/Fill Area/Fill");
+            Check(mutatedMethodFill != null && ReadInt(mutatedMethodFill.ComponentText, "m_FillMethod", -1) != 4,
+                  "T-LIVE4 负例：把 Fill 的 m_FillMethod 从 4（Radial360）改成 0 后，上面的 Radial360 断言会失败");
+        }
+
+        /// <summary>
+        /// J3b（T-LIVE4）：新 UI 的**能量表构建区**必须改用旧素材的径向填充。
+        ///
+        /// 判据（都在去注释后的源码上）：
+        ///   · 能量表区出现 <c>CreateRadialFill(</c>（Image.Type.Filled / Radial360 + fillAmount）；
+        ///   · 同一区**不得**再出现 <c>CreateFillBar(</c>（旧实现：纯色矩形 + 22 号数字 ⇒ 实机大方块）；
+        ///   · 比例口径仍是 SuperEnergy / SuperEnergyMax（权威复制值只读）。
+        /// </summary>
+        private static void CheckEnergyGaugeRadialSource(string uiCode)
+        {
+            string gaugeRegion = Region(uiCode,
+                "RectTransform gauge = CreateRect(rootRect, \"EnergyGauge\"",
+                "RectTransform hpBar = CreateRect(rootRect, \"HpBar\"");
+
+            Check(gaugeRegion != null && gaugeRegion.Length > 0,
+                  "T-LIVE4 能定位 UI 的能量表构建区（结构符合预期）");
+
+            Check(gaugeRegion != null && gaugeRegion.Contains("CreateRadialFill("),
+                  "T-LIVE4 ★ 能量表用径向填充（Image.Type.Filled/FillMethod.Radial360 + fillAmount）而非纯色矩形");
+            Check(gaugeRegion != null && !gaugeRegion.Contains("CreateFillBar("),
+                  "T-LIVE4 ★ 负例：能量表构建区不得再出现 CreateFillBar（旧纯色方块 + 大号数字）");
+
+            CheckContains(uiCode, "UnityEngine.UI.Image.Type.Filled",
+                          "T-LIVE4 能量填充显式指定 Image.Type.Filled");
+            CheckContains(uiCode, "UnityEngine.UI.Image.FillMethod.Radial360",
+                          "T-LIVE4 能量填充显式指定 FillMethod.Radial360");
+            CheckContains(uiCode, "image.fillAmount =",
+                          "T-LIVE4 能量比例用 fillAmount 表达（不是锚点宽度条）");
+            CheckContains(uiCode, "TryReadEnergyFillConfig",
+                          "T-LIVE4 旧 Fill 的径向配置只读复用（缺配置/形态不符即显式失败，不伪造）");
+            CheckContains(uiCode, "Ratio(_status.SuperEnergy, PMNet.Shared.BattleNumericConfig.SuperEnergyMax)",
+                          "T-LIVE4 能量比例 = SuperEnergy / SuperEnergyMax(200)（只读复制值）");
+        }
+
+        /// <summary>
+        /// J5（T-LIVE3）：新增瞄准指示器文件的交付面事实。
+        ///
+        /// 它只证明**源码形状**：DS 拒绝、显式可见材质/颜色、隐藏走 enabled、Dispose、零 RPC/零权威/零资产加载、
+        /// 编码与 meta 纪律；**不**证明实机渲染观感（那要用户实机，见主计划的 PENDING_USER）。
+        /// </summary>
+        private static void CheckAimIndicatorSource(string repoRoot)
+        {
+            string sourcePath = Path.Combine(repoRoot,
+                AimIndicatorRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+            Check(File.Exists(sourcePath), "T-LIVE3 瞄准指示器源码存在：" + AimIndicatorRelativePath);
+            if (!File.Exists(sourcePath)) { return; }
+
+            byte[] sourceBytes = File.ReadAllBytes(sourcePath);
+            bool sourceBom = sourceBytes.Length >= 3 && sourceBytes[0] == 0xEF && sourceBytes[1] == 0xBB
+                             && sourceBytes[2] == 0xBF;
+            Check(sourceBom, "T-LIVE3 瞄准指示器源码带 UTF-8 BOM（项目“中文源码 BOM”纪律）");
+
+            int crlf = 0;
+            int loneLf = 0;
+            for (int i = 0; i < sourceBytes.Length; i++)
+            {
+                if (sourceBytes[i] != (byte)'\n') { continue; }
+                if (i > 0 && sourceBytes[i - 1] == (byte)'\r') { crlf++; }
+                else { loneLf++; }
+            }
+
+            Check(crlf > 0 && loneLf == 0,
+                  "T-LIVE3 瞄准指示器源码换行是 CRLF（实际 CRLF=" + crlf.ToString(CultureInfo.InvariantCulture)
+                  + " loneLF=" + loneLf.ToString(CultureInfo.InvariantCulture) + "）");
+
+            string metaPath = Path.Combine(repoRoot,
+                (AimIndicatorRelativePath + ".meta").Replace('/', Path.DirectorySeparatorChar));
+            Check(File.Exists(metaPath), "T-LIVE3 瞄准指示器带 .meta（否则 Unity 会自己生成一个，等于没锁 guid）");
+
+            if (File.Exists(metaPath))
+            {
+                byte[] metaBytes = File.ReadAllBytes(metaPath);
+                bool metaBom = metaBytes.Length >= 3 && metaBytes[0] == 0xEF && metaBytes[1] == 0xBB
+                               && metaBytes[2] == 0xBF;
+                Check(!metaBom, "T-LIVE3 瞄准指示器 .meta 无 BOM");
+
+                int metaCrlf = 0;
+                for (int i = 0; i < metaBytes.Length; i++)
+                {
+                    if (metaBytes[i] == (byte)'\n' && i > 0 && metaBytes[i - 1] == (byte)'\r') { metaCrlf++; }
+                }
+
+                Check(metaCrlf == 0, "T-LIVE3 瞄准指示器 .meta 使用 LF 换行（与 Unity 生成的 meta 一致）");
+
+                Match guid = Regex.Match(File.ReadAllText(metaPath, Encoding.UTF8),
+                                         @"(?m)^guid: ([0-9a-f]{32})\s*$");
+                Check(guid.Success, "T-LIVE3 瞄准指示器 .meta 含 32 位 hex guid");
+
+                if (guid.Success)
+                {
+                    string metaGuid = guid.Groups[1].Value;
+                    int occurrences = 0;
+                    string[] allMetas = Directory.GetFiles(Path.Combine(repoRoot, "Client", "Assets"),
+                                                           "*.meta", SearchOption.AllDirectories);
+                    for (int i = 0; i < allMetas.Length; i++)
+                    {
+                        if (File.ReadAllText(allMetas[i], Encoding.UTF8)
+                                  .IndexOf("guid: " + metaGuid, StringComparison.Ordinal) >= 0)
+                        {
+                            occurrences++;
+                        }
+                    }
+
+                    Check(occurrences == 1, "T-LIVE3 瞄准指示器 .meta 的 guid 在 Assets 内唯一（出现次数="
+                          + occurrences.ToString(CultureInfo.InvariantCulture) + "；guid=" + metaGuid + "）");
+                }
+            }
+
+            string source = File.ReadAllText(sourcePath, Encoding.UTF8);
+            string code = StripComments(source);
+
+            string[] required =
+            {
+                "PMNetRuntime.IsDedicatedServer",
+                "LineRenderer",
+                "new GameObject(",
+                "Shader.Find(",
+                "new Material(",
+                "startColor =",
+                "endColor =",
+                "startWidth =",
+                "endWidth =",
+                "enabled = false",
+                "public void Dispose()",
+                "#if UNITY_2019_1_OR_NEWER || UNITY_EDITOR",
+                "#else",
+                "public const bool LineRendererImplementationCompiled = true;",
+                "public const bool LineRendererImplementationCompiled = false;",
+            };
+
+            for (int i = 0; i < required.Length; i++)
+            {
+                CheckContains(source, required[i], "T-LIVE3 瞄准指示器必须含标记：" + required[i]);
+            }
+
+            string[] forbidden =
+            {
+                "ServerCombatAttackV1", "ClientCombatAttackResultV1", "ClientCombatMatchResultV1",
+                "ServerCombatResultAckV1", "PMNet_", "MarkPropertyDirty",
+                "CombatHp", "CombatMana", "CombatSuperEnergy",
+                "Instantiate", "Resources.Load", "LoadScene", "FindObjectOfType", "SendMessage",
+                "TouchLogic", "EasyJoystick", "EasyTouch",
+            };
+
+            int hits = 0;
+            for (int i = 0; i < forbidden.Length; i++)
+            {
+                if (code.IndexOf(forbidden[i], StringComparison.Ordinal) >= 0)
+                {
+                    hits++;
+                    Check(false, "瞄准指示器（去注释后）不得出现 RPC/权威写/资产加载/旧链标记：" + forbidden[i]);
+                }
+            }
+
+            Check(hits == 0, "T-LIVE3 瞄准指示器零 RPC / 零权威写 / 零资产加载 / 零旧链（禁用标记命中 0 处，共查 "
+                  + forbidden.Length.ToString(CultureInfo.InvariantCulture) + " 个）");
+
+            int mutatedHits = 0;
+            for (int i = 0; i < forbidden.Length; i++)
+            {
+                if ((code + "\n" + forbidden[i] + "();\n").IndexOf(forbidden[i], StringComparison.Ordinal) >= 0)
+                {
+                    mutatedHits++;
+                }
+            }
+
+            Check(mutatedHits == forbidden.Length,
+                  "T-LIVE3 负例：把每个禁用标记注入指示器文本后扫描器 100% 命中（"
+                  + mutatedHits.ToString(CultureInfo.InvariantCulture) + "/"
+                  + forbidden.Length.ToString(CultureInfo.InvariantCulture) + "）⇒ 0 命中不是空转");
+        }
+
+        /// <summary>J1 用：找到唯一根节点（本 prefab 只有一个根 GameUI）。</summary>
+        private static UiNode FindRoot(UiPrefabModel model)
+        {
+            UiNode named;
+            if (model.NodesByPath.TryGetValue("/GameUI", out named)) { return named; }
+
+            for (int i = 0; i < model.RootIds.Count; i++)
+            {
+                UiNode node;
+                if (model.NodesById.TryGetValue(model.RootIds[i], out node)) { return node; }
+            }
+
+            return null;
+        }
+
+
+        /// <summary>J1 负例用：替换第一次出现的子串（找不到就原样返回）。</summary>
+        private static string ReplaceFirstOccurrence(string text, string oldValue, string newValue)
+        {
+            int index = text.IndexOf(oldValue, StringComparison.Ordinal);
+            if (index < 0) { return text; }
+            return text.Substring(0, index) + newValue + text.Substring(index + oldValue.Length);
+        }
+
+        /// <summary>J1 负例夹具：把**根** GameUI 的 m_IsActive 从 0 改成 1（只动根那一处）。</summary>
+        private static string BumpGameUiRootActiveFlag(string prefabText)
+        {
+            int nameIndex = prefabText.IndexOf("m_Name: GameUI", StringComparison.Ordinal);
+            if (nameIndex < 0) { return prefabText; }
+
+            int activeIndex = prefabText.IndexOf("m_IsActive: 0", nameIndex, StringComparison.Ordinal);
+            if (activeIndex < 0) { return prefabText; }
+
+            return prefabText.Substring(0, activeIndex) + "m_IsActive: 1"
+                   + prefabText.Substring(activeIndex + "m_IsActive: 0".Length);
+        }
+
+        /// <summary>J1 用：读 `m_ReferenceResolution: {x: 800, y: 600}` 的 x（内联结构）。</summary>
+        private static int ReadScalerReferenceResolutionX(string text)
+        {
+            Match match = Regex.Match(text, @"m_ReferenceResolution: \{x: (-?\d+(?:\.\d+)?)");
+            if (!match.Success) { return -1; }
+
+            return (int)Math.Round(double.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>J3 用：从源码文本里读一个 `public const float X = 0.05f;` 并断言取值。</summary>
+        private static void CheckSourceConstFloat(string source, string name, double expected, string label)
+        {
+            double parsed;
+            if (!TryReadConstFloat(source, name, out parsed))
+            {
+                Check(false, "J3 常量可读：" + label + "（源码里找不到 " + name + " 的字面常量）");
+                return;
+            }
+
+            Check(Math.Abs(parsed - expected) < 1e-6,
+                  "J3 常量与镜像一致：" + label + " == " + expected.ToString("R", CultureInfo.InvariantCulture)
+                  + "（源码实际=" + parsed.ToString("R", CultureInfo.InvariantCulture) + "）");
+        }
+
+        /// <summary>
+        /// J3：摇杆指针语义的**可执行镜像** + 与 UI 源码常量的交叉核对。
+        ///
+        /// 镜像按 UI 文件头登记的同一张状态机表实现：
+        ///   down(可用) → 激活；重复 down → 忽略；drag(非激活者) → 忽略；
+        ///   drag(激活者) → 移动推送（去重）/ 攻击只记瞄准；up(激活者) → 移动清零 + 攻击**提交一次**；
+        ///   重复 up → 忽略；Cancel（死亡/终局/无快照/Dispose）→ 移动清零 + 攻击**不提交**。
+        /// 屏幕口径：uGUI 本地 +Y 向上 ⇒ screenY **不取反**（契约：screen up → world −X）。
+        /// </summary>
+        private static void CheckUiPointerSemantics(string uiSource)
+        {
+            CheckSourceConstFloat(uiSource, "MinAimLength", 0.05, "MinAimLength");
+            CheckSourceConstFloat(uiSource, "MovePushEpsilon", 0.0005, "MovePushEpsilon");
+            CheckSourceConstFloat(uiSource, "LegacyJoystickDeadZoneRatio", 0.2, "LegacyJoystickDeadZoneRatio");
+            CheckSourceConstFloat(uiSource, "LegacyJoystickZoneRadiusPixels", 100.0,
+                                  "LegacyJoystickZoneRadiusPixels");
+
+            UiPointerMirror move = new UiPointerMirror();
+            move.Down(1);
+            Check(move.Held && move.ActivePointer == 1, "J3 移动：down 激活该 pointerId");
+
+            move.Down(2);
+            Check(move.Held && move.ActivePointer == 1, "J3 移动：重复 down（另一指针）被忽略，不重置、不重复激活");
+
+            bool dragOther = move.Drag(2, 80f, 0f, 100f, 0.2f);
+            Check(!dragOther && move.MovePushes == 0, "J3 移动：非激活指针的 drag 被忽略（多指安全）");
+
+            bool dragSelf = move.Drag(1, 50f, 0f, 100f, 0.2f);
+            Check(dragSelf && move.MovePushes == 1, "J3 移动：激活指针 drag 推送一次");
+            Check(Math.Abs(move.LastMoveX - 0.5f) < 0.0001f && Math.Abs(move.LastMoveY) < 0.0001f,
+                  "J3 移动：本地 (50,0) / 半径 100 ⇒ 屏幕 (0.5, 0)");
+
+            move.Drag(1, 50f, 0f, 100f, 0.2f);
+            Check(move.MovePushes == 1, "J3 移动：同一向量重复 drag 不重复推送（去重）");
+
+            move.Drag(1, 0f, 80f, 100f, 0.2f);
+            Check(move.LastMoveY > 0.79f,
+                  "J3 移动：本地 +Y（向上）⇒ screenY **为正**（uGUI 本地 +Y 与冻结屏幕口径同向，不取反）");
+            Check(Math.Abs(move.LastMoveY - (-0.8f)) > 0.1f,
+                  "J3 负例：若把 Y 取反，上面那条断言会失败（该断言不是恒真）");
+
+            bool upOther = move.Up(2, 100f, 0.2f);
+            Check(!upOther && move.Held, "J3 移动：非激活指针的 up 被忽略（去重）");
+
+            move.Up(1, 100f, 0.2f);
+            Check(!move.Held && Math.Abs(move.LastMoveX) < 0.0001f && Math.Abs(move.LastMoveY) < 0.0001f,
+                  "J3 移动：松开清移动（推送归零向量）");
+            Check(move.MovePushes == 3, "J3 移动：清零只推一次 (0,0)（实际推送="
+                  + move.MovePushes.ToString(CultureInfo.InvariantCulture) + "）");
+
+            bool upAgain = move.Up(1, 100f, 0.2f);
+            Check(!upAgain && move.MovePushes == 3, "J3 移动：重复 up 被忽略（不再推送）");
+
+            UiPointerMirror attack = new UiPointerMirror();
+            attack.IsAttack = true;
+            attack.Down(7);
+            attack.Drag(7, 60f, 60f, 100f, 0.2f);
+            Check(attack.Attacks == 0 && attack.MovePushes == 0,
+                  "J3 攻击：拖动阶段**不**提交攻击（只记瞄准），也不产生移动推送");
+
+            attack.Up(7, 100f, 0.2f);
+            Check(attack.Attacks == 1, "J3 攻击：松手提交一次");
+            attack.Up(7, 100f, 0.2f);
+            Check(attack.Attacks == 1, "J3 攻击：重复 up 不提交第二次（边沿去重）");
+
+            UiPointerMirror zeroAim = new UiPointerMirror();
+            zeroAim.IsAttack = true;
+            zeroAim.Down(3);
+            zeroAim.Up(3, 100f, 0.2f);
+            Check(zeroAim.Attacks == 0 && zeroAim.Suppressed == 1,
+                  "J3 攻击：未给出方向（|aim| < MinAimLength）时不提交，只记抑制计数");
+
+            UiPointerMirror deadZone = new UiPointerMirror();
+            deadZone.Down(1);
+            deadZone.Drag(1, 5f, 0f, 100f, 0.2f);
+            Check(deadZone.MovePushes == 1 && Math.Abs(deadZone.LastMoveX) < 0.0001f,
+                  "J3 死区：|local| ≤ 20（= 0.2*100）⇒ 输出显式 (0,0)，不是小数值");
+
+            UiPointerMirror clamp = new UiPointerMirror();
+            clamp.Down(1);
+            clamp.Drag(1, 500f, 0f, 100f, 0.2f);
+            Check(Math.Abs(clamp.LastMoveX - 1f) < 0.0001f, "J3 钳制：超出半径的输出被钳到 +1");
+
+            UiPointerMirror disabled = new UiPointerMirror();
+            disabled.Interactable = false;
+            disabled.Down(1);
+            Check(!disabled.Held, "J3 可用性：不可用（死亡/终局/无快照）时 down 被忽略");
+
+            UiPointerMirror nan = new UiPointerMirror();
+            nan.Down(1);
+            bool nanDrag = nan.Drag(1, float.NaN, 0f, 100f, 0.2f);
+            Check(!nanDrag && nan.MovePushes == 0, "J3 健壮性：NaN 本地坐标被拒绝，不推送");
+
+            UiPointerMirror cancelMove = new UiPointerMirror();
+            cancelMove.Down(1);
+            cancelMove.Drag(1, 70f, 0f, 100f, 0.2f);
+            int beforeCancel = cancelMove.MovePushes;
+            cancelMove.Cancel();
+            Check(!cancelMove.Held && cancelMove.Cancels == 1 && cancelMove.MovePushes == beforeCancel + 1
+                  && Math.Abs(cancelMove.LastMoveX) < 0.0001f,
+                  "J3 取消：移动摇杆 Cancel 清零；Held=false；计数 +1");
+
+            UiPointerMirror cancelAttack = new UiPointerMirror();
+            cancelAttack.IsAttack = true;
+            cancelAttack.Down(4);
+            cancelAttack.Drag(4, 70f, 0f, 100f, 0.2f);
+            cancelAttack.Cancel();
+            Check(cancelAttack.Attacks == 0 && cancelAttack.Cancels == 1,
+                  "J3 取消：攻击摇杆 Cancel **不提交**攻击（死亡/终局/Dispose 路径绝不能开火）");
+
+            UiPointerMirror cancelIdle = new UiPointerMirror();
+            cancelIdle.Cancel();
+            Check(cancelIdle.Cancels == 0, "J3 取消：未按住时 Cancel 是空操作（幂等）");
+
+            UiPointerMirror disposed = new UiPointerMirror();
+            disposed.Disposed = true;
+            disposed.Down(1);
+            disposed.Drag(1, 90f, 0f, 100f, 0.2f);
+            disposed.Up(1, 100f, 0.2f);
+            Check(!disposed.Held && disposed.MovePushes == 0 && disposed.Attacks == 0,
+                  "J3 释放：Dispose 之后 down/drag/up 全部无效（不留卡住的方向，也不开火）");
+        }
+
+        /// <summary>
+        /// J4：新 UI 源码 / `.meta` 的编码事实（契约：中文源码 UTF-8 **BOM** + CRLF；meta 无 BOM + LF），
+        /// 以及 meta guid 的全仓库唯一性（否则 Unity 会把两个资源当同一个）。
+        /// </summary>
+        private static void CheckBattleControlsEncodingAndMeta(string repoRoot, string uiSourcePath)
+        {
+            byte[] sourceBytes = File.ReadAllBytes(uiSourcePath);
+            bool sourceBom = sourceBytes.Length >= 3 && sourceBytes[0] == 0xEF && sourceBytes[1] == 0xBB
+                             && sourceBytes[2] == 0xBF;
+            Check(sourceBom, "新 UI 源码带 UTF-8 BOM（项目“中文源码 BOM”纪律）");
+
+            int sourceCrlf = 0;
+            int sourceLoneLf = 0;
+            for (int i = 0; i < sourceBytes.Length; i++)
+            {
+                if (sourceBytes[i] != (byte)'\n') { continue; }
+                if (i > 0 && sourceBytes[i - 1] == (byte)'\r') { sourceCrlf++; }
+                else { sourceLoneLf++; }
+            }
+
+            Check(sourceCrlf > 0 && sourceLoneLf == 0,
+                  "新 UI 源码换行是 CRLF（实际 CRLF=" + sourceCrlf.ToString(CultureInfo.InvariantCulture)
+                  + " loneLF=" + sourceLoneLf.ToString(CultureInfo.InvariantCulture) + "）");
+
+            string metaPath = Path.Combine(repoRoot,
+                BattleControlsMetaRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Check(File.Exists(metaPath), "新 UI 脚本带 .meta（否则 Unity 会自己生成一个，等于没锁 guid）");
+            if (!File.Exists(metaPath)) { return; }
+
+            byte[] metaBytes = File.ReadAllBytes(metaPath);
+            bool metaBom = metaBytes.Length >= 3 && metaBytes[0] == 0xEF && metaBytes[1] == 0xBB
+                           && metaBytes[2] == 0xBF;
+            Check(!metaBom, "新 UI .meta 无 BOM");
+
+            int metaCrlf = 0;
+            for (int i = 0; i < metaBytes.Length; i++)
+            {
+                if (metaBytes[i] == (byte)'\n' && i > 0 && metaBytes[i - 1] == (byte)'\r') { metaCrlf++; }
+            }
+
+            Check(metaCrlf == 0, "新 UI .meta 使用 LF 换行（与 Unity 生成的 meta 一致）");
+
+            Match guid = Regex.Match(File.ReadAllText(metaPath, Encoding.UTF8),
+                                     @"(?m)^guid: ([0-9a-f]{32})\s*$");
+            Check(guid.Success, "新 UI .meta 含 32 位 hex guid");
+            if (!guid.Success) { return; }
+
+            string metaGuid = guid.Groups[1].Value;
+            int occurrences = 0;
+            string assetsRoot = Path.Combine(repoRoot, "Client", "Assets");
+            string[] allMetas = Directory.GetFiles(assetsRoot, "*.meta", SearchOption.AllDirectories);
+            for (int i = 0; i < allMetas.Length; i++)
+            {
+                if (File.ReadAllText(allMetas[i], Encoding.UTF8)
+                          .IndexOf("guid: " + metaGuid, StringComparison.Ordinal) >= 0)
+                {
+                    occurrences++;
+                }
+            }
+
+            Check(occurrences == 1, "新 UI .meta 的 guid 在 Assets 内唯一（出现次数="
+                  + occurrences.ToString(CultureInfo.InvariantCulture) + "；guid=" + metaGuid + "）");
+
+            string prefabMetaPath = Path.Combine(repoRoot,
+                GameUiPrefabMetaRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(prefabMetaPath))
+            {
+                Check(File.ReadAllText(prefabMetaPath, Encoding.UTF8)
+                           .IndexOf("guid: " + GameUiPrefabGuid, StringComparison.Ordinal) >= 0,
+                      "旧局内 UI 预制体的 guid 与契约登记一致（" + GameUiPrefabGuid + "）");
+            }
+        }
+
+        /// <summary>
+        /// J4：PMR4UnityCheck 必须真的引用 **Client/Library/ScriptAssemblies/UnityEngine.UI.dll**
+        /// 与 uGUI 依赖的引擎模块（UIModule / TextRenderingModule）——否则“真实 Unity 2019 API 编译门”
+        /// 会给出一份“没编 uGUI 实现”的假绿。
+        /// </summary>
+        private static void CheckR4UnityCheckUiReferences(string repoRoot)
+        {
+            string csprojPath = Path.Combine(repoRoot,
+                R4UnityCheckCsprojRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Check(File.Exists(csprojPath), "PMR4UnityCheck 工程存在：" + R4UnityCheckCsprojRelativePath);
+            if (!File.Exists(csprojPath)) { return; }
+
+            string csproj = File.ReadAllText(csprojPath, Encoding.UTF8);
+            Check(csproj.IndexOf("UnityEngine.UI.dll", StringComparison.Ordinal) >= 0,
+                  "PMR4UnityCheck 引用真实 UnityEngine.UI.dll（工程 Library/ScriptAssemblies 的包产物）");
+            Check(csproj.IndexOf("UnityEngine.UIModule.dll", StringComparison.Ordinal) >= 0,
+                  "PMR4UnityCheck 引用 UnityEngine.UIModule.dll（Canvas/RenderMode 所在模块）");
+            Check(csproj.IndexOf("UnityEngine.TextRenderingModule.dll", StringComparison.Ordinal) >= 0,
+                  "PMR4UnityCheck 引用 UnityEngine.TextRenderingModule.dll（Text/Font 所在模块）");
+            Check(csproj.IndexOf("DefineConstants>UNITY_EDITOR", StringComparison.Ordinal) >= 0,
+                  "PMR4UnityCheck 显式定义 UNITY_EDITOR ⇒ 会编入 UI 的**完整实现**而不是替身面");
+
+            Check(File.Exists(Path.Combine(repoRoot,
+                      UnityUiAssemblyRelativePath.Replace('/', Path.DirectorySeparatorChar))),
+                  "真实 UnityEngine.UI.dll 存在于工程 Library（本机 Unity 已导入 ugui 包）："
+                  + UnityUiAssemblyRelativePath);
+        }
+
+        /// <summary>
+        /// J4：两组代码已经主侧集成。禁止恢复成“UI 类存在，但宿主不创建/绑定/清理”的假接线。
+        /// 这是源码级门，不宣称 Unity 指针/Canvas 的实机行为已通过。
+        /// </summary>
+        private static void CheckBattleControlsHostWiring(string repoRoot)
+        {
+            string hostPath = Path.Combine(repoRoot,
+                SessionHostRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            Check(File.Exists(hostPath), "局内操控 UI 宿主接线：真实源码存在");
+            if (!File.Exists(hostPath)) { return; }
+
+            string host = File.ReadAllText(hostPath, Encoding.UTF8);
+            Check(HasBattleControlsWiring(host),
+                  "局内UI实际接线：创建、绑定三输入出口、复制快照、每帧刷新、释放均存在");
+
+            string[] critical = {
+                "session.Controls = PMUnityBattleControls.Create(offer.MatchId, out controlsError);",
+                "session.Controls.Bind(TrySetUiMove, TryQueueUiAttack, QueryBattleControlsStatus, TrySetUiAim);",
+                "session.Controls.UpdateStatus();",
+                "controls.Dispose();",
+                "session.AimIndicator = PMUnityBattleAimIndicator.Create(offer.MatchId, out aimError);",
+                "UpdateAimIndicator(session);",
+                "ClearUiAim(session);",
+                "AimIndicator.Dispose();"
+            };
+            for (int i = 0; i < critical.Length; i++)
+            {
+                string removed = host.Replace(critical[i], string.Empty);
+                Check(!string.Equals(removed, host, StringComparison.Ordinal)
+                      && !HasBattleControlsWiring(removed),
+                      "局内UI接线负例：删除第 " + (i + 1).ToString() + " 个关键调用必须被拒");
+            }
+        }
+
+        private static bool HasBattleControlsWiring(string source)
+        {
+            if (string.IsNullOrEmpty(source)) { return false; }
+            return source.Contains("session.Controls = PMUnityBattleControls.Create(offer.MatchId, out controlsError);")
+                   && source.Contains("session.Controls.Bind(TrySetUiMove, TryQueueUiAttack, QueryBattleControlsStatus, TrySetUiAim);")
+                   && source.Contains("session.Controls.UpdateStatus();")
+                   && source.Contains("controls.Dispose();")
+                   && source.Contains("TryGetUiCombatSnapshot(out snapshot)")
+                   && source.Contains("session.Controls = null;")
+                   && source.Contains("public static bool TrySetUiAim(bool isSuper, bool active, float screenX, float screenY)")
+                   && source.Contains("session.AimIndicator = PMUnityBattleAimIndicator.Create(offer.MatchId, out aimError);")
+                   && source.Contains("UpdateAimIndicator(session);")
+                   && source.Contains("ClearUiAim(session);")
+                   && source.Contains("AimIndicator.Dispose();");
+        }
+
+        /// <summary>
+        /// J3 用的**可执行镜像**：按 UI 头注释登记的同一张语义表实现的摇杆状态机。
+        /// 它不是 UI 的实现（本工具编不到那个文件），只用来把“去重/释放/死区/不取反”这些纯逻辑规则
+        /// 跑成正负例；与实现的常量一致性由 <see cref="CheckUiPointerSemantics"/> 交叉核对。
+        /// </summary>
+        private sealed class UiPointerMirror
+        {
+            public const int NoPointer = int.MinValue;
+
+            public bool IsAttack;
+            public bool Interactable = true;
+            public bool Disposed;
+            public int ActivePointer = NoPointer;
+
+            public int MovePushes;
+            public int Attacks;
+            public int Suppressed;
+            public int Cancels;
+
+            public float LastMoveX;
+            public float LastMoveY;
+
+            private float _aimX;
+            private float _aimY;
+            private bool _hasMove;
+
+            public bool Held { get { return ActivePointer != NoPointer; } }
+
+            public void Down(int pointerId)
+            {
+                if (Disposed) { return; }
+                if (Held) { return; }
+                if (!Interactable) { return; }
+                ActivePointer = pointerId;
+            }
+
+            public bool Drag(int pointerId, float localX, float localY, float radius, float deadZoneRatio)
+            {
+                if (Disposed) { return false; }
+                if (!Held || ActivePointer != pointerId) { return false; }
+
+                float sx;
+                float sy;
+                if (!MirrorNormalize(localX, localY, radius, deadZoneRatio, out sx, out sy)) { return false; }
+
+                _aimX = sx;
+                _aimY = sy;
+
+                if (!IsAttack) { PushMove(sx, sy); }
+                return true;
+            }
+
+            public bool Up(int pointerId, float radius, float deadZoneRatio)
+            {
+                if (Disposed) { return false; }
+                if (!Held || ActivePointer != pointerId) { return false; }
+
+                ActivePointer = NoPointer;
+
+                float sx = _aimX;
+                float sy = _aimY;
+                _aimX = 0f;
+                _aimY = 0f;
+
+                if (!IsAttack)
+                {
+                    PushMove(0f, 0f);
+                    return true;
+                }
+
+                if (MirrorMagnitude(sx, sy) < 0.05f)
+                {
+                    Suppressed++;
+                    return true;
+                }
+
+                Attacks++;
+                return true;
+            }
+
+            public void Cancel()
+            {
+                if (Disposed) { return; }
+                if (!Held) { return; }
+
+                ActivePointer = NoPointer;
+                Cancels++;
+                _aimX = 0f;
+                _aimY = 0f;
+
+                if (!IsAttack) { PushMove(0f, 0f); }
+            }
+
+            private void PushMove(float x, float y)
+            {
+                if (_hasMove && Math.Abs(x - LastMoveX) <= 0.0005 && Math.Abs(y - LastMoveY) <= 0.0005)
+                {
+                    return;
+                }
+
+                _hasMove = true;
+                LastMoveX = x;
+                LastMoveY = y;
+                MovePushes++;
+            }
+
+            private static float MirrorMagnitude(float x, float y)
+            {
+                return (float)Math.Sqrt((double)x * (double)x + (double)y * (double)y);
+            }
+
+            private static bool MirrorNormalize(float localX, float localY, float radius,
+                                               float deadZoneRatio, out float screenX, out float screenY)
+            {
+                screenX = 0f;
+                screenY = 0f;
+
+                if (float.IsNaN(localX) || float.IsInfinity(localX)
+                    || float.IsNaN(localY) || float.IsInfinity(localY))
+                {
+                    return false;
+                }
+
+                if (float.IsNaN(radius) || float.IsInfinity(radius) || radius <= 0f) { return false; }
+
+                if (MirrorMagnitude(localX, localY) <= deadZoneRatio * radius) { return true; }
+
+                screenX = ClampUnit(localX / radius);
+                screenY = ClampUnit(localY / radius);   // uGUI 本地 +Y 向上 ⇒ 不取反
+                return true;
+            }
+
+            private static float ClampUnit(float value)
+            {
+                if (value <= -1f) { return -1f; }
+                if (value >= 1f) { return 1f; }
+                return value;
+            }
+        }
+
+        /// <summary>
+        /// J1 用的极简 prefab 文本模型：只够核对树/节点/脚本 guid/Sprite guid（不解析 Unity 语义）。
+        ///
+        /// 为什么需要它：Unity 的 GameObject 文档只写“我有这些组件”的引用，组件实体
+        /// （MonoBehaviour / Image / EasyJoystick 字段）在**各自的文档**里；因此每个节点要把自己的文档 +
+        /// 全部组件文档拼起来（<see cref="UiNode.ComponentText"/>），否则 `m_Sprite` / `m_MethodName` /
+        /// `zoneRadius` 这些字段根本读不到。
+        /// </summary>
+        private sealed class UiPrefabModel
+        {
+            public readonly Dictionary<long, UiNode> NodesById = new Dictionary<long, UiNode>();
+            public readonly Dictionary<string, UiNode> NodesByPath =
+                new Dictionary<string, UiNode>(StringComparer.Ordinal);
+            public readonly Dictionary<long, string> ScriptGuidByComponent = new Dictionary<long, string>();
+            public readonly Dictionary<long, string> SpriteGuidByComponent = new Dictionary<long, string>();
+            public readonly List<long> RootIds = new List<long>();
+            public int ParentEdgeCount;
+            public int TransformDocCount;
+            public int OwnerReadCount;
+
+            public static UiPrefabModel Load(string text)
+            {
+                UiPrefabModel model = new UiPrefabModel();
+                Dictionary<long, string> docByFileId = new Dictionary<long, string>();
+                Dictionary<long, long> transformOwner = new Dictionary<long, long>();
+                Dictionary<long, long> transformFather = new Dictionary<long, long>();
+                string[] docs = Regex.Split(text, @"(?m)^--- ");
+
+                for (int i = 0; i < docs.Length; i++)
+                {
+                    string doc = docs[i];
+                    Match head = Regex.Match(doc, @"^!u!(?<class>\d+) &(?<id>-?\d+)");
+                    if (!head.Success) { continue; }
+
+                    int classId = int.Parse(head.Groups["class"].Value, CultureInfo.InvariantCulture);
+                    long fileId = long.Parse(head.Groups["id"].Value, CultureInfo.InvariantCulture);
+                    docByFileId[fileId] = doc;
+
+                    if (classId == 1)
+                    {
+                        UiNode node = new UiNode();
+                        node.Id = fileId;
+                        node.Name = DecodeYamlName(ReadName(doc));
+                        node.Active = ReadInt(doc, "m_IsActive", 1) != 0;
+
+                        foreach (Match component in Regex.Matches(doc, @"- component: \{fileID: (-?\d+)\}"))
+                        {
+                            node.Components.Add(long.Parse(component.Groups[1].Value,
+                                                           CultureInfo.InvariantCulture));
+                        }
+
+                        model.NodesById[fileId] = node;
+                        continue;
+                    }
+
+                    if (classId == 4 || classId == 224)
+                    {
+                        model.TransformDocCount++;
+
+                        // 关键：m_Children / m_Father 里是 **Transform 组件的 fileID**，不是 GameObject 的 fileID。
+                        // 必须先用 m_GameObject 把 Transform 映射回 GameObject，才能建出真实层级
+                        // （早期版本直接拿 m_Children 当 GameObject id，结果一个父边都建不出来）。
+                        long owner = ReadFileId(doc, "m_GameObject");
+                        if (owner == 0) { continue; }
+
+                        model.OwnerReadCount++;
+                        transformOwner[fileId] = owner;
+                        transformFather[fileId] = ReadFileId(doc, "m_Father");
+                        continue;
+                    }
+                    if (classId != 114) { continue; }
+
+                    Match script = Regex.Match(doc, @"m_Script: \{fileID: -?\d+, guid: (?<guid>[0-9a-f]{32})");
+                    if (script.Success) { model.ScriptGuidByComponent[fileId] = script.Groups["guid"].Value; }
+
+                    Match sprite = Regex.Match(doc, @"m_Sprite: \{fileID: \d+, guid: (?<guid>[0-9a-f]{32})");
+                    if (sprite.Success) { model.SpriteGuidByComponent[fileId] = sprite.Groups["guid"].Value; }
+                }
+
+                foreach (KeyValuePair<long, long> entry in transformOwner)
+                {
+                    long childGameObjectId = entry.Value;
+                    long fatherTransformId;
+
+                    if (!transformFather.TryGetValue(entry.Key, out fatherTransformId)) { continue; }
+                    if (fatherTransformId == 0) { continue; }   // 根：没有父 Transform
+
+                    long parentGameObjectId;
+                    if (!transformOwner.TryGetValue(fatherTransformId, out parentGameObjectId)) { continue; }
+
+                    UiNode parentNode;
+                    UiNode childNode;
+                    if (!model.NodesById.TryGetValue(parentGameObjectId, out parentNode)) { continue; }
+                    if (!model.NodesById.TryGetValue(childGameObjectId, out childNode)) { continue; }
+
+                    parentNode.Children.Add(childNode.Id);
+                    childNode.HasParent = true;
+                    model.ParentEdgeCount++;
+                }
+
+                foreach (KeyValuePair<long, UiNode> pair in model.NodesById)
+                {
+                    if (!pair.Value.HasParent) { model.RootIds.Add(pair.Key); }
+                }
+
+                for (int i = 0; i < model.RootIds.Count; i++)
+                {
+                    UiNode node;
+                    if (model.NodesById.TryGetValue(model.RootIds[i], out node))
+                    {
+                        model.AssignPath(node, string.Empty, docByFileId);
+                    }
+                }
+
+                return model;
+            }
+
+            private void AssignPath(UiNode node, string parentPath, Dictionary<long, string> docByFileId)
+            {
+                node.Path = parentPath + "/" + node.Name;
+                NodesByPath[node.Path] = node;
+
+                StringBuilder sb = new StringBuilder();
+                string ownDoc;
+                if (docByFileId.TryGetValue(node.Id, out ownDoc)) { sb.Append(ownDoc); }
+
+                for (int i = 0; i < node.Components.Count; i++)
+                {
+                    string componentDoc;
+                    if (docByFileId.TryGetValue(node.Components[i], out componentDoc))
+                    {
+                        sb.Append('\n').Append(componentDoc);
+                    }
+                }
+
+                node.ComponentText = sb.ToString();
+
+                for (int i = 0; i < node.Children.Count; i++)
+                {
+                    UiNode child;
+                    if (NodesById.TryGetValue(node.Children[i], out child))
+                    {
+                        AssignPath(child, node.Path, docByFileId);
+                    }
+                }
+            }
+
+            public UiNode Find(string relativePath)
+            {
+                UiNode node;
+                return NodesByPath.TryGetValue("/" + relativePath, out node) ? node : null;
+            }
+
+            public bool HasScriptGuid(UiNode node, string guid)
+            {
+                for (int i = 0; i < node.Components.Count; i++)
+                {
+                    string value;
+                    if (ScriptGuidByComponent.TryGetValue(node.Components[i], out value)
+                        && string.Equals(value, guid, StringComparison.Ordinal))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            public string SpriteGuid(UiNode node)
+            {
+                for (int i = 0; i < node.Components.Count; i++)
+                {
+                    string value;
+                    if (SpriteGuidByComponent.TryGetValue(node.Components[i], out value)) { return value; }
+                }
+
+                return null;
+            }
+        }
+
+        /// <summary>J1 用的节点（名字已解 YAML 转义；路径按 `/A/B` 记；ComponentText 含组件文档）。</summary>
+        private sealed class UiNode
+        {
+            public long Id;
+            public string Name = string.Empty;
+            public bool Active;
+            public bool HasParent;
+            public string Path = string.Empty;
+            public string ComponentText = string.Empty;
+            public readonly List<long> Components = new List<long>();
+            public readonly List<long> Children = new List<long>();
+        }
+
+        /// <summary>
+        /// 解 YAML 双引号名字里的转义（旧 prefab 里中文节点名序列化成 "\u80FD\u91CF\u6761" 形式）。
+        /// 只处理 \uXXXX 与 \ / \" —— 够用且不引入 YAML 解析器。
+        /// </summary>
+        private static string DecodeYamlName(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) { return string.Empty; }
+            if (raw.Length < 2 || raw[0] != '"' || raw[raw.Length - 1] != '"') { return raw; }
+
+            string body = raw.Substring(1, raw.Length - 2);
+            StringBuilder sb = new StringBuilder(body.Length);
+
+            for (int i = 0; i < body.Length; i++)
+            {
+                char c = body[i];
+                if ((int)c != 92 || i + 1 >= body.Length)
+                {
+                    sb.Append(c);
+                    continue;
+                }
+
+                char next = body[i + 1];
+                if (next == 'u' && i + 5 < body.Length)
+                {
+                    int code;
+                    if (int.TryParse(body.Substring(i + 2, 4), NumberStyles.HexNumber,
+                                     CultureInfo.InvariantCulture, out code))
+                    {
+                        sb.Append((char)code);
+                        i += 5;
+                        continue;
+                    }
+                }
+
+                if ((int)next == 92 || next == '"')
+                {
+                    sb.Append(next);
+                    i += 1;
+                    continue;
+                }
+
+                sb.Append(c);
+            }
+
+            return sb.ToString();
+        }
         // ==================================================================== 文本取值helpers
 
         private static int ReadInt(string text, string field, int fallback)

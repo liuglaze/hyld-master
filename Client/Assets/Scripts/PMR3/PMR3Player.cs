@@ -558,7 +558,8 @@ namespace PMNet.R3
         //
         //   复制（公共）    _combatHeroId / _combatTeamId / _combatHp / _combatMaxHp
         //                   _combatDead / _combatMatchEnded / _combatWinnerTeamId
-        //   复制（OwnerOnly）_combatMana / _combatSuperEnergy   ← 资源是**权限边界**，不是带宽优化
+        //   复制（OwnerOnly）_combatMana / _combatSuperEnergy / _combatActivationHighWater
+        //                   ← 资源与激活水位都是**权限边界**，不是带宽优化
         //   上行            ServerCombatAttackV1(uint,bool,float,float)  可靠 + ForceValidate
         //                   ServerCombatResultAckV1(uint)                可靠 + ForceValidate
         //   下行            ClientCombatAttackResultV1(uint,bool,int)    可靠（给 owner）
@@ -645,6 +646,14 @@ namespace PMNet.R3
         public int CombatSuperEnergy { get { return _combatSuperEnergy; } }
 
         /// <summary>
+        /// 复制到的本 owner **单调激活水位**（OwnerOnly；非 owner 永远读不到，只读）。
+        ///
+        /// <para>续局/重连时，新的客户端实例据此从水位之后分配下一个 activationId；
+        /// 客户端本地**不能**写它（只有权威 DS 的 Publish 能改）。</para>
+        /// </summary>
+        public uint CombatActivationHighWater { get { return _combatActivationHighWater; } }
+
+        /// <summary>
         /// R6-A2 战斗复制状态（DS 权威 → 各客户端；资源两条仅 owner）。
         ///
         /// 全部写在**公共复制字段**上；资源两条是 OwnerOnly 条件属性 ——
@@ -685,6 +694,19 @@ namespace PMNet.R3
         /// <summary>大招能量：**仅 owner 可见**（OwnerOnly 条件，权限边界）。</summary>
         [PMReplicated(PMCond.OwnerOnly)]
         private int _combatSuperEnergy { get; set; }
+
+        /// <summary>
+        /// 本 owner 的**单调激活水位**（续局用；OwnerOnly 条件，权限边界）。
+        ///
+        /// <para>DS 每次攻击/清账后把权威核心的单调水位发布到这里（含被拒绝/容量拒绝推进的水位）。
+        /// 恢复后的新客户端实例在 Create 初值里拿到它，从水位之后开始分配 activationId ——
+        /// 否则第一枪会拿 ID=1 去撞 core 的 StaleId 与 R5 的同 (owner,activationId) 终态记忆。</para>
+        ///
+        /// <para>**只增不减**：客户端侧吸收时取 max，迟到的旧复制包不得降低已经发出的水位。
+        /// 非 owner 连接在 Create 初值与后续 Update 里都拿不到它（OwnerOnly 不得泄露）。</para>
+        /// </summary>
+        [PMReplicated(PMCond.OwnerOnly)]
+        private uint _combatActivationHighWater { get; set; }
 
         /// <summary>
         /// 战斗复制状态更新的**唯一通知出口**（每个属性的 RepNotify 都汇到这里）。
@@ -732,7 +754,34 @@ namespace PMNet.R3
         }
 
         /// <summary>
-        /// 战斗复制状态通知的统一实现（九条属性的 RepNotify 全部转发到这里）。
+        /// DS 侧写「激活水位」复制属性的唯一出口（与 <see cref="PublishCombatState"/> 同一套权限口径）。
+        ///
+        /// <para>值来自权威核心 <c>PMCombatSession</c> 的单调水位（含被拒绝/容量拒绝推进的水位），
+        /// 因此**只增不减**；R6 DS 每帧比对后发布，新的客户端实例据此从正确水位起分配 activationId。</para>
+        ///
+        /// <para>**权限**：只允许权威（DS）侧写。本副本若已经挂在**非权威**世界上（即 AP 客户端收到的副本），
+        /// 调用会被拒并计入 <see cref="CombatPublishRejectedCount"/>，复制字段保持原值 ——
+        /// 契约 A2 原文「AP 不写复制字段」，客户端本地不能改权威水位。
+        /// 尚未上线（`World == null`）时放行：DS 侧允许「先写好初值再 Spawn」。</para>
+        /// </summary>
+        /// <returns>是否真的写入（false = 被权限拒绝，值未被改动）。</returns>
+        public bool PublishCombatActivationHighWater(uint highWater)
+        {
+            PMNetWorld world = World;
+            if (world != null && !world.IsServer)
+            {
+                CombatPublishRejectedCount++;
+                WarnCombat("[PMR3Player] PublishCombatActivationHighWater 被拒：本副本在非权威世界上"
+                           + "（AP 不写复制字段）：" + GetNameSafe());
+                return false;
+            }
+
+            _combatActivationHighWater = highWater;
+            return true;
+        }
+
+        /// <summary>
+        /// 战斗复制状态通知的统一实现（十条属性的 RepNotify 全部转发到这里）。
         ///
         /// 只做两件事：**通知驱动入队** + **广播本地事件**；两者都逐订阅者隔离异常
         /// （驱动/宿主的 bug 不该让整条复制链炸掉），并计数到
@@ -814,6 +863,10 @@ namespace PMNet.R3
         /// <summary>复制属性 <c>_combatSuperEnergy</c> 的 RepNotify（只通知/入队；OwnerOnly 通道不会对非 owner 触发）。</summary>
         [PMRepNotify(nameof(_combatSuperEnergy))]
         private void OnRep_CombatSuperEnergy() { NotifyCombatStateReplicated(); }
+
+        /// <summary>复制属性 <c>_combatActivationHighWater</c> 的 RepNotify（只通知/入队；OwnerOnly 通道不会对非 owner 触发）。</summary>
+        [PMRepNotify(nameof(_combatActivationHighWater))]
+        private void OnRep_CombatActivationHighWater() { NotifyCombatStateReplicated(); }
 
         /// <summary>
         /// 上行攻击声明：AP → DS（可靠 + 参数域校验）。

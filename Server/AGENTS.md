@@ -91,3 +91,8 @@ Cecil只在net8工具进程里，不是Server/Unity runtime依赖。源码改动
 
 ## 9. 自动属性复制（当前）
 共享声明支持PMReplicated自动属性正常赋值，编织后变化且Authority且PushBased才Mark；Reader只RawSet，不反向标脏。PMR3Player12+PMR5Projectile1成员已同名迁移，ID/hash不变。纯属性零RPC类也纳入编织/构造注册guard。字段手动模式保留，PushBased=false现有真实轮询与可见性/预算公平处理。数组原地修改不承诺自动Push。完整接口net-property-authoring-contract.md；不以build/纯测试冒称Unity实机通过。
+
+
+## 10. T-LOOP 登录/原局续玩当前事实（覆盖上文历史断线立即判负）
+账号登录验证密码后立即绑定真实UID再原子登记，UID0不能入活动索引、同一旧Client别名按引用清、并发第二连接登记失败就回Fail而不顶掉在线玩家；未验证登录/跨账号FindPlayerInfo不能取UID。Lobby正常Running局客户端断开只开30s续局窗口，不即时Shutdown；原局未终局、已认证同uid重新登录才重签**新Nonce**票并自动以PMDSR1通知客户端，超时才按旧掉线判负；第二次真实TCP断线按连接代次再开新episode。同票跨端仍由DS墓碑拒。已结算的上局结果在Lobby内存缓存最多120s，登录后`PMDS-END1`严格解析只读展示胜负，新局进行时不附旧局结果；不伪造BattleReview。
+最新声明含OwnerOnly战斗激活水位，当前生成ProtocolHash **0xAEA98336**、ID锁SHA256 `767c6e0da859defa61bd15e314d633a83b46e1714f37dc5b4f5f183ce9217826`；§6旧值是T-LOOP前历史。所有同版本DS/Client/Lobby重建后才可用。代码full37项通过仍不是两端Unity断线续局实机验收；Lobby重启丢内存账户/结果/局，不承诺跨进程恢复。

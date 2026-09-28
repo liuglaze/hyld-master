@@ -75,6 +75,12 @@ namespace PMR3IntegrationTest
                     fixture.RunCrashBeforeResult();
                     fixture.RunResultAcceptedThenCrash();
                 }
+
+                // 独立新Fixture：不复用已结算局的DS/客户端/票据或控制状态。
+                using (Fixture resumed = new Fixture())
+                {
+                    resumed.RunResumePath();
+                }
             }
             catch (Exception ex)
             {
@@ -297,6 +303,7 @@ namespace PMR3IntegrationTest
                 offer.CollisionDigest = notice.CollisionDigest;
                 offer.Identity = notice.Identity;
                 offer.Ticket = notice.Ticket;
+                offer.IsResume = notice.IsResume;
 
                 string text;
                 try
@@ -310,10 +317,11 @@ namespace PMR3IntegrationTest
                     return false;
                 }
 
-                if (text == null || text.IndexOf(PMDsEntryCodec.Prefix, StringComparison.Ordinal) != 0)
+                string expectedPrefix = notice.IsResume ? PMDsEntryCodec.ResumePrefix : PMDsEntryCodec.Prefix;
+                if (text == null || text.IndexOf(expectedPrefix, StringComparison.Ordinal) != 0)
                 {
                     OfferFailures++;
-                    error = "编码结果缺少 PMDS1: 前缀";
+                    error = "编码结果缺少对应的 PMDS1:/PMDSR1: 完整前缀";
                     return false;
                 }
 
@@ -470,6 +478,20 @@ namespace PMR3IntegrationTest
                 }
 
                 int uid = connection.Identity.Uid;
+                PMR3Player alreadySpawned;
+                if (PlayersByUid.TryGetValue(uid, out alreadySpawned))
+                {
+                    // 与生产 PMDsSessionHost.HandleReconnect 的所有权边界一致：
+                    // 旧连接必须已离开World/桥，新连接才绑定**同一个**权威对象；
+                    // World.AddConnection 在握手激活时已把现存对象排队，稍后真实可靠流发Create。
+                    if (alreadySpawned.OwnerConnection != null && alreadySpawned.OwnerConnection.IsReady)
+                    {
+                        throw new InvalidOperationException("仍活跃的同uid旧连接不可被顶替");
+                    }
+                    alreadySpawned.OwnerConnection = connection;
+                    return;
+                }
+
                 PMR3Player player = PMR3Runtime.SpawnPlayer(World, Bridge, connection);
                 if (player == null)
                 {
@@ -891,6 +913,97 @@ namespace PMR3IntegrationTest
 
                 Console.WriteLine("    （未在 " + maxRounds + " 轮内满足：" + label + "）");
                 return condition();
+            }
+
+            private static bool BytesEqual(byte[] a, byte[] b)
+            {
+                if (a == null || b == null || a.Length != b.Length) { return false; }
+                for (int i = 0; i < a.Length; i++) { if (a[i] != b[i]) { return false; } }
+                return true;
+            }
+
+            // ── T-LOOP7：跨 Lobby/真实 UDP/World 的受控续局字节链 ────────────────
+            public void RunResumePath()
+            {
+                Section("场景 4：原局断线→Lobby重签新票→真实UDP新端点→旧NetId全量Create/OwnerOnly水位");
+                string matchId = "r3b5-resume-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+                Gateway.Online.Add(UidA);
+                Gateway.Online.Add(UidB);
+                Check(Host.TryStartMatch(MakeMatchRequest(matchId, "resume")).IsQueued,
+                    "R1 续局测试开局申请已入队");
+                if (!PumpUntil(() => Launcher.Requests.Count == 1, "续局DS已启动", PhaseBudgetRounds))
+                {
+                    Fail("R2 DS未启动");
+                    return;
+                }
+                PMDsProcessLaunchRequest launch = Launcher.Requests[0];
+                Ds = DsHarness.Start(ArgValue(launch.Arguments, "-bootstrap"), matchId,
+                    ArgValue(launch.Arguments, "-dsid"), ParseInt(ArgValue(launch.Arguments, "-port")),
+                    "127.0.0.1", Host.ControlPort, Warnings);
+                Ds.Process = Launcher.Processes[0];
+                Check(PumpUntil(() => Gateway.Offers.Count == 2, "初次offer", PhaseBudgetRounds),
+                    "R2 普通PMDS1初始offer到达");
+                if (Gateway.Offers.Count < 2) { return; }
+                PMDsEntryOffer original = Gateway.Offers[UidA];
+                Check(!original.IsResume, "R3 初次offer不是续局");
+                Clients.Add(ClientHarness.Enter(original, Warnings));
+                Clients.Add(ClientHarness.Enter(Gateway.Offers[UidB], Warnings));
+                Check(PumpUntil(() => Ds.PlayersByUid.Count == 2 && Clients[0].OwnReplica != null
+                    && Clients[1].OwnReplica != null && Clients[0].World.ObjectCount == 2,
+                    "两端全量Create", PhaseBudgetRounds), "R4 双端真实UDP握手及World Create到达");
+                if (!Ds.PlayersByUid.ContainsKey(UidA) || Clients[0].OwnReplica == null) { return; }
+                PMR3Player authority = Ds.PlayersByUid[UidA];
+                uint savedNetId = authority.NetId.Value;
+                Check(authority.PublishCombatActivationHighWater(17u),
+                    "R5 DS权威写入OwnerOnly激活水位17（非客户端自报）");
+                Check(PumpUntil(() => Clients[0].OwnReplica.CombatActivationHighWater == 17u,
+                    "OwnerOnly水位复制", PhaseBudgetRounds), "R6 OwnerOnly更新走真实复制字节链");
+
+                // 真实客户端端点关闭；服务端账本必须先释放旧绑定并留票据墓碑。
+                Clients[0].Dispose();
+                Clients.RemoveAt(0);
+                Gateway.Online.Remove(UidA);
+                Host.NotifyClientDisconnected(UidA, 101L);
+                Check(PumpUntil(() => Ds.Endpoint.ConnectionCount == 1,
+                    "旧UDP断开释放", PhaseBudgetRounds), "R7 旧UDP会话已释放uid占用");
+                Check(Host.ClientDisconnectsHeld > 0 && Host.ClientDisconnectAborts == 0,
+                    "R8 Lobby保持原局而不立即中止");
+
+                long rejectedBefore = Ds.Endpoint.HandshakeRejections;
+                ClientHarness stale = ClientHarness.Enter(original, Warnings);
+                Clients.Add(stale);
+                Check(PumpUntil(() => Ds.Endpoint.HandshakeRejections > rejectedBefore,
+                    "旧票新端点被拒", 40), "R9 旧票在新端点真实握手被DS墓碑拒绝");
+                Check(stale.Endpoint.ClientConnection == null,
+                    "R10 旧票没有建立任何新客户端会话");
+                stale.Dispose();
+                Clients.Remove(stale);
+
+                Gateway.Online.Add(UidA);
+                Check(Host.TryRequestResumeEntry(UidA), "R11 已认证同账号自动申请原局新票");
+                Check(PumpUntil(() => Gateway.Offers[UidA].IsResume,
+                    "Lobby续局offer", PhaseBudgetRounds), "R12 新offer已生成并经真实codec解码");
+                PMDsEntryOffer fresh = Gateway.Offers[UidA];
+                Check(fresh.IsResume && Gateway.EntryTexts[UidA].StartsWith(PMDsEntryCodec.ResumePrefix,
+                    StringComparison.Ordinal) && !BytesEqual(fresh.Ticket, original.Ticket),
+                    "R13 新Nonce票用PMDSR1前缀、旧票字节不复用");
+                Clients.Add(ClientHarness.Enter(fresh, Warnings));
+                ClientHarness rejoined = Clients[Clients.Count - 1];
+                Check(PumpUntil(() => Ds.Endpoint.ConnectionCount == 2
+                    && rejoined.OwnReplica != null && rejoined.World.ObjectCount == 2,
+                    "新UDP端点重建World", PhaseBudgetRounds),
+                    "R14 新UDP端点从同一DS收到两名玩家全量Create");
+                Check(Ds.World.ObjectCount == 2 && Ds.SpawnedOrder.Count == 2
+                    && Ds.PlayersByUid[UidA].NetId.Value == savedNetId,
+                    "R15 DS不Spawn第二个权威玩家且NetId未变");
+                Check(rejoined.OwnReplica != null && rejoined.OwnReplica.NetId.Value == savedNetId
+                    && rejoined.OwnReplica.Role == PMNetRole.AutonomousProxy,
+                    "R16 新World收到原NetId的AP副本（OwnerConnection重绑）");
+                Check(rejoined.OwnReplica != null && rejoined.OwnReplica.CombatActivationHighWater == 17u,
+                    "R17 续局Create初值包含OwnerOnly当前攻击水位17");
+                Check(Ds.FindServerConnection(UidA) != null
+                    && ReferenceEquals(Ds.PlayersByUid[UidA].OwnerConnection, Ds.FindServerConnection(UidA)),
+                    "R18 DS唯一OwnerConnection已换成新端点");
             }
 
             // ── 场景 1：完整成功闭环 ───────────────────────────────────────────

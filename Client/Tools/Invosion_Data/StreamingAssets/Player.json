@@ -1,0 +1,10 @@
+{
+  "Player": [
+    {
+      "QjiNengLengQue": 1.5,
+      "Speed": 15,
+      "Blood": 5,
+       "BackForce":3 
+    }
+  ]
+}

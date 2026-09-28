@@ -64,6 +64,9 @@ namespace PMR4NetworkTest
             Section("I. DS 预算与信用（防加速 / 同 tick 不重复充值 / 0dt 拒绝）", TestBudgetAndCredit);
             Section("J. 多角色隔离", TestMultiPlayerIsolation);
             Section("K. 冻结 / 释放 / 诊断", TestLifecycle);
+            Section("L. T-LOOP5 断线宽限窗口（注入墙钟：30s 内可恢复 / 到期与终局拒恢复）", TestDisconnectGraceWindow);
+            Section("M. T-LOOP5 重绑：不 Spawn 新 NetId、升流保位、旧流输入拒绝（真实字节链）",
+                TestReconnectRebindKeepsAuthoritativeState);
 
             Console.WriteLine();
             Console.WriteLine("==================================================");
@@ -280,13 +283,13 @@ namespace PMR4NetworkTest
 
             // A3：运行期描述符（零反射注册表）。
             CheckTrue(PMNetRegistry.IsSealed, "注册表已封板");
-            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 12, "复制属性位宽 == 12（R4原3项 + R6战斗9项）");
+            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 13, "复制属性位宽 == 13（R4原3项 + R6战斗9项 + 续局OwnerOnly水位1项）");
             CheckEq(PMR3Player.PMGeneratedClassId, 405815557u, "运行期 ClassId 与锁一致");
 
             PMNetClassEntry entry;
             CheckTrue(PMNetRegistry.TryGetClass(PMR3Player.PMGeneratedClassId, out entry) && entry != null,
                 "PMR3Player 已注册");
-            CheckEq(entry.Rep.Properties.Length, 12, "复制描述符属性数 == 12（含R6战斗属性）");
+            CheckEq(entry.Rep.Properties.Length, 13, "复制描述符属性数 == 13（含续局OwnerOnly水位）");
 
             PMNetRpcEntry rpc;
             CheckTrue(PMNetRegistry.TryGetRpc(PMR3Player.PMGeneratedClassId,
@@ -1431,6 +1434,52 @@ namespace PMR4NetworkTest
                     PMSessionPeerRole.Server, uid, uid, uid, clientLink));
             }
 
+            /// <summary>
+            /// T-LOOP5：把 <paramref name="index"/> 这条客户端位当成「已断线的旧端点」释放。
+            /// 两侧都真实断开（传输层 Disconnect ⇒ 桥成对摘除世界/复制登记）。
+            /// </summary>
+            public void DisconnectClient(int index)
+            {
+                ServerViews[index].Connection.Dispose();
+                ClientConnections[index].Connection.Dispose();
+            }
+
+            /// <summary>
+            /// T-LOOP5：为**同一个 uid** 建一套新端点（新 ConnectionId，不复用）并当场激活，
+            /// 模拟「客户端拿新票据回来」。返回新连接的下标。
+            ///
+            /// 为什么必须先调 <see cref="DisconnectClient"/>：桥的接受规则里
+            /// 「同一 uid 不得两条活跃连接」是真规则（防顶号），所以重连一定是
+            /// 「旧端点已不再就绪」之后的第二条连接。
+            /// </summary>
+            public int AttachReplacementClient(int uid)
+            {
+                int connectionId = ServerViews.Count + 1;
+                EndpointRow client = NewEndpoint("client" + connectionId, false, Epoch, PMR3Runtime.ProtocolHash);
+                ClientEndpoints.Add(client);
+
+                TestLink serverLink = Hub.AddLink("server->c" + connectionId);
+                TestLink clientLink = Hub.AddLink("c" + connectionId + "->server");
+                Hub.Connect(serverLink, clientLink);
+
+                ConnectionRow newServer = NewConnection(Server, "serverView" + connectionId, connectionId,
+                    PMSessionPeerRole.Client, uid, uid, uid, serverLink);
+                ConnectionRow newClient = NewConnection(client, "client" + connectionId, 1,
+                    PMSessionPeerRole.Server, uid, uid, uid, clientLink);
+
+                ServerViews.Add(newServer);
+                ClientConnections.Add(newClient);
+
+                string error;
+                CheckTrue(newServer.Connection.TryActivate(out error),
+                    "重连：新端点服务端视图激活成功（" + (error ?? "ok") + "）");
+                CheckTrue(newClient.Connection.TryActivate(out error),
+                    "重连：新端点客户端连接激活成功（" + (error ?? "ok") + "）");
+
+                PMR3Runtime.Attach(client.World, client.Bridge);
+                return ServerViews.Count - 1;
+            }
+
             private ConnectionRow NewConnection(EndpointRow owner, string name, int connectionId,
                                                PMSessionPeerRole peerRole, int uid, int playerId, int teamId,
                                                TestLink link)
@@ -2185,10 +2234,22 @@ namespace PMR4NetworkTest
                 catch (InvalidOperationException) { pumpThrew = true; }
                 CheckTrue(pumpThrew, "SP 调用 Pump 被显式拒绝（不权威模拟）");
 
+                PMInterpolatedState<PMMoverSyncState, PMMoverAuxState> beforeMove = sp.SamplePresentation();
                 for (int i = 0; i < 8; i++)
                 {
                     c.Step(16, Move(0f, 1f, 0f, false));
                 }
+                c.Settle();
+                PMMoverSyncState authorityAfterMove = c.DsDriver.GetAuthoritativeSync();
+                PMInterpolatedState<PMMoverSyncState, PMMoverAuxState> afterMove = sp.SamplePresentation();
+                // T-MOVE2：旧 H1 只断言“快照数增加”，即使 SP 永远停出生点也绿。
+                // 新增**位移**断言，分别覆盖 DS 真值确实推进、SP 表现样本跟着推进。
+                CheckTrue(beforeMove.HasValue && afterMove.HasValue
+                    && authorityAfterMove.Position.Z > beforeMove.Sync.Position.Z + 0.05f,
+                    "SP-H1a DS 权威位置确实前进（非只发了重复快照）");
+                CheckTrue(beforeMove.HasValue && afterMove.HasValue
+                    && afterMove.Sync.Position.Z > beforeMove.Sync.Position.Z + 0.05f,
+                    "SP-H1b 真实复制链下 SP 表现样本确实离开出生点");
 
                 CheckTrue(sp.Interpolation.AuthorityAccepted > 0, "SP 收到并接受了权威快照（真实复制链）");
                 CheckTrue(sp.Interpolation.Samples >= 0, "SP 采样计数可读");
@@ -2859,6 +2920,298 @@ namespace PMR4NetworkTest
             }
             finally
             {
+                if (c != null) { c.Dispose(); }
+                ReplicatedPlayers.Clear();
+            }
+        }
+
+        // =================================================================================
+        //  L. T-LOOP5：断线宽限窗口（纯逻辑 + 注入墙钟）
+        // =================================================================================
+
+        /// <summary>
+        /// 为什么要有这一节：宿主（PMDsSessionHost）需要 Unity 才能跑，本工程跑不起来；
+        /// 但「30s 内可恢复 / 到期不可恢复 / 终局一律不可恢复 / 重复观察不延期」是**纯时序判定**，
+        /// 由 <see cref="PMR4DisconnectGraceWindow"/> 以注入时钟实现。
+        ///
+        /// 本节每一条都是**修前反例**：若把宽限写成「一断线就清理/判负」或「每帧重置起点」，
+        /// 下面的断言就会红。真实 DS 进程上的 30s 行为（含真实 UDP 空闲超时带来的观测延迟）
+        /// 仍属 T-LOOP8 实机验收 —— 本工程**不冒充**实机。
+        /// </summary>
+        private static void TestDisconnectGraceWindow()
+        {
+            const int uid = 71;
+            PMR4DisconnectGraceWindow w = new PMR4DisconnectGraceWindow(PMR4DisconnectGraceWindow.DefaultGraceMs);
+            CheckEq(w.GraceMs, 30000, "宽限常量 = 30s（T-LOOP1 v1 冻结值）");
+            CheckEq(w.TrackedCount, 0, "初始没有任何 uid 被跟踪");
+
+            long start = 1000L;
+            CheckTrue(w.ObserveDisconnected(uid, start, start), "首次观察进入宽限（elapsed=0）");
+            CheckEq(w.Started, 1L, "起点只记一次");
+            CheckEq(w.SinceMs(uid), start, "起点 = 传入的「最后一次真实入站流量」时刻");
+
+            // 重复观察不延期：宿主每帧都会看到同一个断线事实。
+            bool stillWithin = true;
+            for (long t = start; t <= start + 20000L; t += 1000L)
+            {
+                if (!w.ObserveDisconnected(uid, start, t)) { stillWithin = false; }
+            }
+
+            CheckTrue(stillWithin, "重复观察期间一直判定「仍在宽限」");
+            CheckEq(w.SinceMs(uid), start, "重复观察不重置起点（不因每帧看到断线而无限延期）");
+
+            CheckTrue(w.IsWithinGrace(uid, start + 29999L), "断线 29.999s 仍在宽限内");
+            CheckTrue(w.TryAuthorizeRebind(uid, start + 29000L, false), "★ 29s 时新票据重绑被允许");
+            CheckTrue(!w.IsTracked(uid), "允许重绑即摘除记录（一次断线只恢复一次）");
+            CheckEq(w.Recovered, 1L, "恢复计数");
+
+            // 重新断线要重新计时，而不是沿用旧起点。
+            long second = start + 29000L;
+            CheckTrue(w.ObserveDisconnected(uid, second, second), "再次断线重新进入宽限");
+            CheckEq(w.SinceMs(uid), second, "第二次断线的起点是新的");
+            CheckTrue(w.IsWithinGrace(uid, second + 29000L), "第二次断线 29s 仍在宽限内");
+
+            // 到期：不可恢复，且记录**保留**为墓碑（迟到的重绑一律拒）。
+            CheckTrue(!w.IsWithinGrace(uid, second + 30000L), "断线 30s 到期");
+            CheckTrue(!w.ObserveDisconnected(uid, second, second + 30000L),
+                "★ 到期后观察返回 false（宿主据此走原清理/胜负）");
+            CheckTrue(!w.TryAuthorizeRebind(uid, second + 31000L, false), "★ 到期后迟到的新票据重绑被拒");
+            CheckEq(w.RebindRefusedExpired, 1L, "到期拒绝计数");
+            CheckTrue(w.IsTracked(uid),
+                "到期记录保留为墓碑（清理之后不得再把该 uid 当『刚刚断线』放进来）");
+            CheckTrue(!w.TryAuthorizeRebind(uid, second + 60000L, false), "★ 更晚的重绑仍然被拒（墓碑不随时间失效）");
+
+            // 终局一律拒（不可逆）。
+            CheckTrue(!w.TryAuthorizeRebind(uid, second + 1L, true), "★ 终局拒绝重绑");
+            CheckEq(w.RebindRefusedEnded, 1L, "终局拒绝计数");
+
+            // 未跟踪 uid = 同帧断线 + 重连（宿主那一帧还没来得及跑断线观察）：必须可用。
+            CheckTrue(w.TryAuthorizeRebind(99, 5L, false), "未跟踪 uid 按『刚刚断开』放行（同帧断线+重连）");
+            CheckEq(w.Recovered, 2L, "未跟踪放行也计一次恢复");
+
+            // 反例：宽限不能为 0/负（否则退化成「一断线就清理」）。
+            bool ctorThrew = false;
+            try { new PMR4DisconnectGraceWindow(0); }
+            catch (ArgumentOutOfRangeException) { ctorThrew = true; }
+            CheckTrue(ctorThrew, "宽限 0 毫秒被拒绝（不允许退化成「一断线就清理」）");
+        }
+
+        // =================================================================================
+        //  M. T-LOOP5：断线重绑（不 Spawn 新 NetId / 升流保位 / 旧流输入拒绝，真实字节链）
+        // =================================================================================
+
+        /// <summary>
+        /// 覆盖 T-LOOP5 的三个验收事实（除单列说明外全部走真实 PMTransport + 真实生成桩）：
+        ///   1) 宽限期间：挂起的权威**不采纳输入、不推进**（位姿/输出边界/累计仿真时间一律不变）；
+        ///   2) 新票据重绑：**不 Spawn 第二个 NetId**，唯一 OwnerConnection 换成新端点，
+        ///      并从**当前**权威位姿/输出边界升流 + 发布完整快照（新客户端据此重建 AP，位置不回档到出生点）；
+        ///   3) 旧流输入在真实链路上被拒（升流后旧 stream 的载荷不得再推动权威）。
+        ///
+        /// 边界（诚实口径）：本工程不能跑 Unity 宿主，因此「宿主在哪一帧调 Suspend/Resume/BeginServerResync」
+        /// 由本测试按冻结次序复现；宽限期间那一包输入按 DS 的**接收实现入口**注入（旧端点已真实释放，
+        /// 网络上根本没有第二条能到达该驱动的连接）——载荷仍是真实 codec 字节，且源流号与当时一致，
+        /// 因此“它被丢的唯一理由就是已挂起”是可断言的。真实 UDP 断开与真实 DS 进程属 T-LOOP8。
+        /// </summary>
+        private static void TestReconnectRebindKeepsAuthoritativeState()
+        {
+            PlayerCase c = null;
+            PMR4MovementDriver newAp = null;
+            try
+            {
+                c = PlayerCase.Build(0x4B0Cu, new[] { 61, 62 }, 0);
+                if (c.ApDriver == null || c.DsDriver == null) { return; }
+
+                for (int i = 0; i < 20; i++)
+                {
+                    c.Step(16, Move(0f, 1f, 0f, false));
+                }
+
+                c.Settle();
+
+                uint netId = c.ServerPlayer.NetId.Value;
+                PMMoverSyncState authBefore = c.DsDriver.GetAuthoritativeSync();
+                long boundaryBefore = c.DsDriver.OutputBoundary.Value;
+                double simBefore = c.DsDriver.AuthorityTotalSimTimeMs;
+                uint streamBefore = c.DsDriver.StreamVersion;
+                float spawnZ = PlayerCase.CreateInitialSync().Position.Z;
+
+                CheckTrue(authBefore.Position.Z > 0.5f,
+                    "M1 断线前权威位置确实前进了（Z=" + authBefore.Position.Z + "）");
+                CheckTrue(Math.Abs(authBefore.Position.Z - spawnZ) > 0.5f, "M1b 权威位置已明显离开出生点");
+
+                // ---- 旧端点断开（真实传输断开，不删对象、不 Dispose driver） ----
+                c.Rig.DisconnectClient(c.OwnerIndex);
+                CheckTrue(!c.ServerPlayer.OwnerConnection.IsReady, "M2 旧端点不再就绪（断线事实由传输层产生）");
+                CheckTrue(c.DsDriver.SuspendAuthorityForDisconnect("test-grace"),
+                    "M3 断线挂起建立（宽限期间不采纳输入/不推进）");
+                CheckTrue(c.DsDriver.IsAuthoritySuspended, "M3b 驱动处于断线挂起态");
+                CheckTrue(c.DsDriver.IsFrozen, "M3c 挂起同时置位 frozen（复用宿主『冻结即不 Pump/不授权』口径）");
+
+                // ---- 宽限期间：同流合法输入被丢弃、Pump 不推进 ----
+                PMR4MovementInputEntry[] graceEntries = new PMR4MovementInputEntry[1];
+                graceEntries[0].InputFrame = boundaryBefore;
+                graceEntries[0].StepMs = 16;
+                graceEntries[0].Input = Move(0f, 1f, 0f, false);
+                byte[] gracePayload = PMR4MovementCodec.EncodeInputs(c.Epoch, netId, streamBefore, graceEntries);
+
+                c.DsDriver.OnServerInputPayload(gracePayload);
+
+                for (int i = 0; i < 30; i++)
+                {
+                    c.Rig.Frame(1);
+                    c.DsDriver.Update(16.0);
+                    c.DsDriver.Pump(16.0, c.ServerFrameId());
+                    c.ServerFrame++;
+                }
+
+                CheckTrue(c.DsDriver.AuthoritySuspendedInputsDropped > 0,
+                    "M4 ★ 宽限期间入站输入被丢弃（不采纳），dropped=" + c.DsDriver.AuthoritySuspendedInputsDropped);
+                CheckTrue(c.DsDriver.AuthoritySuspendedPumpSkips > 0, "M4b ★ 宽限期间 Pump 被拒绝推进");
+                CheckEq(c.DsDriver.OutputBoundary.Value, boundaryBefore, "M5 ★ 宽限期间输出边界不前进（原地）");
+                CheckTrue(Math.Abs(c.DsDriver.AuthorityTotalSimTimeMs - simBefore) < 0.0001,
+                    "M5b ★ 宽限期间累计仿真时间不前进（实际 "
+                    + c.DsDriver.AuthorityTotalSimTimeMs.ToString("0.###") + "）");
+                CheckVec(c.DsDriver.GetAuthoritativeSync().Position, authBefore.Position, 0.0001f,
+                    "M5c ★ 宽限期间权威位姿逐位不变（角色原地留在战场）");
+
+                // ---- 新票据端点接入 + 宿主重绑（不 Spawn 第二个 NetId） ----
+                int newIndex = c.Rig.AttachReplacementClient(c.ServerPlayer.Uid);
+                CheckTrue(c.Rig.ServerView(newIndex).IsReady, "M6 新端点已激活");
+                CheckEq(c.DsDriver.StreamVersion, streamBefore, "M6b 重绑前流代次未变");
+                CheckTrue(!c.Rig.ServerView(c.OwnerIndex).IsReady, "M6c 旧端点仍未就绪（没有顶号）");
+
+                c.ServerPlayer.OwnerConnection = c.Rig.ServerView(newIndex);   // 宿主 OnConnected 的动作
+                CheckTrue(c.DsDriver.ResumeAuthorityAfterReconnect("test-rebind"),
+                    "M7 权威运动恢复（仅断线挂起可恢复）");
+
+                // Create 必须先入可靠流：让 bridge.Update 把新端点的 Create 发出去。
+                // 两帧：本工程的手工 hub 在帧末才路由，客户端下一帧才排空（真实链路，不是绕过）。
+                c.Rig.Frame(2);
+
+                PMNetObject createdObj;
+                bool found = c.Rig.ClientWorld(newIndex).TryFind(c.ServerPlayer.NetId, out createdObj)
+                             && createdObj != null;
+                CheckTrue(found, "M8 新客户端收到既有权威对象的 Create（同一 NetId）");
+                if (!found) { return; }
+
+                PMR3Player newOwnerReplica = createdObj as PMR3Player;
+                CheckTrue(newOwnerReplica != null, "M8b Create 出来的仍是 PMR3Player");
+                if (newOwnerReplica == null) { return; }
+
+                CheckEq(newOwnerReplica.NetId.Value, netId, "M8d ★ 副本 NetId 与断线前**同一个**（没有 Spawn 第二个 NetId）");
+                CheckEq(c.DsDriver.OutputBoundary.Value, boundaryBefore, "M8e 建 Create 本身不改权威边界");
+
+                string error;
+                newAp = PMR4MovementDriver.CreateFromPlayerInitialSnapshot(
+                    newOwnerReplica, c.ClientWorld, c.Epoch, out error);
+                CheckTrue(newAp != null, "M9 新客户端按 Create 初值建立 AP Driver（" + (error ?? "ok") + "）");
+                if (newAp == null) { return; }
+
+                // ---- 升流 + 完整快照（宿主在 endpoint.Pump 之后执行） ----
+                CheckTrue(c.DsDriver.BeginServerResync("ds-reconnect-rebind"),
+                    "M10 从当前权威边界升流并发布完整快照");
+                CheckEq(c.DsDriver.StreamVersion, streamBefore + 1u, "M10b ★ 流代次 +1（由 DS 决定，客户端不得自升）");
+                CheckEq(c.DsDriver.OutputBoundary.Value, boundaryBefore, "M10c 升流不推进输出边界（安全升流）");
+
+                for (int i = 0; i < 3; i++)
+                {
+                    c.Rig.Frame(1);
+                    newAp.Update(0.0);
+                    c.ApDriver.Update(0.0);
+                }
+
+                CheckEq(newAp.StreamVersion, c.DsDriver.StreamVersion, "M11 ★ 新 AP 重绑到 DS 新流");
+                CheckTrue(newAp.SnapshotPayloadsApplied > 0 || newAp.ResyncApplied > 0,
+                    "M11b 新 AP 真的应用了权威快照/重同步载荷（复制通道真的在用）");
+                CheckTrue(newAp.OutputBoundary.Value >= boundaryBefore, "M11c 新 AP 输出边界不倒退");
+                CheckVec(newAp.GetPredictedSync().Position, authBefore.Position, 0.05f,
+                    "M12 ★★ 新 AP 位置 = 断线前权威位置（不回档到出生点）");
+                CheckTrue(Math.Abs(newAp.GetPredictedSync().Position.Z - spawnZ) > 0.5f,
+                    "M12b ★★ 新 AP 位置确实不是出生点");
+
+                // SP（另一名玩家看到的该副本）也必须被新流快照重绑，且位置不回档。
+                CheckTrue(c.SpDrivers.Count >= 1, "M13 旁观者 SP 存在");
+                if (c.SpDrivers.Count >= 1)
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        c.Rig.Frame(1);
+                        c.SpDrivers[0].Update(16.0);
+                        c.SpDrivers[0].Advance(16.0);
+                    }
+
+                    CheckEq(c.SpDrivers[0].StreamVersion, c.DsDriver.StreamVersion,
+                        "M13b ★ 旁观者 SP 经复制快照重绑到新流");
+                    CheckTrue(c.SpDrivers[0].SnapshotStreamRebinds > 0, "M13c SP 记录到一次流重绑");
+                }
+
+                // ---- 旧流输入在真实链路上被拒（真实 RPC + 真实传输） ----
+                long staleBoundary = c.DsDriver.OutputBoundary.Value;
+                PMMoverSyncState staleAuth = c.DsDriver.GetAuthoritativeSync();
+                long rejectedBefore = c.DsDriver.InputRejectedStream;
+
+                PMR4MovementInputEntry[] staleEntries = new PMR4MovementInputEntry[1];
+                staleEntries[0].InputFrame = staleBoundary;
+                staleEntries[0].StepMs = 16;
+                staleEntries[0].Input = Move(0f, 1f, 0f, false);
+                byte[] stalePayload = PMR4MovementCodec.EncodeInputs(c.Epoch, netId, streamBefore, staleEntries);
+
+                newOwnerReplica.ServerMovementInputV1(stalePayload);   // 真实 RPC（新端点）→ 真实传输 → DS
+
+                for (int i = 0; i < 3; i++)
+                {
+                    c.Rig.Frame(1);
+                    c.DsDriver.Update(16.0);
+                    c.DsDriver.Pump(16.0, c.ServerFrameId());
+                    c.ServerFrame++;
+                }
+
+                CheckTrue(c.DsDriver.InputRejectedStream > rejectedBefore,
+                    "M14 ★★ 旧流输入在真实链路上被 DS 拒绝，rejected=" + c.DsDriver.InputRejectedStream);
+                CheckEq(c.DsDriver.OutputBoundary.Value, staleBoundary, "M14b 被拒的旧流输入不推进权威边界");
+                CheckVec(c.DsDriver.GetAuthoritativeSync().Position, staleAuth.Position, 0.0001f,
+                    "M14c 被拒的旧流输入不改变权威位姿");
+
+                // ---- 新流上的新输入必须能被接纳（否则重连就是「能连不能玩」） ----
+                PMR4MovementInputEntry[] freshEntries = new PMR4MovementInputEntry[1];
+                freshEntries[0].InputFrame = c.DsDriver.AuthorityNextInputFrame;
+                freshEntries[0].StepMs = 16;
+                freshEntries[0].Input = Move(0f, 1f, 0f, false);
+                byte[] freshPayload = PMR4MovementCodec.EncodeInputs(
+                    c.Epoch, netId, c.DsDriver.StreamVersion, freshEntries);
+
+                newOwnerReplica.ServerMovementInputV1(freshPayload);
+
+                long admittedBefore = c.DsDriver.InputsAdmitted;
+                for (int i = 0; i < 3; i++)
+                {
+                    c.Rig.Frame(1);
+                    c.DsDriver.Update(16.0);
+                    c.DsDriver.Pump(16.0, c.ServerFrameId());
+                    c.ServerFrame++;
+                }
+
+                CheckTrue(c.DsDriver.InputsAdmitted > admittedBefore,
+                    "M15 ★ 新流上的新输入被接纳（重连后可继续操作）");
+                CheckTrue(c.DsDriver.OutputBoundary.Value > staleBoundary, "M15b 新流输入真的推动了权威边界");
+
+                // 只有「断线挂起」可恢复：非挂起状态下的恢复调用必须被拒。
+                CheckTrue(!c.DsDriver.ResumeAuthorityAfterReconnect("should-not-apply"),
+                    "M16 非挂起状态下不允许『恢复』（只有断线挂起可恢复）");
+                CheckEq(c.DsDriver.AuthorityResumeRejected, 1L, "M16b 拒绝计数");
+
+                // 死亡/终局冻结的驱动不得被「重连」解冻：先 Freeze 再尝试挂起，必须被拒。
+                c.DsDriver.Freeze();
+                CheckTrue(!c.DsDriver.SuspendAuthorityForDisconnect("must-not-suspend-when-already-frozen"),
+                    "M17 ★ 已被冻结（死亡/终局）的驱动不得建立可恢复挂起");
+                CheckEq(c.DsDriver.AuthoritySuspendRejectedFrozen, 1L, "M17b 拒绝计数");
+                CheckTrue(!c.DsDriver.ResumeAuthorityAfterReconnect("must-not-resume-frozen"),
+                    "M17c ★ 被拒的挂起没有被恢复（死者不得被重连复活）");
+                CheckTrue(c.DsDriver.IsFrozen, "M17d 驱动保持冻结");
+            }
+            finally
+            {
+                if (newAp != null) { newAp.Dispose(); }
                 if (c != null) { c.Dispose(); }
                 ReplicatedPlayers.Clear();
             }

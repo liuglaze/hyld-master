@@ -11,10 +11,17 @@
 
       它编什么（都是**真实源码**，不复制、不快照）：
         · Client/Assets/Scripts/PMUnity/PMUnityMoverInput.cs（被测对象）；
+        · Client/Assets/Scripts/PMUnity/PMBattleCameraGeometry.cs（本轮视觉修复的**纯几何**被测对象）；
         · Client/Assets/Scripts/PMMover/PMMoverState.cs（PMVector3 / PMMoverInput / PMMoverDefaults）；
         · Client/Assets/Scripts/PMMover/IPMMoverCollisionQuery.cs（PMVector3 的类型依赖面）；
         · Program.cs 尾部的 UnityEngine 替身（**只**桩 Input / KeyCode 两个类型；见该处边界声明）——
           刻意不做成独立文件：B2 契约限定「新测试工程最多 Program.cs/csproj」。
+
+      为什么纯几何适配器能在这里真跑而物理不能：
+        PMBattleCameraGeometry.cs 刻意**不引用 UnityEngine**（只用 System.Math + PMVector3），
+        因此“固定方位角 / 观察目标 / 后距与近裁面 / 遮挡回退”这些算法可以逐条断言，
+        包括“旧挂根节点时按 owner Yaw 瞬转”的回归反例。真实射线由宿主在 Unity 内做，
+        本工程不假装验物理。
 
       **它刻意不编什么**（这是本工程最重要的边界）：
         · 不编 PMUnityMoverCollisionQuery.cs / PMUnityMoverPresentation.cs —— 它们依赖
@@ -42,6 +49,9 @@
     <Compile Include="Program.cs" />
 
     <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityMoverInput.cs" LinkBase="PMUnity" />
+    <!-- 零 UnityEngine 依赖的 UI 摇杆计算直接编真实源码（非镜像），完整 uGUI 另由 PMR4UnityCheck 验。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityBattleControls.cs" LinkBase="PMUnity" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMBattleCameraGeometry.cs" LinkBase="PMUnity" />
     <Compile Include="..\..\Client\Assets\Scripts\PMMover\PMMoverState.cs" LinkBase="PMMover" />
     <Compile Include="..\..\Client\Assets\Scripts\PMMover\IPMMoverCollisionQuery.cs" LinkBase="PMMover" />
   </ItemGroup>

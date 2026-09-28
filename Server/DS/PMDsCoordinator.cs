@@ -570,6 +570,15 @@ namespace PMNet.Control
         /// <summary>签发的票据张数。</summary>
         public long TicketsIssued;
 
+        /// <summary>
+        /// T-LOOP4：为「原局断线续玩」**轮转 Nonce 重签**的票据张数。
+        ///
+        /// 为什么与 <see cref="TicketsIssued"/> 分开：普通签发对同一身份在有效期内是**幂等**的
+        /// （返回同一张票），而续玩必须换新 Nonce —— 旧票在 DS 端点账本里已经留下消费墓碑，
+        /// 复用旧票字节等于让新端点被拒。本计数非零即证明「确实轮转过 Nonce」。
+        /// </summary>
+        public long TicketsReissued;
+
         /// <summary>票据校验通过次数。</summary>
         public long TicketAccepted;
 
@@ -2180,6 +2189,46 @@ namespace PMNet.Control
 
             PMDsTicket ticket = _issuer.Issue(identity, nowUnixSeconds);
             _counters.TicketsIssued++;
+            return ticket;
+        }
+
+        /// <summary>
+        /// T-LOOP4：为「原局断线续玩」重签一张**新 Nonce** 的票据。
+        ///
+        /// 绑定关系与普通票完全一致（同 MatchId / DsId / Epoch / ProtocolHash / 名册身份 / 密钥），
+        /// 因此 DS 侧的验票（按密钥 + 名册，不按引导票字节比对）照常通过；
+        /// 唯一区别是 Nonce/有效期是新的，旧票在端点账本里的墓碑不会误伤新端点。
+        ///
+        /// 刻意做的限制（fail-closed）：
+        /// - **只允许 <see cref="PMDsSessionState.Running"/>**：终局不可逆，已受理结果或已失败/超时的局
+        ///   不得再发任何票；启动中/就绪中也没有可供续玩的权威会话。
+        /// - 身份只从**本局名册**取，不接受调用方自报 uid 之外的任何字段。
+        /// - 调用方（Lobby 宿主）负责「该 uid 曾真实断开且仍在 30 秒窗口内」与 episode 幂等；
+        ///   本方法每次调用都会轮转 Nonce，**重复调用即滚票**，所以宿主必须按 episode 缓存。
+        /// </summary>
+        public PMDsTicket ReissueTicket(int uid, long nowUnixSeconds)
+        {
+            if (_state != PMDsSessionState.Running)
+            {
+                throw new InvalidOperationException(
+                    "原局续玩只允许对非终局 Running 会话重签票据（当前 " + _state + "）");
+            }
+
+            if (_issuer == null)
+            {
+                throw new InvalidOperationException("尚未分配会话");
+            }
+
+            PMDsRosterIdentity identity;
+            if (!TryGetRosterIdentity(uid, out identity))
+            {
+                throw new ArgumentException("uid " + uid + " 不在本局名册内", "uid");
+            }
+
+            // 必须先撤销该身份的既有票，再签发：保留旧条目会让 Issue 走幂等分支返回**同一张旧票**。
+            _issuer.Revoke(uid);
+            PMDsTicket ticket = _issuer.Issue(identity, nowUnixSeconds);
+            _counters.TicketsReissued++;
             return ticket;
         }
 

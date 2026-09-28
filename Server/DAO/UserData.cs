@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Google.Protobuf.Collections;
 using SocketProto;
 
@@ -80,13 +80,27 @@ namespace Server.DAO
         ///
         /// 有意扩展：账号不存在时自动建号（开发环境不需要先注册）。
         /// 账号存在但密码不符时仍失败——保留密码校验，避免原语义被悄悄削弱。
+        ///
+        /// T-LOOP2：密码校验通过后，必须在**返回成功之前**把本连接的真实 UID / PlayerName
+        /// 从 <see cref="UserStore"/> 权威快照读出并写入。
+        /// 改造前这里只写了 UserName，UID / PlayerName 要等客户端随后的 FindPlayerInfo 才回填，
+        /// 于是 `UserController.Login` 里的 RegisterActiveClient 会以 UID=0 为键先登记一次
+        /// （实机日志 `ACTIVE-ADD id=0`），FindPlayerInfo 再以真实 UID 登记第二次
+        /// （`ACTIVE-ADD id=2`），同一条连接在活跃表里留下两个键；UID 可变，
+        /// 断线时 RemoveActiveClient 只按当时的 UID 删一个键，键 0 残留，
+        /// 导致同账号在旧连接断开后仍被「重复登录」拒绝
+        /// （2026-09-26 server.log 实测）。修复即消除这个「已登录但身份未写入」的窗口。
+        ///
+        /// 身份一律取 UserStore 快照，不信任请求包里的任何 Id；
+        /// 快照不可用（无有效 UID）时明确失败，不返回半成品身份。
         /// </summary>
         public bool Login(MainPack pack)
         {
             string username = pack.Loginpack.Username;
             string password = pack.Loginpack.Password;
 
-            Logging.Debug.Log(username + "      " + password);
+            // 禁止把密码写入大厅日志；仅输出不含凭据的登录阶段标识。
+            Logging.Debug.Log("[Login] 收到账号验证请求（密码不记录）");
 
             bool created;
             string error;
@@ -96,7 +110,16 @@ namespace Server.DAO
                 return false;
             }
 
+            UserSnapshot user;
+            if (!UserStore.TryGetByName(username, out user) || user.Id <= 0)
+            {
+                Logging.Debug.Log("[Login] 身份快照不可用（无有效 UID），拒绝登录 username=" + username);
+                return false;
+            }
+
             UserName = username;
+            UID = user.Id;
+            PlayerName = user.Name;
 
             if (created)
             {
@@ -106,7 +129,21 @@ namespace Server.DAO
             {
                 Logging.Debug.Log($"[Login] 登录成功 username={username}");
             }
+
+            Logging.Debug.Log($"[Login] 身份已写入 id={UID} 昵称={PlayerName}");
             return true;
+        }
+
+        /// <summary>
+        /// 登录密码已经验证，但活跃连接原子登记失败（并发同账号冲突）时撤销
+        /// **本连接**的认证身份。账号仍保留在 UserStore，不能把未登记连接误当成已登录。
+        /// </summary>
+        public void ClearLoginIdentity()
+        {
+            UID = 0;
+            UserName = null;
+            PlayerName = null;
+            PlayerHero = default(Hero);
         }
 
         /// <summary>
@@ -156,6 +193,15 @@ namespace Server.DAO
             try
             {
                 string username = pack.Loginpack.Username;
+                // 账号必须先在这条连接上完成密码校验；不能仅凭请求里自报的 Username
+                // 查询别人的 UID 并由 Controller.FindPlayerInfo 登记成该账号的活跃连接。
+                if (UID <= 0 || string.IsNullOrEmpty(UserName)
+                    || !string.Equals(UserName, username, StringComparison.Ordinal))
+                {
+                    Logging.Debug.Log("[FindPlayerInfo] 未登录或账号与连接身份不符，拒绝查信息");
+                    return false;
+                }
+
                 Logging.Debug.Log(username + "  FindPlayerInfo");
 
                 UserSnapshot user;

@@ -1,0 +1,79 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      T-LIVE1 门禁：入局/续局通知「先于面板注册到达」的**可执行**行为门。
+
+      为什么需要它（本次实机缺陷）
+      (缺陷复现，见下)
+      Lobby 在登录成功后主动推送续局新票（实机 20:26:27 已发出 `PMDSR1:`），而通知到达在大厅
+      TCP 的**异步收包线程**，此时 UIMatchingPanel.Init/AddRequest 可能还没跑。旧实现只有
+      「已注册」一条分支：未注册 ⇒ 直接落进「不能找到对应的处理」并把 MainPack.ToString()
+      （含完整 Str ⇒ 含票据）写日志 —— 通知丢失 + 凭据泄漏。
+
+      本工程把**真正生产的** RequestManger.cs / BaseRequest.cs / PmRpcClient.cs /
+      Loging.cs / PMDsEntryOffer.cs（真实 codec）/ SocketProto.cs（真正 protoc 生成物）
+      编进 net8，用可执行负例钉住：
+        · 严格解码合法的 PMDS1/PMDSR1 在**无注册**时有界暂存（最多一条、TTL ≤ 30s）；
+        · HYLDManger.OnInit 的 RemoveAllRequest **不丢**暂存；
+        · 面板就绪后由主线程**恰好一次**投递进面板队列；
+        · 拒非法 / 过期 / 跨连接的旧暂存；
+        · 关闭 socket / 销毁清暂存；
+        · 普通日志（未注册分支与 BaseRequest.OnResponse 的 Trace）**不含** Str/票据。
+
+      边界（务必看清）
+      (边界说明，见下)
+        · Unity / UI 边界（UIMatchingPanel、HYLDManger、NetGlobal、UnityEngine.Debug）是
+          手写**功能性替身**（Stubs.cs / Program.cs 里的 EntryPanel）：面板替身只复刻
+          「严格解码 → Enter」这一条判定核心，且用的是**真实 codec**；
+        · 替身不证明真实 uGUI 能打开面板、不证明真实 Unity 线程模型；
+          真实 Unity 2019 编译面由 PMClientCheck / PMR4UnityCheck / PMNetUnityPlayerCheck 覆盖；
+        · Program.cs 尾部另有一小组**静态结构断言**（宿主接线是否真的接上了），它是补充证据，
+          不冒充运行验证。
+
+      运行：dotnet build Tools/PMEntryInboxTest -c Release
+            dotnet Tools/PMEntryInboxTest/bin/Release/net8.0/PMEntryInboxTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMEntryInboxTest</AssemblyName>
+    <RootNamespace>PMEntryInboxTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591;CS0162;CS0219;CS0168;CS8981</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Stubs.cs" />
+
+    <!-- 被测对象：真正生产的请求路由层（不复制、不快照、不桩）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Manger\RequestManger.cs" LinkBase="Client\Server\Manger" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Request\BaseRequest.cs" LinkBase="Client\Server\Request" />
+    <Compile Include="..\..\Client\Assets\Scripts\Server\Manger\PmRpcClient.cs" LinkBase="Client\Server\Manger" />
+
+    <!-- 真实日志层：用来钉住「没有任何一条日志带票据」。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Log\Loging.cs" LinkBase="Client\Log" />
+
+    <!-- 真实入局 codec 及其最小依赖：PMNetReader/Writer 是纯 C#，codec 必须真编。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Session\PMDsEntryOffer.cs" LinkBase="Client\PMNet\Session" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Control\PMDsControlProtocol.cs" LinkBase="Client\PMNet\Control" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\Control\PMDsTicket.cs" LinkBase="Client\PMNet\Control" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetReader.cs" LinkBase="Client\PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMNetWriter.cs" LinkBase="Client\PMNet" />
+    <Compile Include="..\..\Client\Assets\Scripts\PMNet\PMWireType.cs" LinkBase="Client\PMNet" />
+
+    <!-- 真正由 protoc 生成的 SocketProto（MainPack / RequestCode / ActionCode / ReturnCode）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\Server\SocketProto.cs" LinkBase="Client\Server" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Client\Assets\Scripts\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

@@ -355,11 +355,10 @@ namespace PMNet.Weaving.Editor
         }
 
         /// <summary>
-        /// 引用目录只给**真实存在且来源可解释**的几个：
-        ///   · 被处理程序集自己所在目录（编辑器路径 = Library/ScriptAssemblies，Player 路径 = 打包产物目录）；
-        ///   · Unity 托管程序集目录（`EditorApplication.applicationContentsPath` + Managed）；
-        ///   · Unity 自带的 netstandard2.0 ref 目录（存在才给）。
-        /// 不给任何"猜"的路径，也不给第三方目录。
+        /// 引用目录来自目标程序集所在目录、Unity 管理程序集与 netstandard ref，
+        /// 以及 CompilationPipeline 对 Assembly-CSharp 明确列出的预编译 DLL 所在目录。
+        /// DOTween 等项目插件可位于 Assets 内、而不在 Library/ScriptAssemblies：不扫整个 Assets，
+        /// 只接纳 Unity 实际编译引用且磁盘存在的 DLL，不复制或改写第三方文件。
         /// </summary>
         private static void AddReferenceDirs(List<string> args, string assemblyPath)
         {
@@ -395,8 +394,36 @@ namespace PMNet.Weaving.Editor
                 }
             }
 
+            // 此 API 是编译器为目标程序集提供的实际引用清单。Editor 与 Player 都取同名目标，
+            // 以涵盖 Editor 当前产物及 Player 脚本 DLL 阶段；不根据报表最终输出目录猜旧包。
+            string projectRoot = Directory.GetParent(Application.dataPath).FullName;
+            AssembliesType[] types = { AssembliesType.Editor, AssembliesType.Player };
+            for (int t = 0; t < types.Length; t++)
+            {
+                try
+                {
+                    UnityEditor.Compilation.Assembly[] assemblies = CompilationPipeline.GetAssemblies(types[t]);
+                    if (assemblies == null) continue;
+                    for (int j = 0; j < assemblies.Length; j++)
+                    {
+                        UnityEditor.Compilation.Assembly compiled = assemblies[j];
+                        if (compiled == null || !string.Equals(compiled.name, TargetAssemblyName, StringComparison.Ordinal)) continue;
+                        List<string> references = PMNetWeavingPolicy.CollectCompiledReferenceDirectories(
+                            compiled.compiledAssemblyReferences, projectRoot);
+                        dirs.AddRange(references);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning(LogPrefix + "无法读取 Unity " + types[t]
+                        + " 的预编译引用目录；编织若缺引用将明确失败：" + ex.Message);
+                }
+            }
+
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < dirs.Count; i++)
             {
+                if (!seen.Add(dirs[i])) continue;
                 args.Add("--reference-dir");
                 args.Add(dirs[i]);
             }

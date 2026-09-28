@@ -2,7 +2,7 @@
 //     本文件由 Tools/PMNetGen 生成，请勿手动修改。
 //     程序集注册表
 //     类数：2
-//     协议摘要（生成期）：0xE6130FAA
+//     协议摘要（生成期）：0xAEA98336
 // 
 //     生成契约：Docs/plans/net-r2-codegen-contract.md（§2 稳定 ID / §4 API 面）
 //     语言面：C# 7.3 + .NET Standard 2.0（Unity 2019.4 约束，D-R0-48）

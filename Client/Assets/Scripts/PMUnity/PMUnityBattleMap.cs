@@ -27,6 +27,14 @@
 //       不 Physics.Simulate、不改全局物理开关。唯一的一次写是加载末尾的
 //       Physics.SyncTransforms()（适配器要求的宿主前置条件：查询前把 Transform 提交给 PhysX）。
 //
+//  T-PLAY3 补充（客户端专有光照，视觉还原批次）：
+//    · 正式客户端在本局隔离场景里额外创建一个**独立根节点** [PMNetBattleLights] + 3 盏灯
+//      （源场景 HYLDGameTatal/MAP/lights 的真实序列化参数），实现全在 PMUnityBattleLighting.cs；
+//    · 它**不是**地图 prefab 根的子节点 ⇒ 不进本类 Collider 白名单、不影响 GetSceneDigest
+//      （DS/客户端摘要仍可比）；它也不含 Collider/Rigidbody ⇒ 不参与 PhysX 查询；
+//    · **DS 零灯**（先判 PMNetRuntime.IsDedicatedServer，再碰任何 Unity 对象）；诊断模式不经过本类；
+//    · 光源是**表现**：创建失败只记入 LightingError + warning，**不阻断**权威对局（见 ApplyClientLighting）。
+//
 //  ---------------------------------------------------------------------------
 //  诚实边界（供 C3/后续批次处理，不许被读成"任意网格精确 MTD"）
 //  ---------------------------------------------------------------------------
@@ -156,6 +164,24 @@ namespace PMNet.Unity
         private int _spawnQueries;
         private bool _disposed;
 
+        /// <summary>本局由 PMUnityBattleLighting 实际创建的客户端专有 Light 数量（T-PLAY3；DS 恒 0）。</summary>
+        private int _clientLightCount;
+
+        /// <summary>客户端专有光源未能创建的原因（成功或 DS 零灯路径为 null）。</summary>
+        private string _lightingError;
+
+#if UNITY_2019_1_OR_NEWER || UNITY_EDITOR
+        /// <summary>
+        /// 本局客户端专有光源（T-PLAY3）。只有正式模式 + 非 DS 才可能非 null；
+        /// 它是**本局隔离场景内的独立根节点**，不挂在地图 prefab 根上（因此不进 Collider 白名单、
+        /// 不影响 <see cref="GetSceneDigest"/>），由 <see cref="Dispose"/> 先于地图根销毁。
+        /// 编译面说明：本类被 Tools/PMBattleContentRuntimeCheck 以**显式 Compile Include** 编入
+        /// （不通配 PMUnity 目录），那里不定义 UNITY_* ⇒ 本成员与调用点用同一 #if 圈定，
+        /// 由 Tools/PMR4UnityCheck（真实 Unity2019 DLL + UNITY_EDITOR）负责真实 API 编译验证。
+        /// </summary>
+        private PMUnityBattleLighting _lighting;
+#endif
+
         /// <summary>隔离场景名的自增序号（同一进程内 CreateScene 禁止重名）。</summary>
         private static int _isolatedSceneSequence;
 
@@ -230,6 +256,19 @@ namespace PMNet.Unity
 
         /// <summary>是否已释放。</summary>
         public bool Disposed { get { return _disposed; } }
+
+        /// <summary>
+        /// 本局客户端专有光源创建的 Light 数量。正式客户端成功时为 3（= 源场景 MAP/lights 的条数）；
+        /// **DS 恒为 0**（T-PLAY3 的 DS 零灯口径）；创建失败也为 0（失败只写入
+        /// <see cref="LightingError"/>，不阻断权威对局）。诊断模式不经过本类，与本值无关。
+        /// </summary>
+        public int ClientLightCount { get { return _clientLightCount; } }
+
+        /// <summary>
+        /// 客户端专有光源未能创建的原因（T-PLAY3a 的可观察口径）；成功创建或 DS 零灯路径为 null
+        /// ——DS 不建灯是**预期**，不是错误。
+        /// </summary>
+        public string LightingError { get { return _lightingError; } }
 
         private static readonly Collider[] EmptyColliders = new Collider[0];
 
@@ -445,8 +484,52 @@ namespace PMNet.Unity
                 return false;
             }
 
+            // T-PLAY3：正式客户端在本局隔离场景内重建源场景 MAP/lights 的 1 蓝方向光 + 2 青聚光。
+            // DS 不建灯；诊断模式根本不经过本类。光源是**表现**：失败只记录、不阻断权威对局。
+            created.ApplyClientLighting();
+
             map = created;
             return true;
+        }
+
+        /// <summary>
+        /// T-PLAY3：给**正式客户端的本局**建"独立、可精确释放"的光源容器（<see cref="PMUnityBattleLighting"/>）。
+        ///
+        /// 门与生命周期（逐条对应 T-PLAY3a 的负例口径）：
+        ///   · **身份门**：PMNetRuntime.IsDedicatedServer ⇒ 一个 Unity 对象都不建（DS 零灯；
+        ///     光照类内部还有同一判定的第二道门）；
+        ///   · **场景**：容器是本局隔离场景内的**独立根节点**（不挂地图 prefab 根 ⇒ 不进 Collider 白名单、
+        ///     不改场景结构摘要、不参与 PhysX）；
+        ///   · **失败不阻断权威对局**：光源是纯表现（无物理、无协议、无资产写入），创建失败只写
+        ///     <see cref="LightingError"/> + 一条 warning，本局继续（绝不因为一盏灯拒绝入局）；
+        ///   · **精确释放**：失败时 PMUnityBattleLighting 内部已销毁半成品容器；成功时由
+        ///     <see cref="Dispose"/> 在销毁地图根**之前**先销毁容器（Stop/换局/入局失败都不残留灯）。
+        /// </summary>
+        private void ApplyClientLighting()
+        {
+            _clientLightCount = 0;
+            _lightingError = null;
+
+#if UNITY_2019_1_OR_NEWER || UNITY_EDITOR
+            if (PMNet.PMNetRuntime.IsDedicatedServer)
+            {
+                return;   // DS 零灯：预期路径，不是错误
+            }
+
+            PMUnityBattleLighting lighting;
+            string error;
+            if (!PMUnityBattleLighting.TryCreate(_scene, out lighting, out error))
+            {
+                _lightingError = error;
+                Logging.HYLDDebug.LogWarning("[PMUnityBattleMap] 客户端专有光照未创建：" + error
+                                             + "（本局继续；光源是表现层，不阻断权威对局）");
+                return;
+            }
+
+            _lighting = lighting;
+            _clientLightCount = lighting.LightCount;
+            Logging.HYLDDebug.Log("[PMUnityBattleMap] 客户端专有光照已创建：" + lighting.Describe());
+#endif
         }
 
         // ---------------------------------------------------------------- 几何/组件校验
@@ -1044,7 +1127,12 @@ namespace PMNet.Unity
                    + ", layerMask=0x" + LayerMaskOf(_colliders).ToString("X8", CultureInfo.InvariantCulture)
                    + ", worldVersion=" + _manifest.worldVersion.ToString(CultureInfo.InvariantCulture)
                    + ", sceneDigest=" + _sceneDigest.ToString(CultureInfo.InvariantCulture)
-                   + ", spawnQueries=" + _spawnQueries.ToString(CultureInfo.InvariantCulture) + ")";
+                   + ", spawnQueries=" + _spawnQueries.ToString(CultureInfo.InvariantCulture)
+                   + ", clientLights=" + _clientLightCount.ToString(CultureInfo.InvariantCulture)
+                   + (_lightingError == null
+                          ? ", lightingError=<none>"
+                          : ", lightingError=\"" + _lightingError + "\"")
+                   + ")";
         }
 
         // ---------------------------------------------------------------- 释放
@@ -1067,6 +1155,17 @@ namespace PMNet.Unity
             }
 
             _disposed = true;
+
+#if UNITY_2019_1_OR_NEWER || UNITY_EDITOR
+            // T-PLAY3：先销毁本局客户端专有光源容器——它是隔离场景里的**独立根节点**，不在地图根下，
+            // 漏掉它就等于退局/换局后留下一个活跃光源；再销毁地图根。幂等由光照类自身保证。
+            PMUnityBattleLighting lighting = _lighting;
+            _lighting = null;
+            if (lighting != null)
+            {
+                lighting.Dispose();
+            }
+#endif
 
             GameObject root = _root;
             if (root != null)

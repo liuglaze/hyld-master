@@ -18,7 +18,13 @@ namespace Server
         // 增加一把全局锁，保护下面两个集合
         private readonly object _lock = new object();
         private List<Client> _clients = new List<Client>();
-        private Dictionary<int, Client> _activeClient = new Dictionary<int, Client>();
+
+        // 活跃客户索引（uid -> 连接）。登记/删除/查找的判定集中在这个纯索引类里（T-LOOP2）：
+        //   · 无效身份（UID<=0 / 账号名为空）拒绝登记，避免 uid=0 别名残留；
+        //   · 同一连接的旧键（UID 变化产生的别名）登记时清掉；
+        //   · 删除按引用一致，旧连接的迟到 Close 不得删掉同 uid 的新连接。
+        // 索引自带锁，因此下面对它的访问不再借用 _lock（_lock 只保护 _clients 列表）。
+        private readonly PMActiveClientIndex<Client> _activeClient = new PMActiveClientIndex<Client>();
 
         public ControllerManger _controllerManger;
 
@@ -61,66 +67,100 @@ namespace Server
 
         public Client GetActiveClient(int id)
         {
-            lock (_lock)
+            Client client;
+            if (_activeClient.TryGet(id, out client))
             {
-                if (!_activeClient.ContainsKey(id))
-                {
-                    return null;
-                }
-                return _activeClient[id];
+                return client;
             }
-        }
 
-        public void AddActiveClient(int id, Client client)
-        {
-            lock (_lock)
-            {
-                if (!_activeClient.ContainsKey(id))
-                {
-                    _activeClient.Add(id, client);
-                }
-            }
+            return null;
         }
 
         /// <summary>
-        /// 把该连接登记为活跃玩家。幂等。
+        /// 兼容保留：按 uid 手工登记一条活跃连接（当前工程内已无调用点）。
         ///
-        /// 与 AddActiveClient 的区别：若同一 uid 已存在**另一条**连接，先移除旧连接再登记，
-        /// 保证 _activeClient 里不会留下已被顶替的断线连接。
-        ///
-        /// 计划 B4：把原来散在 FindPlayerInfo 里的登记动作提取出来，
-        /// 使 Login 与 FindPlayerInfo 都能调用同一套逻辑。
+        /// 登记键规则统一收敛到 <see cref="RegisterActiveClient"/>，避免出现第二套键口径；
+        /// 传入的 id 与连接自身 UID 不一致时明确拒绝并记日志，不静默建立错误别名。
         /// </summary>
-        public void RegisterActiveClient(Client client)
+        public void AddActiveClient(int id, Client client)
         {
             if (client == null)
             {
                 return;
             }
 
-            lock (_lock)
+            if (client.UID != id)
             {
-                Client existing;
-                if (_activeClient.TryGetValue(client.UID, out existing) && !ReferenceEquals(existing, client))
-                {
-                    _activeClient.Remove(client.UID);
-                    Logging.Debug.Log($"[ACTIVE-REPLACE] id={client.UID} 旧连接被新连接顶替");
-                }
-
-                _activeClient[client.UID] = client;
+                Logging.Debug.Log($"[ACTIVE-REJECT] AddActiveClient id={id} 与连接 UID={client.UID} 不一致，拒绝登记");
+                return;
             }
 
-            Logging.Debug.Log($"[ACTIVE-ADD] id={client.UID} 玩家{client.PlayerName} 加入活跃字典");
+            RegisterActiveClient(client);
         }
 
+        /// <summary>
+        /// 把该连接登记为活跃玩家。幂等。
+        ///
+        /// 语义（T-LOOP2，判定全部在 <see cref="PMActiveClientIndex{TEntry}"/> 里）：
+        /// - UID&lt;=0 或账号名为空的连接**拒绝登记**。这类身份来自「登录成功但真实身份未写入」；
+        ///   一旦以 0 为键进入活跃表，断线时按可变 UID 删除就会留下 uid=0 别名，
+        ///   使同账号在旧连接断开后仍被「重复登录」拒绝（2026-09-26 server.log：
+        ///   `ACTIVE-ADD id=0` → `ACTIVE-ADD id=2` → 断线只删键 2 → 键 0 残留）。
+        /// - 同一连接的旧键（UID 变化产生的别名）在同一次加锁里清掉，不留第二身份。
+        /// - 该 uid 已被**另一条**活跃连接占用时不顶号、不踢人：保持原连接并返回 Conflict。
+        ///   真正在线的同账号重复登录仍由 `UserController.Login` 的活跃账号门拒绝，本方法不放宽它。
+        /// </summary>
+        internal PMActiveRegistration RegisterActiveClient(Client client)
+        {
+            if (client == null)
+            {
+                return PMActiveRegistration.Rejected;
+            }
+
+            PMActiveRegistration result = _activeClient.Register(client);
+            if (result == PMActiveRegistration.Registered)
+            {
+                Logging.Debug.Log($"[ACTIVE-ADD] id={client.UID} 玩家{client.PlayerName} 加入活跃字典");
+            }
+            else if (result == PMActiveRegistration.Conflict)
+            {
+                Logging.Debug.Log($"[ACTIVE-CONFLICT] id={client.UID} 玩家{client.PlayerName} 登记被拒："
+                    + "该 uid 已有另一条活跃连接（不顶号、不踢人）");
+            }
+            else
+            {
+                Logging.Debug.Log($"[ACTIVE-REJECT] uid={client.UID} 玩家名='{client.PlayerName}' 拒绝登记："
+                    + "UID 非法或账号名为空（防 uid=0 别名残留）");
+            }
+
+            // Controller 必须用本次**原子登记结果**决定登录是否成功，不能只在登记前
+            // 先查一次账号在线（两条并发登录都可能在查时看到“空”）。
+            return result;
+        }
+
+        /// <summary>
+        /// 注销该连接的**全部**活跃键（按引用一致删除，不是只按当前 UID 删一个键）。
+        ///
+        /// 为什么必须按引用：UID 在连接生命周期内可变（Login 后 FindPlayerInfo 会回填真实 UID），
+        /// 同一条连接可能在索引里留下多个键。若删除只看 <c>client.UID</c>，既漏删别名，
+        /// 又会在「旧连接迟到 Close 时该 uid 已被同账号新连接占用」时**误删新连接**。
+        /// </summary>
         public void RemoveActiveClient(Client client)
         {
-            lock (_lock)
+            if (client == null)
             {
-                if (_activeClient.ContainsKey(client.UID))
-                {
-                    _activeClient.Remove(client.UID);
-                }
+                return;
+            }
+
+            bool removed = _activeClient.Remove(client);
+            if (removed)
+            {
+                Logging.Debug.Log($"[ACTIVE-REMOVE] id={client.UID} 玩家{client.PlayerName} 移出活跃字典");
+            }
+            else
+            {
+                Logging.Debug.Log($"[ACTIVE-REMOVE-SKIP] id={client.UID} 玩家{client.PlayerName} "
+                    + "不在活跃字典（别名已清或已被新连接占用），未删除任何键");
             }
         }
 
@@ -130,14 +170,12 @@ namespace Server
         /// </summary>
         public Client GetActiveClientByUserName(string username)
         {
-            lock (_lock)
+            if (string.IsNullOrEmpty(username))
             {
-                foreach (var kvp in _activeClient)
-                {
-                    if (kvp.Value.UserName == username) return kvp.Value;
-                }
+                return null;
             }
-            return null;
+
+            return _activeClient.FindByUserName(username);
         }
 
         public PlayerState GetPlayerState(int id)
@@ -397,6 +435,9 @@ namespace Server
                 offer.Port = notice.Port;
                 offer.Identity = notice.Identity;
                 offer.Ticket = notice.Ticket;
+                // T-LOOP4：原局续玩与初次入局共用同一二进制布局/同一网关，只换文本前缀（PMDSR1 对 PMDS1）。
+                // 该标记**不授予权限**：客户端只据此调整握手重试预算，是否允许入局仍由 DS 独立验票+名册裁决。
+                offer.IsResume = notice.IsResume;
 
                 string text;
                 try
@@ -420,7 +461,8 @@ namespace Server
                 // 只记公开对账字段，不记 offer / 完整 Str / 票据。
                 Logging.Debug.Log("[PMDsLobby] 入局通知已发送 uid=" + notice.Identity.Uid
                     + " match=" + notice.MatchId + " ds=" + notice.DsId
-                    + " port=" + notice.Port + " epoch=" + notice.Epoch);
+                    + " port=" + notice.Port + " epoch=" + notice.Epoch
+                    + " resume=" + (notice.IsResume ? 1 : 0));
                 error = null;
                 return true;
             }

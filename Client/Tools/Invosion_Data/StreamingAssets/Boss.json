@@ -1,0 +1,11 @@
+{
+  "Boss": [
+    {
+      "Boss1Blood": 150,
+      "Boss2Blood": 800,
+      "Boss3Blood": 1200,
+      "Boss4Blood": 1450,
+      "Boss5Blood": 2200
+    }
+  ]
+}

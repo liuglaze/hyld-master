@@ -106,6 +106,7 @@ namespace PMCombatCoreTest
             Section("H. 终局与断线：Forfeit / winner 0 / 未 start（T6A3）", TestEndgame);
             Section("I. 对抗审查：副作用 / 回收 / 回显 / 容差 / 极端时钟（review）", TestAdversarialReview);
             Section("J. 契约收口：回显闸门 / 容量水位 / 开战门 / 结算身份（terminal fix）", TestTerminalFix);
+            Section("K. T-LOOP 高危2：权威体只读激活水位（续局播种的唯一来源）", TestActivationHighWaterView);
 
             Console.WriteLine();
             Console.WriteLine("=== 汇总：通过 " + _passed + " / 失败 " + _failures.Count + " ===");
@@ -1888,6 +1889,72 @@ namespace PMCombatCoreTest
             double length = Math.Sqrt(x * x + z * z);
             outX = (float)(x / length);
             outZ = (float)(z / length);
+        }
+
+        // ================================================ K. T-LOOP 高危2：只读激活水位
+
+        /// <summary>
+        /// 权威核心的**只读**单调激活水位（续局播种的唯一来源）。
+        ///
+        /// <para>为什么必须有它：断线续局时客户端是**新实例**（本地 activationId 分配器为空），
+        /// 而同一 NetId 的 <c>HighWaterActivationId</c> 跨断线保留。若不把水位播给新实例，
+        /// 恢复后的第一枪会拿 ID=1 去撞 StaleId（或 R5 的 AlreadyTerminal）。</para>
+        ///
+        /// <para>覆盖：未知 netId 不隐式建档、新玩家初始 0、被接受的攻击推进、重复不回退、
+        /// 被拒的旧 ID 不拉低水位、查询零副作用、uint.MaxValue 后 core 仍对 ID=1 判
+        /// StaleId（**不回绕**）。</para>
+        /// </summary>
+        private static void TestActivationHighWaterView()
+        {
+            PMCombatSession s = new PMCombatSession(Epoch);
+
+            uint water;
+            Check(!s.TryGetActivationHighWater(77u, out water) && water == 0u,
+                "K1 未知 netId 水位查询返回 false 且置 0（不隐式建档）");
+
+            Check(s.AddPlayer(77u, 7, 1, PMHeroId.XueLi), "K2 单人局名册登记成功");
+            Check(s.StartMatch(1), "K3 单人局 StartMatch(1) 通过");
+            Check(s.TryGetActivationHighWater(77u, out water) && water == 0u,
+                "K4 新玩家水位初始为 0（还没见过任何 activationId）");
+
+            double t = Advance(1.0);
+            PMCombatAttackDecision d1 = s.RequestAttack(77u, 5u, false, 1f, 0f, t);
+            Check(d1.Accepted, "K5 攻击 ID=5 被接受");
+            Check(s.TryGetActivationHighWater(77u, out water) && water == 5u,
+                "K6 ★ 只读水位 == 5（与账本同步）");
+
+            // 重复同 ID：返回原结论，水位不回退也不虚增。
+            PMCombatAttackDecision dup = s.RequestAttack(77u, 5u, false, 1f, 0f, t);
+            Check(dup.Duplicate && dup.Accepted, "K7 重复 ID=5 返回原结论（Duplicate=true）");
+            Check(s.TryGetActivationHighWater(77u, out water) && water == 5u,
+                "K8 重复不回退也不虚增水位");
+
+            // 被拒的旧 ID：仍保留（拒绝也进水位语义）。
+            PMCombatAttackDecision stale = s.RequestAttack(77u, 3u, false, 1f, 0f, t);
+            Check(!stale.Accepted && stale.Reason == PMCombatRejectReason.StaleId, "K9 旧 ID=3 → StaleId");
+            Check(s.TryGetActivationHighWater(77u, out water) && water == 5u,
+                "K10 ★ 被拒的旧 ID 不把水位拉低（单调只增）");
+
+            // 只读查询零副作用。
+            int attacksBefore = s.AttackRecordCount;
+            uint ignored;
+            s.TryGetActivationHighWater(77u, out ignored);
+            s.TryGetActivationHighWater(123456u, out ignored);
+            CheckEq(s.AttackRecordCount, attacksBefore, "K11 ★ 只读查询不产生任何账本副作用");
+
+            // uint.MaxValue：本身是合法值，但之后不可能有「比水位更新」的 ID。
+            t = Advance(200.0);
+            PMCombatAttackDecision maxDecision = s.RequestAttack(77u, uint.MaxValue, false, 1f, 0f, t);
+            Check(maxDecision.Accepted,
+                "K12 把水位推到 uint.MaxValue 的那一枪本身合法（reason=" + maxDecision.Reason + "）");
+            Check(s.TryGetActivationHighWater(77u, out water) && water == uint.MaxValue,
+                "K13 ★ 只读水位 == uint.MaxValue");
+
+            PMCombatAttackDecision wrapped = s.RequestAttack(77u, 1u, false, 1f, 0f, t);
+            Check(!wrapped.Accepted && wrapped.Reason == PMCombatRejectReason.StaleId,
+                "K14 ★★ MaxValue 之后 ID=1 仍是 StaleId（core 绝不回绕）");
+            Check(s.TryGetActivationHighWater(77u, out water) && water == uint.MaxValue,
+                "K15 水位停在 uint.MaxValue（拒绝不回退）");
         }
 
         private static void Section(string name, Action test)

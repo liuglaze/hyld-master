@@ -68,8 +68,17 @@ namespace Server
                 //分发消息
                 if (mainPack != null)
                 {
-                    //Logging.HYLDDebug.LogError(mainPack);
-                    Logging.HYLDDebug.Trace("OnResponse  : \n" + mainPack);
+                    // T-LIVE1：这里**只记非秘密元数据**。
+                    // 改动前是 Trace("OnResponse  : \n" + mainPack)：MainPack.ToString() 是
+                    // Google.Protobuf 生成的全文输出，会把 Str 整个打出来 —— 而入局/续局通知正是
+                    // 靠 Str 承载 `PMDS1:`/`PMDSR1:` + Base64(含短时效票据)，等于把凭据写进日志。
+                    // 旧日志无法撤回；新代码不得再产生任何一条这样的记录。
+                    Logging.HYLDDebug.Trace("OnResponse request=" + mainPack.Requestcode
+                                            + " action=" + mainPack.Actioncode
+                                            + " return=" + mainPack.Returncode
+                                            + " requestId=" + mainPack.RequestId
+                                            + " strLen=" + (mainPack.Str == null ? 0 : mainPack.Str.Length)
+                                            + "  (不打印 MainPack 内容：Str 可能携带票据/凭据)");
                     panel.OnResponse(mainPack);
                 }
                 else

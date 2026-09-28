@@ -76,6 +76,7 @@ namespace PMNetWeavingEditorTest
             // ---------------------------------------------------------------- Player 目标策略
             Run("策略: 只认 report.files 里精确名 + 绝对路径", Test_Policy_PlayerCandidates);
             Run("策略: Editor相对路径以Unity项目而非仓库为基准", Test_EditorRelativePath);
+            Run("策略: 第三方预编译引用只从Unity编译清单取存在的DLL目录", Test_CompiledReferenceDirectories);
             Run("策略: Player 候选 API 不接受 outputPath（无推测回退）", Test_Policy_PlayerCandidateApiShape);
             Run("策略: 目标缺失文案明确拒绝产出 Player", Test_Policy_PlayerMissingDescription);
             Run("策略: 目标文件名精确匹配（不吞 Editor/firstpass）", Test_Policy_TargetFileNameExact);
@@ -489,6 +490,26 @@ namespace PMNetWeavingEditorTest
             AssertTrue(!PMNetWeavingPolicy.IsFullyQualifiedPath(((char)92) + "Assembly-CSharp.dll"), "当前盘根相对路径必须拒绝");
         }
 
+        private static void Test_CompiledReferenceDirectories()
+        {
+            string root = NewTempDir("compiled-references");
+            try
+            {
+                string plugin = Path.Combine(root, "Assets", "Resources", "DOTween", "DOTween.dll");
+                WriteText(plugin, "fixture");
+                string relative = "Assets/Resources/DOTween/DOTween.dll";
+                string missing = "Assets/Resources/Unrelated/No.dll";
+                List<string> dirs = PMNetWeavingPolicy.CollectCompiledReferenceDirectories(
+                    new string[] { relative, plugin, missing, "C:relative.dll", "", "Assets/Resources/DOTween/readme.txt" }, root);
+                AssertEqualInt(1, dirs.Count, "只收集存在的编译引用DLL目录并去重，不递归扫描Assets");
+                AssertEqual(Path.GetDirectoryName(plugin), dirs[0], "从Unity编译清单发现DOTween目录");
+                AssertEqualInt(0, PMNetWeavingPolicy.CollectCompiledReferenceDirectories(
+                    new string[] { relative }, "not-an-absolute-root").Count,
+                    "Unity项目根目录不可解释时不能退回外部工具cwd");
+            }
+            finally { Directory.Delete(root, true); }
+        }
+
         private static void Test_Policy_PlayerCandidateApiShape()
         {
             MethodInfo method = typeof(PMNetWeavingPolicy).GetMethod(
@@ -869,7 +890,14 @@ namespace PMNetWeavingEditorTest
             AssertTrue(source.IndexOf("\"；Play/Build 门禁=\" + (GateEnabled", StringComparison.Ordinal) < 0,
                 "状态输出不得再宣称门禁可关");
 
-            // (6) 契约缺失的所有入口都必须真的失败（不是只写日志）。
+            // (6) Cecil 必须收到 Unity 真正引用的预编译插件目录；否则 DOTween 不在
+            // Library/ScriptAssemblies 时，Repair/Player 都会因 AssemblyResolutionException 失败。
+            AssertTrue(source.IndexOf("compiled.compiledAssemblyReferences", StringComparison.Ordinal) >= 0,
+                "目标 Assembly-CSharp 必须从 Unity 编译 API 获取预编译引用清单");
+            AssertTrue(source.IndexOf("PMNetWeavingPolicy.CollectCompiledReferenceDirectories(", StringComparison.Ordinal) >= 0,
+                "编织命令必须接入受控的第三方引用目录规则");
+
+            // (7) 契约缺失的所有入口都必须真的失败（不是只写日志）。
             int failBuildCalls = CountOccurrences(source, "FailBuild(");
             AssertTrue(failBuildCalls >= 6,
                 "FailBuild 调用点过少（preflight/Player 缺失与失败都必须 FailBuild），实际 "

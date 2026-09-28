@@ -27,6 +27,10 @@ namespace PMDsLobbyTest
     /// G 客户端断线中止局（不伪造胜利）+ 延迟退出仍占用 + 退出后才恢复
     /// H listener 分帧（半包/粘包/超限立即断开）与三重有界 + 非 loopback 拒绝
     /// I 账本单元语义（原子预留 / 释放 / 幂等）
+    /// J 宿主 offer 字段 ⇄ 冻结 PMDsEntryCodec 往返（含续局前缀 PMDSR1）
+    /// K 认证正常退出的优雅退出宽限
+    /// L T-LOOP4 原局断线续玩：30s 窗口 / 新 Nonce 票 / episode 不滚票 / 失败面 / 只读结果
+    /// M T-LOOP1 高危1：PMDS-END1 只读结果通知的共享严格解析（真实生产编码 ⇄ 字段往返 + 畸形样本）
     ///
     /// 退出码：0 = 全部通过；1 = 有失败。
     /// </summary>
@@ -63,6 +67,11 @@ namespace PMDsLobbyTest
                     TestFrozenEntryOfferRoundTrip);
                 Section("K. 认证正常退出的优雅退出宽限（真实宿主链路 + 真实 loopback TCP）",
                     TestGracefulExitGraceThroughHost);
+                Section("L. T-LOOP4 原局断线续玩：新票签发 / episode 不滚票 / 失败面 / 只读结果",
+                    TestResumeEntryLifecycle);
+                Section("M. T-LOOP1 高危1：PMDS-END1 只读结果的共享严格解析（真实生产编码 ⇄ 字段往返 + 畸形样本）",
+                    TestEndedNoticeStrictCodec);
+                Section("N. T-LOOP 二次断线：连接代次区分重复通知与新episode", TestSecondReconnectEpisode);
             }
             finally
             {
@@ -705,6 +714,38 @@ namespace PMDsLobbyTest
                 Check(gateway.Restored.Count == 2, "参战玩家恢复在线（两人）");
                 Check(gateway.RestoredWhileProcessAlive == false, "恢复在线发生在确认进程退出**之后**");
                 Check(host.GetCoordinator("m-result") == null, "会话已从宿主视图移除");
+
+                // T-LOOP二审：旧局结果120s缓存尚在，但同uid已进入**新的Running局**时，
+                // 登录响应不能同时展示旧局胜负并推新局offer（新局优先）。
+                string oldResult;
+                Check(host.TryGetRecentMatchEndedNotice(81, out oldResult),
+                    "F-new1 旧局结果在TTL内可供无局登录只读展示");
+                CloseQuietly(controlSocket);
+                controlSocket = null;
+                gateway.ProcessAliveProbe = () => launcher.Processes.Count > 0
+                    && launcher.Processes[launcher.Processes.Count - 1].IsRunning;
+                Check(host.TryStartMatch(MakeRequest("m-result2", 81, 82)).IsQueued,
+                    "F-new2 同uid新局已排队（原局资源已释放）");
+                Check(PumpUntil(host, () => host.StartedSessions.Length >= 2
+                    && host.StartedSessions[host.StartedSessions.Length - 1].MatchId == "m-result2"),
+                    "F-new3 新局已落地（宿主历史已启动列表保留上一局记录）");
+                if (host.StartedSessions.Length >= 2 && launcher.Requests.Count > 1)
+                {
+                    PMDsBootstrappedMatch nextBoot = ReadBootstrap(
+                        ArgValue(launcher.Requests[1].Arguments, "-bootstrap"), out decodeError);
+                    Check(nextBoot != null, "F-new4 新局引导文件可读：" + decodeError);
+                    if (nextBoot != null)
+                    {
+                        controlSocket = Connect(host.ControlPort);
+                        SendBytes(controlSocket, BuildReadyFrame(nextBoot,
+                            host.StartedSessions[host.StartedSessions.Length - 1].Port,
+                            nextBoot.CollisionDigest, true), 64);
+                        Check(PumpUntil(host, () => host.GetCoordinator("m-result2").State == PMDsSessionState.Running),
+                            "F-new5 新局Running");
+                        CheckRejected(!host.TryGetRecentMatchEndedNotice(81, out oldResult),
+                            "F-new6 正在新局时登录不附旧局结果（新局续玩offer优先）");
+                    }
+                }
             }
             finally
             {
@@ -750,15 +791,44 @@ namespace PMDsLobbyTest
                 SendBytes(controlSocket, BuildReadyFrame(boot, record.Port, boot.CollisionDigest, true), 48);
                 Check(PumpUntil(host, () => coordinator.State == PMDsSessionState.Running), "会话就绪并 Running");
                 Check(gateway.Offers.Count == 2, "两名玩家已收到 offer");
+                Check(!gateway.Offers[0].IsResume && !gateway.Offers[1].IsResume,
+                    "初次入局 offer 不是续局（IsResume=false）");
 
-                // 客户端断线 ⇒ 中止该测试局，不伪造胜利。
+                // T-LOOP4：**非终局 Running 局**下客户端断线不再立即中止，而是进入 30 秒原局续玩窗口
+                // （离线角色仍留在权威战场，Lobby 不伪造胜负）；窗口到期仍未连回才走旧断线路径。
+                gateway.Online.Remove(91);   // 真实断线：该 uid 的大厅 TCP 已经不在了
                 host.NotifyClientDisconnected(91);
-                Check(PumpUntil(host, () => host.ClientDisconnectAborts == 1), "断线中止被处理");
+                Check(PumpUntil(host, () => host.ClientDisconnectsHeld == 1), "断线进入续玩窗口（不立即中止）");
+                host.PumpOnce();
+                CheckEq(host.ClientDisconnectAborts, 0L, "窗口内未中止该局");
+                CheckEq(coordinator.State, PMDsSessionState.Running, "窗口内会话仍为 Running");
+                CheckRejected(gateway.Results.Count == 0, "**没有**伪造正常胜利（无 Result 通知）");
+                Check(host.PortPool.InUseCount == 1, "窗口内端口仍被占用");
+                Check(host.PlayerLedger.IsOccupied(91) && host.PlayerLedger.IsOccupied(92),
+                    "窗口内 uid 仍被占用");
+
+                // 玩家 TCP 与控制通道是两条独立链路：窗口期内必须继续有 Lobby↔DS 心跳，
+                // 否则会先撞 15 秒心跳超时（那是另一条失败路径）。
+                AdvanceWithHeartbeats(host, controlSocket, boot, coordinator, clock, 30000);
+                Check(PumpUntil(host, () => host.ReconnectWindowsExpired >= 1), "续玩窗口到期");
+                Check(PumpUntil(host, () => host.ClientDisconnectAborts == 1), "到期仍未连回 ⇒ 走旧断线中止路径");
                 host.PumpOnce();
                 CheckRejected(gateway.Results.Count == 0, "**没有**伪造正常胜利（无 Result 通知）");
                 Check(coordinator.State != PMDsSessionState.ResultPending
                     && coordinator.State != PMDsSessionState.ResultCommitted,
                     "断线局没有进入结果状态：" + coordinator.State);
+
+                // T-LOOP4：已判定中止的局（DS 进程还没退出、State 仍是 Running）绝不允许靠
+                // “再来一次断线 + 续局请求”重开 30 秒窗口 —— 否则等于跳过 Forfeit。
+                host.NotifyClientDisconnected(91);
+                host.PumpOnce();
+                CheckEq(host.ClientDisconnectsHeld, 1L, "迟到的重复断线通知不重开窗口（不重复计数）");
+                Check(host.TryRequestResumeEntry(91), "G 续局请求已入队（该局已判定中止）");
+                Check(PumpUntil(host, () => host.ResumeRejectedSessionAborting == 1),
+                    "已判定中止的局不再签发续局票");
+                CheckEq(host.LastResumeOutcome, PMDsLobbyResumeOutcome.RejectedSessionAborting,
+                    "拒绝原因=该局已被判定中止");
+                CheckEq(gateway.Offers.Count, 2, "中止后不再产生 offer");
 
                 // 宽限期到期 → 请求强杀，但进程故意不退出。
                 clock.Ms += 11000;
@@ -1072,6 +1142,79 @@ namespace PMDsLobbyTest
                 Check(decoded.Identity == notice.Identity, "往返 Identity 一致（所有权只来自票据名册）");
                 Check(decoded.Ticket != null && BytesEqual(decoded.Ticket, notice.Ticket),
                     "往返票据字节逐字节保真（客户端据此连 DS）");
+
+                // T-LOOP1：续局只换**文本前缀**，二进制字段/票据校验原样共用；
+                // 实现前这里必须失败：旧 codec 根本不认识 PMDSR1。
+                string resumeText = "PMDSR1:" + text.Substring(PMNet.Session.PMDsEntryCodec.Prefix.Length);
+                Check(PMNet.Session.PMDsEntryCodec.HasPrefix(resumeText),
+                    "J-resume 续局专用前缀被新链识别（不误当旧战斗链）");
+                PMNet.Session.PMDsEntryOffer resumed;
+                string resumeError;
+                Check(PMNet.Session.PMDsEntryCodec.TryDecode(resumeText, out resumed, out resumeError)
+                    && resumed != null && resumed.IsResume && BytesEqual(resumed.Ticket, notice.Ticket),
+                    "J-resume 同一二进制载荷经续局前缀仍被严格解码并标记续局：" + resumeError);
+                Check(!decoded.IsResume, "J-resume 普通 PMDS1 初始 offer 绝不误标续局");
+                if (resumed != null)
+                {
+                    Check(PMNet.Session.PMDsEntryCodec.Encode(resumed) == resumeText,
+                        "J-resume 续局编码往返逐字节稳定（不换二进制布局）");
+                }
+                Check(!PMNet.Session.PMDsEntryCodec.HasPrefix("PMDSR1"),
+                    "J-resume 不完整前缀被拒");
+            }
+            finally
+            {
+                CloseQuietly(controlSocket);
+                host.Dispose();
+            }
+        }
+
+        private static void TestSecondReconnectEpisode()
+        {
+            FakeClock clock = new FakeClock();
+            FakeLauncher launcher = new FakeLauncher();
+            FakeGateway gateway = new FakeGateway();
+            gateway.Online.Add(311);
+            gateway.Online.Add(312);
+            gateway.ProcessAliveProbe = () => launcher.Processes.Count > 0 && launcher.Processes[0].IsRunning;
+            PMDsLobbyHost host = CreateHost(clock, launcher, gateway, null);
+            Socket controlSocket = null;
+            try
+            {
+                Check(host.TryStartMatch(MakeRequest("m-twice", 311, 312)).IsQueued, "N1 开局排队");
+                Check(PumpUntil(host, () => host.StartedSessions.Length == 1), "N2 开局成功");
+                PMDsLobbySessionRecord record = host.StartedSessions[0];
+                string error;
+                PMDsBootstrappedMatch boot = ReadBootstrap(
+                    ArgValue(launcher.Requests[0].Arguments, "-bootstrap"), out error);
+                if (boot == null) { Check(false, "N3 引导不可读：" + error); return; }
+                controlSocket = Connect(host.ControlPort);
+                SendBytes(controlSocket, BuildReadyFrame(boot, record.Port, boot.CollisionDigest, true), 64);
+                Check(PumpUntil(host, () => host.GetCoordinator("m-twice").State == PMDsSessionState.Running),
+                    "N3 进入Running");
+
+                gateway.Online.Remove(311);
+                host.NotifyClientDisconnected(311, 101L); // 首次TCP连接代次
+                Check(PumpUntil(host, () => host.ClientDisconnectsHeld >= 1), "N4 第一断线开窗");
+                host.NotifyClientDisconnected(311, 101L); // 同连接重复Close不得刷新
+                host.PumpOnce();
+                gateway.Online.Add(311);
+                Check(host.TryRequestResumeEntry(311), "N5 首次自动续局请求入队");
+                Check(PumpUntil(host, () => gateway.Offers.Count == 3), "N6 首次新票已发");
+                if (gateway.Offers.Count < 3) { return; }
+                byte[] first = gateway.Offers[2].Ticket;
+                long reissues = host.GetCoordinator("m-twice").Counters.TicketsReissued;
+
+                gateway.Online.Remove(311);
+                host.NotifyClientDisconnected(311, 102L); // 新TCP连接真实第二次断线
+                Check(PumpUntil(host, () => host.ClientDisconnectsHeld >= 3), "N7 第二次真实断线产生新episode");
+                gateway.Online.Add(311);
+                Check(host.TryRequestResumeEntry(311), "N8 第二次续局请求入队");
+                Check(PumpUntil(host, () => gateway.Offers.Count == 4), "N9 第二张票发出");
+                Check(gateway.Offers.Count >= 4 && !BytesEqual(first, gateway.Offers[3].Ticket),
+                    "N10 二次断线必须是新票字节（旧票已被DS消费/留墓碑）");
+                CheckEq(host.GetCoordinator("m-twice").Counters.TicketsReissued, reissues + 1,
+                    "N11 新episode只轮转一次Nonce，不因同连接重复Close滚票");
             }
             finally
             {
@@ -1281,6 +1424,7 @@ namespace PMDsLobbyTest
                 copy.CollisionDigest = notice.CollisionDigest;
                 copy.Identity = notice.Identity;
                 copy.Ticket = (byte[])notice.Ticket.Clone();
+                copy.IsResume = notice.IsResume;
                 Offers.Add(copy);
                 error = null;
                 return true;
@@ -1613,6 +1757,697 @@ namespace PMDsLobbyTest
                     host.Dispose();
                 }
             }
+        }
+
+        // ────────────────────────────────────────────────────────────────
+        // L. T-LOOP4：原局断线续玩（新票签发 / episode 幂等 / 失败面 / 只读结果）
+        // ────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// T-LOOP4 验收：Lobby 侧原局断线续玩 v1（`Docs/plans/net-architecture-migration.md`
+        /// 「T-LOOP1 原局断线续玩 v1 冻结接口」）。
+        ///
+        /// 全程用注入时钟 + 真实 loopback 控制链路 + 受控进程替身，不用 sleep 等真实超时；
+        /// 覆盖「正向签发 / 同 episode 不滚票 / 全部失败面 / 终局不可逆 / 只读结果有界」。
+        /// </summary>
+        private static void TestResumeEntryLifecycle()
+        {
+            FakeClock clock = new FakeClock();
+            FakeLauncher launcher = new FakeLauncher();
+            FakeGateway gateway = new FakeGateway();
+            gateway.Online.Add(201);
+            gateway.Online.Add(202);
+            gateway.Online.Add(203);   // 在线但没有任何对局：用于「无局可续」
+            gateway.ProcessAliveProbe = () => launcher.Processes.Count > 0 && launcher.Processes[0].IsRunning;
+
+            PMDsLobbyHost host = CreateHost(clock, launcher, gateway, null);
+            Socket controlSocket = null;
+
+            try
+            {
+                Check(host.TryStartMatch(MakeRequest("m-resume", 201, 202)).IsQueued, "L1 开局已入队");
+                Check(PumpUntil(host, () => host.StartedSessions.Length == 1), "L2 开局已落地");
+
+                PMDsLobbySessionRecord record = host.StartedSessions[0];
+                PMDsCoordinator coordinator = host.GetCoordinator("m-resume");
+                string decodeError;
+                PMDsBootstrappedMatch boot = ReadBootstrap(
+                    ArgValue(launcher.Requests[0].Arguments, "-bootstrap"), out decodeError);
+                if (boot == null)
+                {
+                    Check(false, "引导文件不可解码：" + decodeError);
+                    return;
+                }
+
+                controlSocket = Connect(host.ControlPort);
+                SendBytes(controlSocket, BuildReadyFrame(boot, record.Port, boot.CollisionDigest, true), 64);
+                Check(PumpUntil(host, () => coordinator.State == PMDsSessionState.Running), "L3 会话就绪并 Running");
+                CheckEq(gateway.Offers.Count, 2, "L4 两名玩家收到初次入局 offer");
+                if (gateway.Offers.Count < 2)
+                {
+                    return;
+                }
+
+                Check(!gateway.Offers[0].IsResume && !gateway.Offers[1].IsResume,
+                    "L5 初次入局 offer 的 IsResume=false（PMDS1:）");
+                byte[] originalTicket = (byte[])gateway.Offers[0].Ticket.Clone();
+                PMDsRosterIdentity identity201 = gateway.Offers[0].Identity;
+                CheckEq(identity201.Uid, 201, "L6 初次 offer 的身份来自名册 uid 201");
+
+                // ── 真实断线 ⇒ 进入 30s 窗口，不立即中止 ──
+                // 真实顺序：玩家的 TCP 已经掉了（所以此刻该 uid **没有**已认证连接），
+                // 之后的重新登录才会让它重新变成已认证。
+                gateway.Online.Remove(201);
+                host.NotifyClientDisconnected(201);
+                Check(PumpUntil(host, () => host.ClientDisconnectsHeld == 1), "L7 断线进入续玩窗口");
+                host.PumpOnce();
+                CheckEq(host.ClientDisconnectAborts, 0L, "L8 窗口内未中止该局");
+                CheckEq(coordinator.State, PMDsSessionState.Running, "L9 窗口内会话仍为 Running");
+                Check(host.PortPool.InUseCount == 1 && host.PlayerLedger.IsOccupied(201),
+                    "L10 窗口内端口与 uid 仍被占用");
+
+                // ── 未断线的在线 uid 不得取续局票（在线顶号必须 fail-closed）──
+                Check(host.TryRequestResumeEntry(202), "L11 续局请求已入队（uid=202）");
+                Check(PumpUntil(host, () => host.ResumeRejectedNotDisconnected == 1), "L12 未断线被拒");
+                CheckEq(host.LastResumeOutcome, PMDsLobbyResumeOutcome.RejectedNotDisconnected, "L13 拒绝原因=未断线");
+                CheckEq(gateway.Offers.Count, 2, "L14 被拒请求不产生任何 offer");
+
+                // ── UID0 / 无局可续 ──
+                CheckRejected(!host.TryRequestResumeEntry(0), "L15 uid=0 不入队");
+                CheckEq(host.ResumeRejectedUidInvalid, 1L, "L16 UID0 被拒计数");
+                Check(host.TryRequestResumeEntry(203), "L17 uid=203 请求已入队");
+                Check(PumpUntil(host, () => host.ResumeRejectedNoSession >= 1), "L18 无局可续被拒");
+                CheckEq(gateway.Offers.Count, 2, "L19 无局请求不产生 offer");
+
+                // ── 没有已认证连接（密码校验/原子登记未真正落地）不得取票 ──
+                Check(host.TryRequestResumeEntry(201), "L20 uid=201 请求已入队（当前无已认证连接）");
+                Check(PumpUntil(host, () => host.ResumeRejectedNotAuthenticated == 1), "L21 无已认证连接被拒");
+                CheckEq(gateway.Offers.Count, 2, "L22 未认证请求不产生 offer");
+                gateway.Online.Add(201);   // 模拟玩家重新登录并原子登记成功
+
+                // ── offer 投递失败 ⇒ 记失败、不中止该局，且已签发的票被缓存（不白轮转）──
+                gateway.FailOffer = true;
+                Check(host.TryRequestResumeEntry(201), "L23 uid=201 续局请求已入队（注入投递失败）");
+                Check(PumpUntil(host, () => host.ResumeOfferSendFailures == 1), "L24 offer 投递失败被记录");
+                CheckEq(host.ResumeTicketsIssued, 1L, "L25 首次请求确实重签了一张新票");
+                CheckEq(coordinator.Counters.TicketsReissued, 1L, "L26 协调器层只轮转过一次 Nonce");
+                CheckEq(coordinator.State, PMDsSessionState.Running, "L27 投递失败不中止该局");
+                gateway.FailOffer = false;
+
+                // ── 重试成功 ⇒ 用**同一张**票（不滚票）──
+                Check(host.TryRequestResumeEntry(201), "L28 uid=201 重试续局请求已入队");
+                Check(PumpUntil(host, () => gateway.Offers.Count == 3), "L29 续局 offer 已送达");
+                if (gateway.Offers.Count < 3)
+                {
+                    // 新用例对旧行为要能干净地“红”，而不是抛下标越界把后面的断语全吞掉。
+                    Check(false, "L29b 续局 offer 缺失（实现未按 T-LOOP4 签发），后续断语提前结束");
+                    return;
+                }
+
+                CheckEq(host.ResumeTicketsReused, 1L, "L30 首次送达属于「复用本 episode 已签发的票」");
+                CheckEq(coordinator.Counters.TicketsReissued, 1L, "L31 没有第二次轮转（不滚票）");
+
+                PMDsLobbyEntryNotice resumeNotice = gateway.Offers[2];
+                Check(resumeNotice.IsResume, "L32 续局 offer 的 IsResume=true（PMDSR1:）");
+                Check(resumeNotice.Identity == identity201, "L33 续局身份与初次入局一致（只来自名册）");
+                CheckEq(resumeNotice.MatchId, record.MatchId, "L34 MatchId 不变");
+                CheckEq(resumeNotice.Port, record.Port, "L35 端口不变（仍指向同一局）");
+                CheckEq(resumeNotice.Epoch, record.Epoch, "L36 Epoch 不变（原局同世代）");
+                Check(!BytesEqual(resumeNotice.Ticket, originalTicket),
+                    "L37 续局票**不是**旧票字节（换了新 Nonce）");
+                CheckEq(resumeNotice.Ticket.Length, originalTicket.Length, "L38 票据长度与既有 codec 一致");
+
+                // 新票必须仍是本局可信票据（DS 按密钥 + 名册验票，不按引导票字节比对）。
+                PMDsTicketVerification verified = coordinator.ResolveTicket(resumeNotice.Ticket, clock.Ms / 1000L);
+                Check(verified.IsValid, "L39 新票通过本局验签（Verdict=" + verified.Verdict + "）");
+                Check(verified.Identity == identity201, "L40 新票绑定的身份与名册一致");
+
+                // ── 同 episode 再请求一次 ⇒ 原样重发同一张票 ──
+                Check(host.TryRequestResumeEntry(201), "L41 同 episode 第三次请求已入队");
+                Check(PumpUntil(host, () => gateway.Offers.Count == 4), "L42 重复请求仍会重发 offer");
+                Check(gateway.Offers.Count == 4 && BytesEqual(gateway.Offers[3].Ticket, resumeNotice.Ticket),
+                    "L43 重复请求字节完全相同（不滚票）");
+                CheckEq(host.ResumeTicketsReused, 2L, "L44 复用计数 +1");
+                CheckEq(host.ResumeTicketsIssued, 1L, "L45 签发（轮转）计数仍为 1");
+                CheckEq(coordinator.Counters.TicketsReissued, 1L, "L46 协调器只轮转过一次");
+
+                // ── 冻结 codec 对续局 offer 的严格往返（与生产网关同字段映射）──
+                string resumeText = PMNet.Session.PMDsEntryCodec.Encode(ToWireOffer(resumeNotice));
+                Check(resumeText.StartsWith(PMNet.Session.PMDsEntryCodec.ResumePrefix, StringComparison.Ordinal),
+                    "L47 续局 offer 编码后带 PMDSR1: 前缀（普通 PMDS1 无行为变化）");
+                Check(!resumeText.StartsWith(PMNet.Session.PMDsEntryCodec.Prefix, StringComparison.Ordinal),
+                    "L48 续局 offer 不再以初始 PMDS1: 开头");
+                PMNet.Session.PMDsEntryOffer decodedResume;
+                string resumeDecodeError;
+                Check(PMNet.Session.PMDsEntryCodec.TryDecode(resumeText, out decodedResume, out resumeDecodeError)
+                    && decodedResume != null && decodedResume.IsResume
+                    && BytesEqual(decodedResume.Ticket, resumeNotice.Ticket),
+                    "L49 续局 offer 被冻结 codec 严格解码并标记 IsResume：" + resumeDecodeError);
+
+                // ── 窗口到期（该 uid 已重新在线）⇒ 不再签发新票，但**不中止**权威局 ──
+                AdvanceWithHeartbeats(host, controlSocket, boot, coordinator, clock, 30000);
+                Check(PumpUntil(host, () => host.ReconnectWindowsExpired >= 1), "L50 续玩窗口到期");
+                CheckEq(host.ClientDisconnectAborts, 0L, "L51 到期时 uid 已在线 ⇒ 不中止该局");
+                CheckEq(coordinator.State, PMDsSessionState.Running, "L52 会话仍为 Running");
+                int offersBeforeExpiredRequest = gateway.Offers.Count;
+                Check(host.TryRequestResumeEntry(201), "L53 过期后请求已入队");
+                Check(PumpUntil(host, () => host.ResumeRejectedWindowExpired == 1), "L54 过期后请求被拒");
+                CheckEq(host.LastResumeOutcome, PMDsLobbyResumeOutcome.RejectedWindowExpired, "L55 拒绝原因=窗口过期");
+                CheckEq(gateway.Offers.Count, offersBeforeExpiredRequest, "L56 过期后不再产生 offer");
+
+                // ── 终局 ⇒ 只读结果缓存 + 续局一律拒绝（不可逆）──
+                SendBytes(controlSocket, BuildResultFrame(boot, 9001UL, 1, Encoding.UTF8.GetBytes("resume-smoke")), 32);
+                Check(PumpUntil(host, () => coordinator.State == PMDsSessionState.ResultPending),
+                    "L57 结果推进到 ResultPending");
+                Check(PumpUntil(host, () => host.MatchEndedNoticesRecorded == 2), "L58 两名玩家各写一条只读结果");
+
+                string endedText;
+                Check(host.TryGetRecentMatchEndedNotice(201, out endedText), "L59 取得 uid=201 的只读结果通知");
+                string expected201 = "PMDS-END1:" + Convert.ToBase64String(Encoding.UTF8.GetBytes("m-resume"))
+                    + ":1:0";
+                CheckEq(endedText, expected201, "L60 通知文本严格等于冻结格式（base64(matchId)/winner/localTeam）");
+                string ended202;
+                Check(host.TryGetRecentMatchEndedNotice(202, out ended202), "L61 uid=202 也有条目");
+                CheckEq(ended202, "PMDS-END1:" + Convert.ToBase64String(Encoding.UTF8.GetBytes("m-resume"))
+                    + ":1:1", "L62 localTeam 取该 uid 在名册里的真实 TeamId");
+                CheckRejected(!host.TryGetRecentMatchEndedNotice(203, out ended202), "L63 非参战 uid 没有结果条目");
+                CheckRejected(!host.TryGetRecentMatchEndedNotice(0, out ended202), "L64 uid=0 不返回结果条目");
+
+                int offersBeforeTerminalRequest = gateway.Offers.Count;
+                Check(host.TryRequestResumeEntry(201), "L65 终局后请求已入队");
+                Check(PumpUntil(host, () => host.ResumeRejectedTerminal == 1), "L66 终局后续局被拒");
+                CheckEq(host.LastResumeOutcome, PMDsLobbyResumeOutcome.RejectedTerminal, "L67 拒绝原因=已终局");
+                CheckEq(gateway.Offers.Count, offersBeforeTerminalRequest, "L68 终局后不产生 offer（不恢复输入）");
+
+                // ── 只读结果缓存 TTL（默认 120s）有界过期 ──
+                AdvanceWithHeartbeats(host, controlSocket, boot, coordinator, clock, 120001);
+                string expired;
+                CheckRejected(!host.TryGetRecentMatchEndedNotice(201, out expired), "L69 超过 120s 后结果条目过期");
+                CheckEq(host.MatchEndedNoticesServed, 2L, "L70 已服务计数只记两次成功返回");
+            }
+            finally
+            {
+                CloseQuietly(controlSocket);
+                host.Dispose();
+            }
+
+            VerifyServerLoginWiring();
+        }
+
+        /// <summary>
+        /// 与 <c>Server.ServerLobbyClientGateway.TrySendEntryOffer</c> **完全同字段**的映射（含 IsResume）。
+        /// 本测试不编 Server 主工程（避免锁运行中的 dll），因此用同一映射验证字段能过冻结 codec。
+        /// </summary>
+        private static PMNet.Session.PMDsEntryOffer ToWireOffer(PMDsLobbyEntryNotice notice)
+        {
+            PMNet.Session.PMDsEntryOffer offer = new PMNet.Session.PMDsEntryOffer();
+            offer.MatchId = notice.MatchId;
+            offer.DsId = notice.DsId;
+            offer.Host = notice.Host;
+            offer.Epoch = notice.Epoch;
+            offer.ProtocolHash = notice.ProtocolHash;
+            offer.CollisionDigest = notice.CollisionDigest;
+            offer.Port = notice.Port;
+            offer.Identity = notice.Identity;
+            offer.Ticket = notice.Ticket;
+            offer.IsResume = notice.IsResume;
+            return offer;
+        }
+
+        // ────────────────────────────────────────────────────────────────
+        //  M. T-LOOP1 高危1：PMDS-END1「上局已终局」只读结果通知的共享严格解析
+        // ────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// 红队高危1（主计划末尾「T-LOOP 跨端独立红队复核」第 1 条）的验收：
+        /// **真实生产编码**（<c>PMDsLobbyEndedNotice.ToText</c> → Server 的 <c>PMDsLobbyEndedCodec</c>
+        /// → 共享 <c>PMNet.Session.PMDsEndedNoticeCodec</c>）⇄ 共享严格解析的字段往返；
+        /// 再逐条钉住畸形样本必须被拒。
+        ///
+        /// 为什么不是「源码正则」验收：这里断言的是**行为**（接受/拒绝 + 解析出的字段值 +
+        /// 结论口径 + 只读文案），并且关键负例都与一条「最小修复版」配对
+        /// （见 <see cref="CheckMutationRejected"/>），所以「解析器一律拒绝」这种假实现不可能全绿。
+        /// </summary>
+        private static void TestEndedNoticeStrictCodec()
+        {
+            // ── 1. 真实生产编码 → 共享解析：字段往返 + 冻结线格式 ──
+            PMDsLobbyEndedNotice produced = new PMDsLobbyEndedNotice();
+            produced.MatchId = "m-loop-end-1";
+            produced.WinnerTeamId = 1;
+            produced.LocalTeamId = 0;
+
+            string text = produced.ToText();
+            string frozenFormat = "PMDS-END1:"
+                + Convert.ToBase64String(Encoding.UTF8.GetBytes("m-loop-end-1")) + ":1:0";
+            CheckEq(text, frozenFormat, "M01 生产编码严格等于冻结线格式（base64(matchId):winner:localTeam）");
+            CheckEq(PMDsLobbyEndedCodec.Prefix, "PMDS-END1:", "M02 前缀常量与冻结格式一致");
+
+            PMNet.Session.PMDsEndedNotice notice;
+            string error;
+            bool decoded = PMNet.Session.PMDsEndedNoticeCodec.TryDecode(text, out notice, out error);
+            Check(decoded && notice != null, "M03 生产编码能被共享严格解析（" + (error ?? "ok") + "）");
+            if (!decoded || notice == null)
+            {
+                Check(false, "M03b 共享解析未接受生产编码，后续断语提前结束");
+                return;
+            }
+
+            CheckEq(notice.MatchId, "m-loop-end-1", "M04 matchId 字段往返一致");
+            CheckEq(notice.WinnerTeamId, 1, "M05 winnerTeamId 字段往返一致");
+            CheckEq(notice.LocalTeamId, 0, "M06 localTeamId 字段往返一致");
+
+            // 独立手写的冻结文本（**不经过本仓 Encode**）也必须能解析：排除「同源自证」。
+            PMNet.Session.PMDsEndedNotice independent;
+            Check(PMNet.Session.PMDsEndedNoticeCodec.TryDecode(frozenFormat, out independent, out error)
+                && independent != null && independent.MatchId == "m-loop-end-1"
+                && independent.WinnerTeamId == 1 && independent.LocalTeamId == 0,
+                "M07 独立手写的冻结文本可解析且字段一致（" + (error ?? "ok") + "）");
+
+            // ── 2. 前缀互不抢占：入局 codec 的 PMDS1:/PMDSR1: 必须原样保留（团队共享，不得丢）──
+            CheckEq(PMNet.Session.PMDsEntryCodec.Prefix, "PMDS1:", "M08 PMDS1: 初始入局前缀未变");
+            CheckEq(PMNet.Session.PMDsEntryCodec.ResumePrefix, "PMDSR1:", "M09 PMDSR1: 续局前缀未丢");
+            Check(!PMNet.Session.PMDsEndedNoticeCodec.HasPrefix("PMDS1:AAAA:1:0"),
+                "M10 本 codec 不认 PMDS1: 前缀（与入局 codec 不互相抢）");
+            Check(!PMNet.Session.PMDsEndedNoticeCodec.HasPrefix("PMDSR1:AAAA:1:0"),
+                "M11 本 codec 不认 PMDSR1: 前缀");
+            Check(PMNet.Session.PMDsEndedNoticeCodec.HasPrefix(frozenFormat),
+                "M12 HasPrefix 只认完整的 PMDS-END1: 前缀（含冒号）");
+            CheckRejected(!PMNet.Session.PMDsEndedNoticeCodec.HasPrefix("PMDS-END1"),
+                "M13 缺冒号的前缀不算命中（旧代码的裸前缀比较已被收紧）");
+
+            // ── 3. 胜/负/平：结论口径与本局 HUD 完全一致（winner==0 → 平；localTeam==winner → 胜）──
+            CheckVerdict(BuildEndedText("m-draw", 0, 1), PMNet.Session.PMDsEndedVerdict.Draw, "平局", "M14");
+            CheckVerdict(BuildEndedText("m-win", 2, 2), PMNet.Session.PMDsEndedVerdict.Victory, "胜利", "M15");
+            CheckVerdict(BuildEndedText("m-lose", 3, 1), PMNet.Session.PMDsEndedVerdict.Defeat, "失败", "M16");
+
+            // ── 4. 畸形样本：一律必须被拒（负例优先）──
+            //    覆盖契约要求的六类：非法分段 / 尾部 / 非规范 Base64 / 非法 UTF-8 / 负 team / 空 matchId。
+            string[] malformed = new string[]
+            {
+                null,
+                string.Empty,
+                "PMDS-END1",                                       // 缺冒号
+                "PMDS-END1:",                                      // 空载荷
+                "PMDS-END1:AAAA",                                  // 缺字段
+                "PMDS-END1:AAAA:1",                                // 缺 localTeam
+                "PMDS-END1:AAAA:1:",                               // 空 localTeam
+                "PMDS-END1:AAAA::0",                               // 空 winner
+                "PMDS-END1:AAAA:1:0:9",                            // 尾部多余字段
+                "PMDS-END1:AAAA:1:0:",                             // 尾部空字段（悬空冒号）
+                "PMDS-END1::1:0",                                  // 空 matchId（空 base64）
+                "pmds-end1:AAAA:1:0",                              // 前缀大小写不符
+                " PMDS-END1:AAAA:1:0",                             // 前缀前有空白
+                "XPMDS-END1:AAAA:1:0",                             // 前缀不在开头
+                "PMDS1:AAAA:1:0",                                  // 用入局前缀冒充
+                "PMDSR1:AAAA:1:0",                                 // 用续局前缀冒充
+                "PMDS-END1:AAA:1:0",                               // base64 长度 %4 != 0
+                "PMDS-END1:bS1wYQ:1:0",                            // 省略填充
+                "PMDS-END1:AA=A:1:0",                              // 填充符出现在中间
+                "PMDS-END1:AAA==:1:0",                             // 填充符过多
+                "PMDS-END1:QR==:1:0",                              // 非规范 Base64（填充位非零）
+                "PMDS-END1:AA A=:1:0",                             // 空白混入 Base64
+                "PMDS-END1:wyg=:1:0",                              // 非法 UTF-8（0xC3 0x28）
+                "PMDS-END1:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(new string('a', 129))) + ":1:0",
+                "PMDS-END1:AAAA:-1:0",                             // 负 winner
+                "PMDS-END1:AAAA:1:-2",                             // 负 localTeam
+                "PMDS-END1:AAAA:+1:0",                             // 显式正号（非规范整数）
+                "PMDS-END1:AAAA:1:+0",
+                "PMDS-END1:AAAA: 1:0",                             // 字段内空白
+                "PMDS-END1:AAAA:1: 0",
+                "PMDS-END1:AAAA:01:0",                             // 前导零（非规范整数）
+                "PMDS-END1:AAAA:1:00",
+                "PMDS-END1:AAAA:abc:0",                            // 非数字
+                "PMDS-END1:AAAA:1:x",
+                "PMDS-END1:AAAA:1:0.0",                            // 小数
+                "PMDS-END1:AAAA:0x1:0",                            // 十六进制写法
+                "PMDS-END1:AAAA:2147483648:0",                     // int 溢出
+                "PMDS-END1:AAAA:1:2147483648",
+                "PMDS-END1:AAAA:1:0 ",                             // 尾随空白
+                "PMDS-END1:AAAA:1:0\n",                            // 尾部换行
+                "PMDS-END1:AAAA:\uFF11:0",                            // 全角数字（非 ASCII 数字）
+                "PMDS-END1:" + new string('A', 600) + ":1:0",      // 文本超过 512 字节上限
+            };
+
+            for (int i = 0; i < malformed.Length; i++)
+            {
+                PMNet.Session.PMDsEndedNotice rejected;
+                string reason;
+                bool accepted = PMNet.Session.PMDsEndedNoticeCodec.TryDecode(malformed[i], out rejected, out reason);
+                CheckRejected(!accepted && rejected == null,
+                    "M20." + (i + 1).ToString("D2") + " 畸形样本被拒：" + DescribeText(malformed[i]) + "（"
+                    + (accepted ? "被错误接受" : reason) + "）");
+            }
+
+            // ── 5. 配对反例：畸形必须被拒，而它的「最小修复版」必须被接受 ──
+            //    没有这一对，一个「一律拒绝」的实现也能让上面所有负例全绿。
+            string pairGood = BuildEndedText("m-pair", 1, 0);
+            CheckMutationRejected(pairGood, pairGood + ":9", "M40 尾部多余字段被拒");
+            CheckMutationRejected(pairGood, pairGood + ":", "M41 悬空尾部冒号被拒");
+            CheckMutationRejected(pairGood, BuildEndedText("m-pair", 1, 0).Replace(":1:0", ":-1:0"),
+                "M42 负 winner 被拒");
+            CheckMutationRejected(pairGood, BuildEndedText("m-pair", 1, 0).Replace(":1:0", ":1:-2"),
+                "M43 负 localTeam 被拒");
+            CheckMutationRejected(pairGood, BuildEndedText("m-pair", 1, 0).Replace(":1:0", ":01:0"),
+                "M44 前导零被拒（非规范整数）");
+            CheckMutationRejected(pairGood, BuildEndedText("m-pair", 1, 0).Replace(":1:0", ":+1:0"),
+                "M45 显式正号被拒");
+            CheckMutationRejected("PMDS-END1:bS1wYQ==:1:0", "PMDS-END1:bS1wYQ:1:0",
+                "M46 省略 Base64 填充被拒（配对样本的 base64 确实带填充）");
+            CheckMutationRejected(pairGood, "PMDS-END1:wyg=:1:0", "M47 非法 UTF-8 被拒");
+            CheckMutationRejected(pairGood, "PMDS-END1::1:0", "M48 空 matchId 被拒");
+            CheckMutationRejected(pairGood, "PMDS1:"
+                + Convert.ToBase64String(Encoding.UTF8.GetBytes("m-pair")) + ":1:0",
+                "M49 用 PMDS1: 前缀冒充被拒");
+            // 一个 1 字节的 matchId 是**合法**的，而且它的规范 Base64 以两个 '=' 结尾：
+            // 必须被接受（这里刻意**不**照抄入局 codec 的「填充必须落在第 4 位以后」规则），
+            // 而只把「填充位非零」的 QR== 拒掉。
+            CheckMutationRejected("PMDS-END1:QQ==:1:0", "PMDS-END1:QR==:1:0",
+                "M50 非规范 Base64（填充位非零）被拒，而规范的单字节编码被接受");
+
+            // ── 6. 生产编码侧同样 fail-closed（远端字段可能非法：宁可让通知缺席，也不发必然被拒的文本）──
+            PMNet.Session.PMDsEndedNotice badWinner = new PMNet.Session.PMDsEndedNotice();
+            badWinner.MatchId = "m-bad";
+            badWinner.WinnerTeamId = -1;
+            badWinner.LocalTeamId = 0;
+            string encodedText;
+            string encodeError;
+            CheckRejected(!PMNet.Session.PMDsEndedNoticeCodec.TryEncode(badWinner, out encodedText, out encodeError)
+                && encodedText == null, "M60 负 winner 无法编码（" + (encodeError ?? "ok") + "）");
+            ExpectThrow(delegate() { PMNet.Session.PMDsEndedNoticeCodec.Encode(badWinner); },
+                "M61 Encode 对非法字段显式抛出（不静默发送）");
+
+            PMNet.Session.PMDsEndedNotice badLocalTeam = new PMNet.Session.PMDsEndedNotice();
+            badLocalTeam.MatchId = "m-bad";
+            badLocalTeam.WinnerTeamId = 1;
+            badLocalTeam.LocalTeamId = -2;
+            CheckRejected(!PMNet.Session.PMDsEndedNoticeCodec.TryEncode(badLocalTeam, out encodedText, out encodeError),
+                "M62 负 localTeam 无法编码（" + (encodeError ?? "ok") + "）");
+
+            PMNet.Session.PMDsEndedNotice emptyMatch = new PMNet.Session.PMDsEndedNotice();
+            emptyMatch.MatchId = string.Empty;
+            CheckRejected(!PMNet.Session.PMDsEndedNoticeCodec.TryEncode(emptyMatch, out encodedText, out encodeError),
+                "M63 空 matchId 无法编码（" + (encodeError ?? "ok") + "）");
+
+            PMNet.Session.PMDsEndedNotice okNotice = new PMNet.Session.PMDsEndedNotice();
+            okNotice.MatchId = "m-loop-end-1";
+            okNotice.WinnerTeamId = 1;
+            okNotice.LocalTeamId = 0;
+            Check(PMNet.Session.PMDsEndedNoticeCodec.TryEncode(okNotice, out encodedText, out encodeError)
+                && string.Equals(encodedText, frozenFormat, StringComparison.Ordinal),
+                "M64 合法字段的 TryEncode 与冻结格式一致（" + (encodeError ?? "ok") + "）");
+
+            // Lobby 侧的旧入口（PMDsLobbyEndedCodec）也必须走同一条 fail-closed 路径。
+            PMDsLobbyEndedNotice badLobby = new PMDsLobbyEndedNotice();
+            badLobby.MatchId = "m-bad";
+            badLobby.WinnerTeamId = -1;
+            badLobby.LocalTeamId = 0;
+            string lobbyText;
+            string lobbyError;
+            CheckRejected(!PMDsLobbyEndedCodec.TryEncode(badLobby, out lobbyText, out lobbyError)
+                && lobbyText == null, "M65 Lobby 侧负 winner 通知无法编码（" + (lobbyError ?? "ok") + "）");
+
+            // ── 7. 宿主端到端负例：**已验证但不可信**的 winner（-1）不得变成客户端可见的「已结束」通知 ──
+            //    控制协议的 Result.WinnerTeamId 只拒 < -1（-1 可上线），所以这条路径可达；
+            //    若在此放行，客户端会拿一个负号去和「本队」比较，等于用乱值冒充可信结论。
+            {
+                FakeClock negativeClock = new FakeClock();
+                FakeLauncher negativeLauncher = new FakeLauncher();
+                FakeGateway negativeGateway = new FakeGateway();
+                negativeGateway.Online.Add(301);
+                negativeGateway.Online.Add(302);
+                negativeGateway.ProcessAliveProbe =
+                    () => negativeLauncher.Processes.Count > 0 && negativeLauncher.Processes[0].IsRunning;
+
+                PMDsLobbyHost negativeHost = CreateHost(negativeClock, negativeLauncher, negativeGateway, null);
+                Socket negativeSocket = null;
+                try
+                {
+                    Check(negativeHost.TryStartMatch(MakeRequest("m-negative-winner", 301, 302)).IsQueued,
+                        "M70 负 winner 场景：开局已入队");
+                    Check(PumpUntil(negativeHost, () => negativeHost.StartedSessions.Length == 1),
+                        "M71 负 winner 场景：开局已落地");
+
+                    PMDsLobbySessionRecord negativeRecord = negativeHost.StartedSessions[0];
+                    PMDsCoordinator negativeCoordinator = negativeHost.GetCoordinator("m-negative-winner");
+                    string negativeDecodeError;
+                    PMDsBootstrappedMatch negativeBoot = ReadBootstrap(
+                        ArgValue(negativeLauncher.Requests[0].Arguments, "-bootstrap"), out negativeDecodeError);
+                    if (negativeBoot == null)
+                    {
+                        Check(false, "M72 负 winner 场景：引导文件不可解码 " + negativeDecodeError);
+                    }
+                    else
+                    {
+                        negativeSocket = Connect(negativeHost.ControlPort);
+                        SendBytes(negativeSocket,
+                            BuildReadyFrame(negativeBoot, negativeRecord.Port, negativeBoot.CollisionDigest, true), 64);
+                        Check(PumpUntil(negativeHost, () => negativeCoordinator.State == PMDsSessionState.Running),
+                            "M72 负 winner 场景：会话 Running");
+
+                        SendBytes(negativeSocket,
+                            BuildResultFrame(negativeBoot, 8801UL, -1, Encoding.UTF8.GetBytes("negative-smoke")), 32);
+                        Check(PumpUntil(negativeHost,
+                                () => negativeCoordinator.State == PMDsSessionState.ResultPending),
+                            "M73 负 winner 的 Result 被协调器受理（协议只拒 < -1）");
+                        Check(PumpUntil(negativeHost, () => negativeHost.MatchEndedNoticesRecorded == 2L),
+                            "M74 名册两条只读结果条目已写入（写入点未被本修改改变）");
+
+                        string negativeText;
+                        CheckRejected(!negativeHost.TryGetRecentMatchEndedNotice(301, out negativeText)
+                            && negativeText == null,
+                            "M75 负 winner 不产生客户端可见的结束通知（fail-closed，不冒充可信结果）");
+                        CheckEq(negativeHost.MatchEndedNoticesEncodeRejected, 1L,
+                            "M76 编码侧 fail-closed 分支确实走到且可观测");
+                        CheckEq(negativeHost.MatchEndedNoticesServed, 0L, "M77 未服务任何不可信通知");
+                    }
+                }
+                finally
+                {
+                    CloseQuietly(negativeSocket);
+                    negativeHost.Dispose();
+                }
+            }
+        }
+
+        /// <summary>解码一段冻结文本并断言结论（胜/负/平）与只读文案。</summary>
+        private static void CheckVerdict(string text, PMNet.Session.PMDsEndedVerdict expected,
+            string expectedText, string tag)
+        {
+            PMNet.Session.PMDsEndedNotice notice;
+            string error;
+            if (!PMNet.Session.PMDsEndedNoticeCodec.TryDecode(text, out notice, out error) || notice == null)
+            {
+                Check(false, tag + " 合法样本应被接受：" + text + "（" + (error ?? "null") + "）");
+                return;
+            }
+
+            PMNet.Session.PMDsEndedVerdict actual = PMNet.Session.PMDsEndedNoticeCodec.ResolveVerdict(notice);
+            Check(actual == expected, tag + "a 结论=" + actual + "（期望 " + expected + "）");
+            CheckEq(PMNet.Session.PMDsEndedNoticeCodec.VerdictText(actual), expectedText, tag + "b 结论文案");
+
+            string message = PMNet.Session.PMDsEndedNoticeCodec.BuildReadOnlyMessage(notice);
+            Check(message.IndexOf(expectedText, StringComparison.Ordinal) >= 0
+                && message.IndexOf(notice.MatchId, StringComparison.Ordinal) >= 0,
+                tag + "c 只读文案含结论与对局：" + message.Replace("\n", " / "));
+        }
+
+        /// <summary>
+        /// 配对反例：<paramref name="good"/> 必须被接受、<paramref name="bad"/> 必须被拒。
+        /// 没有这一对，一个「一律拒绝」的实现也能让所有负例全绿。
+        /// </summary>
+        private static void CheckMutationRejected(string good, string bad, string label)
+        {
+            PMNet.Session.PMDsEndedNotice decoded;
+            string error;
+            bool goodAccepted = PMNet.Session.PMDsEndedNoticeCodec.TryDecode(good, out decoded, out error);
+            bool badAccepted = PMNet.Session.PMDsEndedNoticeCodec.TryDecode(bad, out decoded, out error);
+            CheckRejected(goodAccepted && !badAccepted,
+                label + "（合法样本被接受=" + goodAccepted + "，畸形样本被接受=" + badAccepted + "）");
+        }
+
+        /// <summary>
+        /// 独立手写的冻结线格式（**不调用被测 codec**）：
+        /// <c>base64(matchId UTF-8)</c> + <c>:</c> + winner + <c>:</c> + localTeam。
+        /// 用它造合法样本，避免「用被测编码器造样本再喂给被测解析器」的同源自证。
+        /// </summary>
+        private static string BuildEndedText(string matchId, int winnerTeamId, int localTeamId)
+        {
+            return "PMDS-END1:" + Convert.ToBase64String(Encoding.UTF8.GetBytes(matchId))
+                + ":" + winnerTeamId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ":" + localTeamId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>期望某段代码抛出（参数不合法是**调用方**的编程错误，必须显式炸）。</summary>
+        private static void ExpectThrow(Action action, string label)
+        {
+            try
+            {
+                action();
+                Check(false, label + "（未抛出）");
+            }
+            catch (Exception)
+            {
+                Check(true, label);
+            }
+        }
+
+        /// <summary>把样本转成可读标签（截断 + 转义控制字符）。样本是测试数据，不含真实凭据。</summary>
+        private static string DescribeText(string text)
+        {
+            if (text == null)
+            {
+                return "<null>";
+            }
+
+            string shown = text.Length > 48 ? text.Substring(0, 48) + "…" : text;
+            return "\"" + shown.Replace("\n", "\\n").Replace("\r", "\\r").Replace("\0", "\\0") + "\"";
+        }
+
+        /// <summary>
+        /// 推进注入时钟并**保持 Lobby↔DS 控制面存活**：每步先发一条真实 Heartbeat 帧，
+        /// 等到协调器确实收到并刷新了 liveness 时钟，再推进下一步。
+        ///
+        /// 为什么必须这样：玩家 TCP 断线与控制通道是两条独立链路，所以续玩窗口期内控制面仍需心跳；
+        /// 否则会先撞 15 秒心跳超时，测试验的就不是续玩窗口而是另一条失败路径。
+        /// </summary>
+        private static void AdvanceWithHeartbeats(PMDsLobbyHost host, Socket controlSocket,
+            PMDsBootstrappedMatch boot, PMDsCoordinator coordinator, FakeClock clock,
+            long totalMilliseconds, long stepMilliseconds = 5000)
+        {
+            long remaining = totalMilliseconds;
+            while (remaining > 0)
+            {
+                long step = remaining < stepMilliseconds ? remaining : stepMilliseconds;
+                long before = coordinator.Counters.Heartbeats;
+                clock.Ms += step;
+                SendBytes(controlSocket, BuildHeartbeatFrame(boot), 64);
+                if (!PumpUntil(host, () => coordinator.Counters.Heartbeats > before))
+                {
+                    // 不静默：心跳没被接受会让后续断言失去意义。
+                    Check(false, "推进时钟时 Heartbeat 未被接受（state=" + coordinator.State + "）");
+                    return;
+                }
+
+                remaining -= step;
+            }
+        }
+
+        /// <summary>
+        /// T-LOOP4 生产接线事实核对（Server 侧登录路径）。
+        ///
+        /// 本门禁不编 Server 主工程（避免锁住运行中的 Server.dll），所以对**真实源码**做文本事实断言：
+        /// 续局与只读结果两条路径必须挂在「密码校验通过 + RegisterActiveClient 原子登记成功」之内，
+        /// 且 T-LOOP2 的并发登记竞态修复（冲突回 Fail + 清身份）必须保留。
+        /// 它与 `dotnet build Server/Server.csproj`（0 错误）一起构成 Server 侧接线证据；
+        /// **真实 TCP 登录与真实两进程续局仍需实机验收**（T-LOOP8）。
+        /// </summary>
+        private static void VerifyServerLoginWiring()
+        {
+            string text;
+            string error;
+            if (!TryReadRepoFile("Server/Controller/Controllers.cs", out text, out error))
+            {
+                Check(false, "L71 无法定位 Server/Controller/Controllers.cs：" + error);
+                return;
+            }
+
+            int loginIndex = text.IndexOf("public MainPack Login(Server server, Client client, MainPack pack)",
+                StringComparison.Ordinal);
+            Check(loginIndex > 0, "L71 找到 UserController.Login");
+
+            int registeredIndex = text.IndexOf("if (registration == PMActiveRegistration.Registered)",
+                StringComparison.Ordinal);
+            Check(registeredIndex > loginIndex, "L72 Login 内存在原子登记成功分支");
+
+            int resumeCallIndex = text.IndexOf("RequestResumeEntryFor(client.UID)", StringComparison.Ordinal);
+            Check(resumeCallIndex > registeredIndex,
+                "L73 续局请求只在原子登记成功分支内发出（密码错误/UID0/并发冲突都到不了）");
+
+            int endedCallIndex = text.IndexOf("AttachEndedMatchNoticeIfAny(client, pack)", StringComparison.Ordinal);
+            Check(endedCallIndex > registeredIndex, "L74 只读结果通知同样只在登记成功后附加");
+
+            int findInfoIndex = text.IndexOf("public MainPack FindPlayerInfo(Server server, Client client, MainPack pack)",
+                StringComparison.Ordinal);
+            Check(findInfoIndex > resumeCallIndex,
+                "L75 续局调用落在 Login 内部（不在 FindPlayerInfo 等其它入口）");
+
+            int clearIdentityIndex = text.IndexOf("client.GetUserData.ClearLoginIdentity();", registeredIndex,
+                StringComparison.Ordinal);
+            Check(clearIdentityIndex > registeredIndex,
+                "L76 登记冲突仍清登录身份并回 Fail（T-LOOP2 竞态修复保留）");
+
+            Check(!ContainsPasswordLogging(text), "L77 Login 路径不打印密码字段（无凭据入日志）");
+
+            int helperIndex = text.IndexOf("private static void RequestResumeEntryFor(int uid)", StringComparison.Ordinal);
+            Check(helperIndex > 0, "L78 续局 helper 存在且为 login 专用封装");
+            Check(text.IndexOf("TryRequestResumeEntry(uid)", helperIndex, StringComparison.Ordinal) > helperIndex,
+                "L79 helper 只是转发到宿主 API（不在 Controller 里另写一套签发）");
+        }
+
+        /// <summary>是否在日志调用里出现密码字段（凭据不得进日志）。</summary>
+        private static bool ContainsPasswordLogging(string text)
+        {
+            string[] lines = text.Split('\n');
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i];
+                if (line.IndexOf("Log", StringComparison.Ordinal) < 0)
+                {
+                    continue;
+                }
+
+                if (line.IndexOf("Password", StringComparison.Ordinal) >= 0
+                    || line.IndexOf("PassWord", StringComparison.Ordinal) >= 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// 从「当前目录」与「AppContext.BaseDirectory」各自向上查找仓库相对文件。
+        /// 找不到时**明确失败**（不静默跳过事实核对）。
+        /// </summary>
+        private static bool TryReadRepoFile(string relativePath, out string text, out string error)
+        {
+            text = null;
+            error = null;
+
+            string[] roots = new string[] { Environment.CurrentDirectory, AppContext.BaseDirectory };
+            for (int i = 0; i < roots.Length; i++)
+            {
+                string directory = roots[i];
+                for (int depth = 0; depth < 12 && !string.IsNullOrEmpty(directory); depth++)
+                {
+                    string candidate = Path.Combine(directory, relativePath);
+                    if (File.Exists(candidate))
+                    {
+                        try
+                        {
+                            text = File.ReadAllText(candidate);
+                            return true;
+                        }
+                        catch (Exception ex)
+                        {
+                            error = ex.GetType().Name + " " + ex.Message;
+                            return false;
+                        }
+                    }
+
+                    DirectoryInfo parent = Directory.GetParent(directory);
+                    if (parent == null)
+                    {
+                        break;
+                    }
+
+                    directory = parent.FullName;
+                }
+            }
+
+            error = "从当前目录与 AppContext.BaseDirectory 向上 12 层都没有找到 " + relativePath;
+            return false;
         }
 
         private static byte[] BuildExitedFrame(PMDsBootstrappedMatch boot, int exitCode)

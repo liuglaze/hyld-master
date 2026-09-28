@@ -72,6 +72,8 @@ namespace PMDsControlTest
                 "R3A2", TestControlFaceLiveness);
             Section("N. 认证正常退出的优雅退出宽限：宽限内不强杀 / 到期才异常收尾强杀",
                 "R3A2", TestGracefulExitGrace);
+            Section("O. T-LOOP4 原局续玩重签票：新 Nonce 轮转 / 只允许 Running / 名册与终局门",
+                "R3A2", TestReissueTicket);
 
             Console.WriteLine();
             var tags = new List<string>(_tagTotal.Keys);
@@ -3370,6 +3372,115 @@ namespace PMDsControlTest
             first = null;
             second = null;
             hash = 0u;
+            return false;
+        }
+
+        // ────────────────────────────────────────────────────────────────
+        // O. T-LOOP4：原局续玩的重签票接口（协调器只做 Nonce 轮转与状态门）
+        // ────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// T-LOOP4 冻结接口（`Docs/plans/net-architecture-migration.md`「T-LOOP1 原局断线续玩 v1 冻结接口」）
+        /// 落在协调器上的那一半：为**非终局 Running** 会话重签一张**新 Nonce** 的票。
+        ///
+        /// 刻意验证两件事：
+        /// ① 普通签发在有效期内是**幂等**的（同一张票），而重签**必须换掉 Nonce** ——
+        ///    否则新端点会撞上旧票在 DS 端点账本里的消费墓碑；
+        /// ② 重签**每次调用都轮转**，所以「同一断线 episode 不滚票」必须由 Lobby 宿主按 episode 缓存实现
+        ///    （那一半由 PMDsLobbyTest 的 L23–L46 覆盖），协调器不假装自己会去重。
+        /// </summary>
+        private static void TestReissueTicket()
+        {
+            FakeClock clock = new FakeClock();
+            FakeLauncher launcher = new FakeLauncher();
+            RecordingSink sink = new RecordingSink();
+            PMDsCoordinatorOptions options = MakeOptions();
+            PMDsCoordinator coordinator = NewCoordinator(clock, launcher, sink, options,
+                MakeRequest("match-o", "ds-o", 7u, 0xAABBCCDDu, 0x0F0F0F0Fu, DefaultRoster));
+
+            long nowSeconds = clock.Now / 1000L;
+            DsView ds = DsView.FromCoordinator(coordinator);
+            int port = coordinator.AllocatedPort;
+
+            PMDsRosterIdentity identity101;
+            Check(coordinator.TryGetRosterIdentity(101, out identity101), "O1 名册身份可查（uid=101）");
+
+            // 状态门：只有非终局 Running 允许重签（终局不可逆）。
+            Check(ThrowsInvalidOperation(delegate { coordinator.ReissueTicket(101, nowSeconds); }),
+                "O2 Allocated 态重签被拒（抛 InvalidOperationException）");
+            CheckEq(coordinator.Counters.TicketsReissued, 0L, "O3 被拒调用不计数");
+
+            CheckEq(coordinator.BeginStart().Outcome, PMDsCoordinatorOutcome.Applied, "O4 启动被接受");
+            byte[] ready = ds.Ready(port, ds.CollisionDigest, true);
+            CheckEq(coordinator.OnControlPayload(ready, 0, ready.Length).Outcome,
+                PMDsCoordinatorOutcome.Applied, "O5 合法 Ready 被接受");
+            Check(ThrowsInvalidOperation(delegate { coordinator.ReissueTicket(101, nowSeconds); }),
+                "O6 Ready（尚未 Running）态重签被拒");
+            CheckEq(coordinator.MarkRunning().Outcome, PMDsCoordinatorOutcome.Applied, "O7 进入 Running");
+
+            // 普通签发幂等 vs 重签轮转。
+            byte[] issuedFirst = coordinator.IssueTicket(101, nowSeconds).ExportTicketBytes();
+            byte[] issuedAgain = coordinator.IssueTicket(101, nowSeconds).ExportTicketBytes();
+            CheckBytes(issuedAgain, issuedFirst, "O8 普通签发在有效期内幂等（返回同一张票）");
+
+            byte[] reissued = coordinator.ReissueTicket(101, nowSeconds).ExportTicketBytes();
+            Check(!Compare(reissued, issuedFirst), "O9 重签换了新 Nonce（字节不同）");
+            CheckEq(reissued.Length, issuedFirst.Length, "O10 重签票长度与既有 wire 一致");
+
+            PMDsTicketVerification verified = coordinator.ResolveTicket(reissued, nowSeconds);
+            Check(verified.IsValid, "O11 重签票通过本局验签（Verdict=" + verified.Verdict + "）");
+            Check(verified.Identity == identity101, "O12 重签票身份仍是名册身份（只来自名册）");
+            CheckEq(verified.MatchId, "match-o", "O13 重签票仍绑定本局 MatchId");
+            CheckEq(verified.Epoch, 7u, "O14 重签票仍是原局世代");
+
+            byte[] oldTicket102 = coordinator.IssueTicket(102, nowSeconds).ExportTicketBytes();
+            byte[] newTicket102 = coordinator.ReissueTicket(102, nowSeconds).ExportTicketBytes();
+            Check(!Compare(newTicket102, oldTicket102), "O15 另一身份同样得到新 Nonce");
+            Check(coordinator.ResolveTicket(newTicket102, nowSeconds).IsValid, "O16 另一身份重签票有效");
+            Check(coordinator.ResolveTicket(oldTicket102, nowSeconds).IsValid,
+                "O17 旧票 MAC 仍然有效（DS 侧防重放靠端点账本，不靠 Lobby 撤回）");
+
+            CheckEq(coordinator.Counters.TicketsReissued, 2L, "O18 重签计数 = 2");
+
+            // 名册外必须拒绝（不按调用方自报身份签发）。
+            Check(ThrowsArgumentException(delegate { coordinator.ReissueTicket(999, nowSeconds); }),
+                "O19 名册外 uid 重签被拒（抛 ArgumentException）");
+            Check(ThrowsArgumentException(delegate { coordinator.ReissueTicket(0, nowSeconds); }),
+                "O20 uid=0 重签被拒");
+
+            // 终局不可逆：受理结果后不得再签。
+            byte[] result = ds.Result(0x11UL, 0, Encoding.ASCII.GetBytes("o-smoke"));
+            CheckEq(coordinator.OnControlPayload(result, 0, result.Length).Outcome,
+                PMDsCoordinatorOutcome.Applied, "O21 结果被接受");
+            CheckEq(coordinator.State, PMDsSessionState.ResultPending, "O22 状态 ResultPending");
+            Check(ThrowsInvalidOperation(delegate { coordinator.ReissueTicket(101, nowSeconds); }),
+                "O23 ResultPending 态重签被拒（终局不可逆）");
+
+            byte[] fatal = ds.Error(1u, "fatal");
+            CheckEq(coordinator.OnControlPayload(fatal, 0, fatal.Length).Outcome,
+                PMDsCoordinatorOutcome.Applied, "O24 终态转移被接受");
+            Check(coordinator.IsTerminal, "O25 已进入终态");
+            Check(ThrowsInvalidOperation(delegate { coordinator.ReissueTicket(101, nowSeconds); }),
+                "O26 终态重签被拒");
+            CheckEq(coordinator.Counters.TicketsReissued, 2L, "O27 终局路径没有额外轮转");
+        }
+
+        /// <summary>捕获指定异常才算「按契约拒绝」；抛别的异常或不抛都算失败。</summary>
+        private static bool ThrowsInvalidOperation(Action action)
+        {
+            try { action(); }
+            catch (InvalidOperationException) { return true; }
+            catch (Exception) { return false; }
+
+            return false;
+        }
+
+        private static bool ThrowsArgumentException(Action action)
+        {
+            try { action(); }
+            catch (ArgumentException) { return true; }
+            catch (Exception) { return false; }
+
             return false;
         }
 

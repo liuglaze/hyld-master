@@ -1027,18 +1027,77 @@ namespace Server.Controller
             //0.3.查寻用户信息（内存实现；账号不存在时由 UserData.Login 自动建号）
             if (client.GetUserData.Login(pack))
             {
-                pack.Returncode = ReturnCode.Succeed;
+                // 原子登记是登录成功的一部分：单独在前面查一次是否在线存在竞态。
+                // 两条连接可同时读到“无人在线”，第二条必须在索引冲突时明确失败，
+                // 不能回 Succeed 却没有活跃登记（更不能顶替当前在线的真实连接）。
+                PMActiveRegistration registration = server.RegisterActiveClient(client);
+                if (registration == PMActiveRegistration.Registered)
+                {
+                    pack.Returncode = ReturnCode.Succeed;
 
-                // 计划 B4：原本「登记为活跃玩家」只发生在后续的 FindPlayerInfo 里，
-                // 形成一个「已登录但 GetActiveClient 返回 null」的窗口期，
-                // 使匹配/邀请/开战这些依赖在线集合的功能有几率看不到刚登录的玩家。
-                // 现在登录成功即登记；FindPlayerInfo 仍会幂等地再调一次做兜底。
-                server.RegisterActiveClient(client);
+                    // T-LOOP4：只有“密码校验已通过 + 原子登记成功”才允许走下面两条后置路径。
+                    // 它们都没有自己的认证通道，也没有第二套密码判定：并发第二连接会在
+                    // RegisterActiveClient 返回 Conflict 时走 else 分支，根本到不了这里，
+                    // 所以「真正在线的同账号互斥」没有被放宽。
+                    //   ① 上局已终局的**只读**结果通知（无秘密，不创建 DS 会话、不恢复输入）；
+                    //   ② 原局断线续玩：异步请求重签**新 Nonce**票（未断线/已过期/不在名册均被拒）。
+                    AttachEndedMatchNoticeIfAny(client, pack);
+                    RequestResumeEntryFor(client.UID);
+                }
+                else
+                {
+                    client.GetUserData.ClearLoginIdentity();
+                    pack.Returncode = ReturnCode.Fail;
+                }
             }
             else pack.Returncode = ReturnCode.Fail;
 
             //发送结果
             return pack;
+        }
+
+        /// <summary>
+        /// T-LOOP4：若该 uid 最近一局已终局且 Lobby 侧还有只读结果摘要（有界 120 秒内存缓存，
+        /// 只由已验证的 DS ResultAccepted 产生），就把**无秘密**的
+        /// <c>PMDS-END1:&lt;base64(matchId UTF8)&gt;:&lt;winner&gt;:&lt;localTeam&gt;</c>
+        /// 文本放进登录响应 <c>MainPack.Str</c>。
+        ///
+        /// 它只让客户端显示「上一局已结束」的可信胜负并**留在大厅**：不创建 DS 会话、不恢复输入/战斗，
+        /// 也**绝不**伪造 <c>BattleReview</c> 帧历史（回放属 R6）。没有条目时什么都不做。
+        /// </summary>
+        private static void AttachEndedMatchNoticeIfAny(Client client, MainPack pack)
+        {
+            PMDsLobbyHost host = PMDsLobbyHost.Instance;
+            if (host == null)
+            {
+                return;
+            }
+
+            string endedNotice;
+            if (host.TryGetRecentMatchEndedNotice(client.UID, out endedNotice))
+            {
+                pack.Str = endedNotice;
+                Logging.Debug.Log($"[PMDsLobby] 登录响应附带上局只读结果通知 uid={client.UID}");
+            }
+        }
+
+        /// <summary>
+        /// T-LOOP4：同 uid 重新登录后的「原局续玩」请求（**异步**，真正的重签与新 offer 推送在 Lobby 泵线程）。
+        ///
+        /// 前置条件已在外层满足：密码校验通过且本连接已原子登记为活跃连接。
+        /// 没有任何可续的原局时是 no-op（正常匹配流程不受影响）；
+        /// 失败分支（未断线/窗口过期/不在名册/已终局/UID0）由宿主 fail-closed 拒绝并计数。
+        /// 不记录任何秘密（票据/密码不进日志）。
+        /// </summary>
+        private static void RequestResumeEntryFor(int uid)
+        {
+            PMDsLobbyHost host = PMDsLobbyHost.Instance;
+            if (host == null)
+            {
+                return;
+            }
+
+            host.TryRequestResumeEntry(uid);
         }
         /// <summary>
         /// 找名字
@@ -1053,11 +1112,18 @@ namespace Server.Controller
             //2.2FindPlayerInfo查找玩家名字
             if (client.GetUserData.FindPlayerInfo(ref pack, client))
             {
-                pack.Returncode = ReturnCode.Succeed;
-
-                // 幂等登记（Login 已登记过一次）。保留这里是为了兼容
-                // 「重登录 / 旧连接残留」场景：同 uid 的旧连接会被顶掉。
-                server.RegisterActiveClient(client);
+                // FindPlayerInfo 现在要求同一连接已验证登录且账号与请求一致。
+                // 第二次登记是幂等核验，不允许冲突后还回成功或把另一个在线连接顶掉。
+                PMActiveRegistration registration = server.RegisterActiveClient(client);
+                if (registration == PMActiveRegistration.Registered)
+                {
+                    pack.Returncode = ReturnCode.Succeed;
+                }
+                else
+                {
+                    client.GetUserData.ClearLoginIdentity();
+                    pack.Returncode = ReturnCode.Fail;
+                }
             }
             else pack.Returncode = ReturnCode.Fail;
             //2.4返回查询结果

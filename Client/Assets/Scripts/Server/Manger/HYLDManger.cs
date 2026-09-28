@@ -108,6 +108,11 @@ public class HYLDManger : Singleton<HYLDManger>
         }
 
 
+        // T-LIVE1：主线程泵 —— 把大厅 TCP 收包线程暂存下来的入局/续局通知，在面板就绪后**恰好一次**投递。
+        // 刻意排在 _uiManger.Excute **之前**：先入面板队列，同一帧就能被面板抽干。
+        // 没有暂存时它立即返回，不做任何 Unity 调用。
+        Server.RequestManger.PumpEntryNoticeInbox();
+
         if (_uiManger != null && _uiManger.IsInit)
         {
             _uiManger.Excute(Time.deltaTime);
@@ -133,6 +138,9 @@ public class HYLDManger : Singleton<HYLDManger>
 
     public void OnInit()
     {
+        // T-LIVE1：RemoveAllRequest 只清请求注册表与待确认表，**不清**入局/续局通知的暂存 ——
+        // 通知可能先于面板注册到达（本次实机缺陷的次序），必须保留到「被消费 / TTL 到期 /
+        // 连接关闭 / 显式退出」为止，否则等于把先到的新票丢在注册前一步。
         Server.RequestManger.RemoveAllRequest();
         _uiManger = GameObject.FindWithTag("UIManger").transform.GetComponent<UIBaseManger>();
         _uiManger.OnInit();
@@ -147,6 +155,9 @@ public class HYLDManger : Singleton<HYLDManger>
         }
 
         Server.RequestManger.RemoveAllRequest();
+        // T-LIVE1：退出/销毁时清掉待用票。RemoveAllRequest 本身**不**清暂存（OnInit 期间必须保留），
+        // 所以这里显式清一次；正常断线路径已由 CloseSocket → NotifySocketClosed 清过。
+        Server.RequestManger.ClearStagedEntryNotice("HYLDManger 销毁");
         Logging.HYLDDebug.Shutdown();
         if(HYLDStaticValue.isNet && _socketManger != null)
             _socketManger.CloseSocket();
@@ -156,6 +167,8 @@ public class HYLDManger : Singleton<HYLDManger>
 
     private void OnApplicationQuit()
     {
+        // T-LIVE1：退出前清掉待用票（与 OnDestroy 互补，不依赖两个回调的执行顺序）。
+        Server.RequestManger.ClearStagedEntryNotice("应用退出");
         Logging.HYLDDebug.Shutdown();
     }
     public void Send(MainPack pack)

@@ -108,3 +108,34 @@ DS 每帧从真实运动结果记录目标历史，先战斗授权，再投射�
 - PushBased=false现已实际解析并运行期轮询；无变化不发，按连接可见性筛候选，预算轮转防饥饿。不是完整频率/休眠/相关性实现。
 - 含RPC或auto-property的类都必须编织；纯属性零RPC不可绕guard。原13成员迁成同名private auto-property以保ID，外部只读视图保留。
 - 门禁新增PMPropertyWeaverTest；复制反例扩到14类。详见net-property-authoring-contract.md与_property_integrated.md，实机仍后置。
+
+
+## 11. 首次双客户端视觉与局内操控（T-PLAY 代码侧）
+- 客户端正式对局相机不再是第三人称诊断角度：参考旧Main Camera.prefab透视FOV60、高俯角68.191、固定世界yaw−90，仅Owner相机随位置平滑且隔离场景遮挡回退；可见角色Yaw写旧Capsule子节点，权威Mover输入/网络Yaw不改。
+- 正式地图map2仍是固定seed同版资源；客户端在独立场景临时建旧蓝方向光/青聚光，退局销毁；DS不建灯，旧HYLDGame.unity不加载，不保证旧场景全套RenderSettings/逐像素。
+- 客户端本局独立PMUnityBattleControls新Canvas（只读旧inactive GameUI prefab的四张Sprite与部分布局，绝不实例化旧prefab/启用TouchLogic/EasyTouch/旧联网）：移动、普通/直线大招独立瞄准摇杆、只读HP/Mana/Energy；UI通过PMClientSessionHost.TrySetUiMove/TryQueueUiAttack/TryGetUiCombatSnapshot，不发RPC/写资源。F/G仍可用；旧完整技能/道具/UI尚未全部迁移。新控件失败明确拒绝入局、不回旧链；生命周期由Session在Stop/结果退场/换局释放。
+- 代码门PMR4UnityAdapterTest188/0、PMBattleContentSceneFactsCheck376/0、PMR6NetworkTest400/0与真实Unity2019 API编译通过；真实Unity/Player双端UI点击、光照观感/取景仍PENDING_USER。原G8资产哈希因用户先前烘焙与BuildSettings改动失败，不能直接把完整门禁写PASS。主计划唯一状态源。
+
+- 新增编译门`PMNetUnityPlayerCheck`：引用真实**Player变体**引擎程序集（不定义UNITY_EDITOR），专抓“Editor能编、Build Player报CS1061”的编辑器专有API分叉（如`Light.lightmapBakeType`只能`#if UNITY_EDITOR`）。`PMR4UnityCheck`是Editor面，不能替代Player面。
+
+
+## 12. T-MOVE 输入与远端位置诊断（代码侧）
+- 正式相机 yaw−90 下 WASD/方向键与旧 Horizontal/Vertical 虚拟轴现以**屏幕方向**读入、统一调用 `PMUnityMoverInput.TryScreenVectorToWorld`：W/↑=世界−X，S/↓=+X，D/→=+Z，A/←=−Z；与UI摇杆同源，原W=+Z是已修的分叉。UI优先且松开回键盘；离线测试198/0含10项修前反例。
+- `PMClientSessionHost` 现有低频 heartbeat 新增 `rigChain`：每个副本按netId/role记录 raw（最后收到的复制快照）、accepted（驱动采纳数）、shown（最后应用的表现状态）、root（Unity根Transform）与冻结标志。包内AP移动但Editor观察到SP停在出生点的根因**尚未有逐副本实机证据**，不得把全局快照计数或子弹起点当作远端移动通过。具体用户复测见 `Docs/plans/net-runtime-acceptance.md` T-MOVE，状态只记主计划。
+- Player编译门 UI DLL 应来自 PlayerDataCache/Win64/Data/Managed，不依赖会被Unity清理的PlayerScriptAssemblies目录，也不能退回Editor DLL掩盖Player API不兼容。
+
+
+## 13. T-LOOP 当前协议（覆盖本文上面的历史数字）
+原R6首杀后只剩角落IMGUI/7s自动退场：现可信结果ACK后由保留HUD显示居中胜负弹窗与“返回大厅”，按钮走带会话令牌校验的EndSessionNormally，结果保留到新Enter/显式Stop。客户端遭短时断线后同账号新进程成功登录时，Lobby仅对未终局30s窗口自动发`PMDSR1:`新票；`RequestManger`先打开UIMatchingPanel后派发，`PMClientSessionHost`只替换故障旧会话/建全新World，普通健康会话不能顶替，终局不可恢复战斗。仅续局Hello预算80×250ms，普通仍24×250ms；旧票不同端点/墓碑仍拒。
+新增OwnerOnly `_combatActivationHighWater` 让续局客户端首枪从DS水位之后分配，防StaleId/AlreadyTerminal；PMR3Player现13复制属性+13RPC，PMR5Projectile另1属性；新的总ProtocolHash **0xAEA98336**，ID锁SHA256 `767c6e0da859defa61bd15e314d633a83b46e1714f37dc5b4f5f183ce9217826`。本文上文R6旧数字（12/13等与0xE6130FAA）为T-LOOP前历史，只用于理解阶段，不能用于现在部署判断。代码门`run_net_acceptance.py --suite full`37项；实机中断原局恢复/离线可受伤/二次断线、UI覆盖仍PENDING_USER，必须同版重建所有三端。
+
+
+## 14. T-LIVE 实机回归（新口径覆盖§13返回后仍显示）
+- Lobby已发PMDSR1但客户端尚未注册StartEnterBattle时，以`PMEntryNoticeInbox`单槽真codec严格解码+TTL≤30s+TCP代次暂存，`HYLDManger.Update`主线程在UI前Pump，注册/打开后恰好一次投递；socket关闭/OnDestroy清暂存。不把MainPack.ToString或Str写日志（它含短时效ticket）。旧日志含票不可外传。`PMEntryInboxTest`153/0，真实客户端重连仍PENDING_USER。
+- `PMUnityCombatHud.SetReturnedToLobby`现在**整块结算UI零绘制**，只保留只读结果数据到下次Enter/Stop。本文§13“返回后可见结果HUD”属于旧设计，用户已推翻。
+- 本地Owner`PMUnityBattleAimIndicator`按住/拖动普攻/大招摇杆显示世界LineRenderer瞄准扇形，方向/距离取同一次PMCombatWeaponPlanner计划；释放/死亡/终局/换局清线，DS与SP不创建。Shader.Find可能在Player被裁剪，需实机看`ShaderFound`诊断。
+- 大招能量以旧FullBG/FullPower/UnFullImage资源重建圆盘和Radial360，fill=SuperEnergy/200；非纯色大矩形/大字。正式旧GameUI仅只读，不实例化旧TouchLogic。代码`run_net_acceptance.py --suite full`现39项/39过（含新PMEntryInboxTest和R4UnityAdapterTest），仍不是Unity Player画面验收。
+
+
+## 15. T-AIM 近似可命中覆盖带（新一轮指示器口径）
+原T-LIVE3世界空间LineRenderer只有0.06m细中心线；现在本地Owner拖普通/支持的大招摇杆时另画半透明带，半径来自**权威Spec.RadiusM + 标准PMMover胶囊半径0.4m + DS Validator容差0.3m**（首批弹0.1m，标准半径0.8m、整宽1.6m），每股弹道都用同一PMCombatWeaponPlanner方向与距离。不用旧ShootWidth（0~4m纯视觉）冒充命中半径，不修改DS实际判定。断线/松手/终局双层隐藏，DS/SP无渲染；墙前碰撞、目标缩放、高度/回溯可使实际命中不同，**覆盖带不是必中承诺**。代码 full39/39 不等于Unity实机观感，T-AIM5仍PENDING_USER；本轮没有变更ProtocolHash0xAEA98336/ID锁。

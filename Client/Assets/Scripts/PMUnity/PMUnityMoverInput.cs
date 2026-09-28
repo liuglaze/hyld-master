@@ -46,6 +46,29 @@
 //         PMMoverInput frame = _input.SampleAndConsume(stepMs);
 //
 //  ---------------------------------------------------------------------------
+//  T-PLAY4：UI 摇杆 / 独立瞄准的屏幕→世界变换与来源选择（本轮新增）
+//  ---------------------------------------------------------------------------
+//  用户选型冻结（Docs/plans/net-architecture-migration.md「T-PLAY4 UI与输入接口冻结」）：
+//    · UI 输入是相对**用户选定相机**的 [-1,1] 屏幕坐标，该相机世界 yaw = −90
+//      （与 T-PLAY1 的 PMBattleCameraGeometry.DefaultYawDegrees 同源）；
+//    · screen up(+Y) → world −X；screen right(+X) → world +Z；
+//    · 非 finite / 超限数一律拒绝（**不**静默钳制）；接受范围内限幅单位向量；
+//    · 摇杆释放（0,0）清移动；UI 摇杆在时**优先于**键盘平面输入。
+//
+//  公开面（本类新增，宿主 PMClientSessionHost 的 TrySetUiMove 只会用到这两个）：
+//    · 纯变换（不读硬件/不改状态，可在 net8 逐条断言）：
+//        TryScreenVectorToWorld(screenX, screenY, out worldX, out worldZ)  → 移动/通用平面向量
+//        TryScreenAimDirection(screenX, screenY, out worldX, out worldZ)   → **单位**瞄准方向
+//    · 有状态（主线程；由宿主/UI 调用，不直接读硬件）：
+//        SetUiMoveWorld(worldX, worldZ) / ClearUiMove() / HasUiMove
+//        UiMoveWorldX / UiMoveWorldZ / UiMoveAcceptCount / UiMoveClearCount
+//
+//  消费方式：与键盘**同一条** Sample()/SampleAndConsume()/Consume() 通道（来源选择在
+//  ReadPlanar 内完成），UI 摇杆**不**新增第二条输入步进路径，也不绕开任何边沿消费纪律。
+//  竖直轴与跳跃边沿不受 UI 摇杆影响；攻击瞄准**不进**本类——它只是“屏幕方向→世界方向”，
+//  与移动朝向（YawDegrees）是两件事，由宿主分别消费。
+//
+//  ---------------------------------------------------------------------------
 //  依赖面（刻意最小）
 //  ---------------------------------------------------------------------------
 //    只用 UnityEngine.Input + UnityEngine.KeyCode（+ System.Math）。**不用** Mathf / Vector3 /
@@ -72,6 +95,29 @@ namespace PMNet.Unity
 
         /// <summary>真实输入步的最大毫秒数（契约：上行 dt 1..50）。</summary>
         public const int MaxRealStepMs = 50;
+
+        // ---------------------------------------------------------------- UI 屏幕系常量（T-PLAY4）
+
+        /// <summary>
+        /// UI 屏幕坐标（相对用户选定相机世界 yaw −90）的**每分量**上限。
+        ///
+        /// 超出该上限、或出现 NaN/±Infinity 时，纯变换一律**返回 false**（不静默钳制）：
+        /// 契约要求「全部拒 NaN/Infinity/超限数，不吞非法」——非法输入必须让调用方看得见，
+        /// 而不是被本类悄悄改成某个合法值（那正是「UI 显示与上行方向不一致」的来源）。
+        /// </summary>
+        public const float ScreenInputMaxMagnitude = 1f;
+
+        /// <summary>
+        /// 上限比较的浮点容差。UI 端用 <c>dx / radius</c> 算归一化坐标时会带 1ulp 级误差，
+        /// 不因此把一个合法的「推到底」误判成非法。
+        /// </summary>
+        public const float ScreenInputMagnitudeEpsilon = 1e-4f;
+
+        /// <summary>
+        /// 攻击瞄准方向的最小长度（归一化前的屏幕向量长度）。
+        /// 低于它视为「没有方向」：攻击瞄准**不默认**取某个方向，直接拒绝。
+        /// </summary>
+        public const float AimDirectionMinLength = 1e-4f;
 
         // ---------------------------------------------------------------- 配置（构造后可直接改）
 
@@ -118,6 +164,16 @@ namespace PMNet.Unity
         private int _zeroStepSamples;
         private PMMoverInput _lastSampled;
 
+        // ---- T-PLAY4：UI 摇杆（世界平面向量；来源选择在 ReadPlanar 内完成）----
+
+        /// <summary>当前是否有活动的 UI 摇杆推动。false = 摇杆已释放（或从未设置）。</summary>
+        private bool _hasUiMove;
+
+        private float _uiMoveWorldX;
+        private float _uiMoveWorldZ;
+        private int _uiMoveSamples;
+        private int _uiMoveClears;
+
         /// <summary>缓冲中是否有尚未被真实步消费的跳跃边沿。</summary>
         public bool HasBufferedJumpEdge { get { return _jumpEdgeBuffered; } }
 
@@ -147,6 +203,26 @@ namespace PMNet.Unity
 
         /// <summary>最近一次产出的输入（诊断用；默认全零）。</summary>
         public PMMoverInput LastSampled { get { return _lastSampled; } }
+
+        /// <summary>
+        /// 当前是否有**活动**的 UI 摇杆推动（T-PLAY4）。摇杆释放（零输入）后为 false。
+        ///
+        /// 为 true 时平面移动来源 = UI（键盘 WASD/方向键与 Horizontal/Vertical 虚拟轴在这一帧被忽略），
+        /// 竖直轴（<see cref="ExternalVerticalInput"/>）不受影响。
+        /// </summary>
+        public bool HasUiMove { get { return _hasUiMove; } }
+
+        /// <summary>UI 摇杆当前的世界 X 分量（无输入时为 0；已限幅在单位向量内）。</summary>
+        public float UiMoveWorldX { get { return _uiMoveWorldX; } }
+
+        /// <summary>UI 摇杆当前的世界 Z 分量（无输入时为 0；已限幅在单位向量内）。</summary>
+        public float UiMoveWorldZ { get { return _uiMoveWorldZ; } }
+
+        /// <summary><see cref="SetUiMoveWorld"/> 被接受的次数（诊断；只增）。</summary>
+        public int UiMoveAcceptCount { get { return _uiMoveSamples; } }
+
+        /// <summary>UI 摇杆被清空（释放 / 停局 / 死亡 / 换局）的次数（诊断；只增）。</summary>
+        public int UiMoveClearCount { get { return _uiMoveClears; } }
 
         // ---------------------------------------------------------------- 采集
 
@@ -269,6 +345,128 @@ namespace PMNet.Unity
             _bufferedEdgePolls = 0;
             _lastYawDegrees = 0f;
             _lastSampled = PMMoverInput.Empty();
+
+            // T-PLAY4：UI 摇杆属于**本局输入状态**，换局/停局必须一起清掉（不带出上一局的推杆）。
+            ClearUiMove();
+        }
+
+        // ---------------------------------------------------------------- UI 输入（T-PLAY4）
+
+        /// <summary>
+        /// **纯**变换：UI 屏幕向量（相对用户选定相机世界 yaw −90 的 [-1,1] 坐标）→ 世界平面向量。
+        ///
+        /// 轴约定（用户选型冻结，不得自行改成别的朝向）：
+        ///   screen up(+Y) → world −X（旧相机水平前向 = 世界 −X，因为它世界 yaw = −90）；
+        ///   screen right(+X) → world +Z（相机右向 = 世界 +Z）。
+        ///
+        /// 规则：
+        ///   · NaN/±Infinity，或分量超出 [-1-ε, 1+ε] 的「超限数」→ **返回 false**
+        ///     （不吞非法、不静默钳制成合法值，否则 UI 显示与上行方向会不一致）；
+        ///   · 接受范围内**限幅单位向量**：模长 &gt; 1 时只缩长度、不改方向（斜向推杆不会更快）；
+        ///   · 零输入是合法输入：返回 true 且 world = (0,0)，由调用方走「释放清移动」。
+        ///
+        /// 不读硬件、不改任何状态（与 <see cref="Convert"/> 同一条纯洁性纪律）。
+        /// </summary>
+        public static bool TryScreenVectorToWorld(float screenX, float screenY,
+                                                  out float worldX, out float worldZ)
+        {
+            worldX = 0f;
+            worldZ = 0f;
+
+            // ① 非有限一律拒绝（含 NaN：与 NaN 的任何比较都为 false，因此必须先显式判掉）。
+            if (float.IsNaN(screenX) || float.IsInfinity(screenX)) { return false; }
+            if (float.IsNaN(screenY) || float.IsInfinity(screenY)) { return false; }
+
+            // ② 超出屏幕坐标量程的分量 = 非法输入（不是「需要钳制」的输入）。
+            float limit = ScreenInputMaxMagnitude + ScreenInputMagnitudeEpsilon;
+            if (screenX > limit || screenX < -limit) { return false; }
+            if (screenY > limit || screenY < -limit) { return false; }
+
+            // ③ 轴变换：screen up → world −X；screen right → world +Z。
+            float x = -screenY;
+            float z = screenX;
+
+            // ④ 限幅单位向量（只改长度，不改方向）。
+            float magnitude = (float)Math.Sqrt((double)x * (double)x + (double)z * (double)z);
+            if (magnitude > 1f)
+            {
+                x = (float)((double)x / (double)magnitude);
+                z = (float)((double)z / (double)magnitude);
+            }
+
+            worldX = x;
+            worldZ = z;
+            return true;
+        }
+
+        /// <summary>
+        /// **纯**变换：UI 瞄准摇杆的屏幕向量 → **单位**世界方向（供攻击的瞄准/枪口/planner/上行共用）。
+        ///
+        /// 与 <see cref="TryScreenVectorToWorld"/> 同一轴约定与同一套非法输入拒绝；
+        /// 额外要求方向非零：屏幕向量长度 ≤ <see cref="AimDirectionMinLength"/> 时返回 false
+        /// （「没有方向」不得被默认成某个方向，否则就是凭空替玩家选了一个弹道）。
+        /// 返回的 (worldX, worldZ) 恒为单位向量（模长 1，除 0 以外）。
+        /// </summary>
+        public static bool TryScreenAimDirection(float screenX, float screenY,
+                                                 out float worldX, out float worldZ)
+        {
+            worldX = 0f;
+            worldZ = 0f;
+
+            float x;
+            float z;
+            if (!TryScreenVectorToWorld(screenX, screenY, out x, out z)) { return false; }
+
+            float length = (float)Math.Sqrt((double)x * (double)x + (double)z * (double)z);
+            if (length <= AimDirectionMinLength) { return false; }
+
+            worldX = (float)((double)x / (double)length);
+            worldZ = (float)((double)z / (double)length);
+            return true;
+        }
+
+        /// <summary>
+        /// 设置 UI 摇杆的**世界**平面分量（宿主先用 <see cref="TryScreenVectorToWorld"/> 变换并校验）。
+        ///
+        /// 语义：模长 &gt; 1 时限幅到单位向量；零向量等价于 <see cref="ClearUiMove"/>（「释放摇杆清零」）。
+        /// 非有限值直接抛异常（这里不接受坏值——校验应在纯变换入口完成）。
+        /// 调用方必须是主线程（Unity 输入事件线程）。
+        /// </summary>
+        public void SetUiMoveWorld(float worldX, float worldZ)
+        {
+            RequireFinite(worldX, "uiMoveWorldX");
+            RequireFinite(worldZ, "uiMoveWorldZ");
+
+            float magnitude = (float)Math.Sqrt((double)worldX * (double)worldX + (double)worldZ * (double)worldZ);
+            if (magnitude > 1f)
+            {
+                worldX = (float)((double)worldX / (double)magnitude);
+                worldZ = (float)((double)worldZ / (double)magnitude);
+            }
+            else if (magnitude <= 0f)
+            {
+                ClearUiMove();
+                return;
+            }
+
+            _uiMoveWorldX = worldX;
+            _uiMoveWorldZ = worldZ;
+            _hasUiMove = true;
+            _uiMoveSamples++;
+        }
+
+        /// <summary>
+        /// 清空 UI 摇杆（释放 / 停局 / 死亡 / 换局）。
+        /// 清空后平面移动来源**立刻**回到键盘（不需要等到下一次采样）。
+        /// </summary>
+        public void ClearUiMove()
+        {
+            bool wasActive = _hasUiMove;
+            _hasUiMove = false;
+            _uiMoveWorldX = 0f;
+            _uiMoveWorldZ = 0f;
+
+            if (wasActive) { _uiMoveClears++; }
         }
 
         // ---------------------------------------------------------------- 纯转换（可离线测试）
@@ -375,30 +573,47 @@ namespace PMNet.Unity
 
         private void ReadPlanar(out float x, out float z)
         {
+            // T-PLAY4（来源选择）：UI 摇杆**优先**。
+            //
+            // 为真时键盘物理键与 Horizontal/Vertical 虚拟轴在本帧**都不参与**平面输入
+            // （不叠加、也不各来一份）——否则会出现“UI 摇杆与键盘同时推”的混合位移，
+            // 而玩家手上只有一个摇杆。竖直轴（ExternalVerticalInput）与跳跃边沿不受影响。
+            // 摇杆释放（零输入）⇒ HasUiMove 为 false ⇒ 键盘立刻恢复，无需额外开关。
+            if (_hasUiMove)
+            {
+                x = _uiMoveWorldX;
+                z = _uiMoveWorldZ;
+                return;
+            }
+
             float deadZone = AxisDeadZone;
 
-            // 主来源：物理按键（永不抛异常，因此在任何 InputManager 配置下都可用）。
-            float keyX = PickLarger(KeyAxis(KeyCode.A, KeyCode.D), KeyAxis(KeyCode.LeftArrow, KeyCode.RightArrow));
-            float keyZ = PickLarger(KeyAxis(KeyCode.S, KeyCode.W), KeyAxis(KeyCode.DownArrow, KeyCode.UpArrow));
-
-            x = ApplyDeadZone(keyX, deadZone);
-            z = ApplyDeadZone(keyZ, deadZone);
+            // 键盘和旧虚拟轴都是「屏幕右/上」意图，必须与 UI 摇杆共用**同一**变换：
+            // 屏上(+V)→世界−X、屏右(+H)→世界+Z。此前直接把 A/D 写 MoveX、W/S 写 MoveZ，
+            // 导致实机 WASD 与摇杆方向旋转了 90°；不能只旋转键盘而漏掉 Horizontal/Vertical。
+            float keyH = PickLarger(KeyAxis(KeyCode.A, KeyCode.D), KeyAxis(KeyCode.LeftArrow, KeyCode.RightArrow));
+            float keyV = PickLarger(KeyAxis(KeyCode.S, KeyCode.W), KeyAxis(KeyCode.DownArrow, KeyCode.UpArrow));
+            float screenH = ApplyDeadZone(keyH, deadZone);
+            float screenV = ApplyDeadZone(keyV, deadZone);
 
             // 附加来源：Horizontal/Vertical 虚拟轴（未配置时会抛，故失败后关掉并计数）。
-            if (!UseLegacyAxes || _axisUnavailable)
+            if (UseLegacyAxes && !_axisUnavailable)
             {
-                return;
+                float axisH;
+                float axisV;
+                if (TryReadLegacyAxes(out axisH, out axisV))
+                {
+                    screenH = PickLarger(screenH, ApplyDeadZone(axisH, deadZone));
+                    screenV = PickLarger(screenV, ApplyDeadZone(axisV, deadZone));
+                }
             }
 
-            float axisX;
-            float axisZ;
-            if (!TryReadLegacyAxes(out axisX, out axisZ))
+            // 单一轴约定在 TryScreenVectorToWorld；物理键与虚拟轴都走它，
+            // 这样镜头映射以后若变更，不会再次出现键盘与摇杆的方向分叉。
+            if (!TryScreenVectorToWorld(screenH, screenV, out x, out z))
             {
-                return;
+                throw new InvalidOperationException("PMUnityMoverInput: 键盘/虚拟轴屏幕向量非法");
             }
-
-            x = PickLarger(x, ApplyDeadZone(axisX, deadZone));
-            z = PickLarger(z, ApplyDeadZone(axisZ, deadZone));
         }
 
         private bool TryReadLegacyAxes(out float x, out float z)

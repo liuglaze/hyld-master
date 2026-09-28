@@ -1,0 +1,67 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      T-LOOP2 验收门禁：登录身份写入 / uid=0 残留 / 活跃索引引用一致删除。
+
+      事实来源：
+        Docs/plans/net-architecture-migration.md 的 T-LOOP2 行与 T-LOOP1 收口段；
+        实机证据 Server/log/2026-09-26_15时34分34秒/server.log：
+          `ACTIVE-ADD id=0` → 查信息后 `ACTIVE-ADD id=2` → 断开 uid2 后同账号仍被活跃拒绝。
+
+      它验证什么（全部是可执行行为，不是对源码的字符串搜索）：
+        A 真实 UserData.Login（+真实 UserStore）成功后，本连接必须已有真实 UID / PlayerName；
+          密码错误、空账号名仍明确失败（不放宽原有密码校验）。
+        B 复现并锁死 uid=0 残留：登录 → FindPlayerInfo → 断线 → 同账号必须能重新登记。
+        C 同一连接 UID 变化产生的旧键（别名）必须被清掉。
+        D 删除按**引用一致**：旧连接的迟到 Close 不得误删同 uid 的新连接。
+        E 真正重复登录：同 uid 的另一条连接登记被拒（不顶号、不踢人），幂等登记不新增键；
+          UID<=0 / 空账号名的连接一律拒绝登记。
+
+      它不验证什么（避免把替身当验收）：
+        · 不建真实 TCP、不启真实服务、不碰用户正在跑的 Server.dll / Lobby；
+        · `Server.RegisterActiveClient` / `RemoveActiveClient` 的判定全部在抽出的纯索引类里，
+          本门禁直接驱动那份**生产实现**；Server.cs 只剩日志与委派（编译由 Server 工程保证）。
+        · 真实 Unity 客户端行为、DS 入局、原局续玩（T-LOOP4/5/6）不在本门禁范围。
+
+      退出码：0 = 全部通过；1 = 有失败。
+      语言面：C# 7.3（与 Unity 2019.4 的编译上限一致），net8.0。
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMLoginLifecycleTest</AssemblyName>
+    <RootNamespace>PMLoginLifecycleTest</RootNamespace>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>CS8981;CS0169;CS0414;CS0649;CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Stubs.cs" />
+
+    <!--
+      被测生产源（只读链接，**不复制**）：
+        · UserData.Login：登录成功后是否在返回前写入真实 UID / PlayerName；
+        · UserStore   ：内存用户库（UID 分配真值）；
+        · PMActiveClientIndex：Server 活跃表抽出的纯索引（登记/删除/查找判定）。
+    -->
+    <Compile Include="..\..\Server\DAO\UserStore.cs" LinkBase="Server\DAO" />
+    <Compile Include="..\..\Server\DAO\UserData.cs" LinkBase="Server\DAO" />
+    <Compile Include="..\..\Server\Server\PMActiveClientIndex.cs" LinkBase="Server\Server" />
+
+    <!-- UserData 的协议载具（与服务端同一份生成产物，避免第二套协议定义）与日志门面。 -->
+    <Compile Include="..\..\Server\Server\SocketProto.cs" LinkBase="SocketProto" />
+    <Compile Include="..\..\Server\Tool\Loging.cs" LinkBase="Server\Tool" />
+
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\..\Server\Google.Protobuf.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>

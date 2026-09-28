@@ -4,9 +4,9 @@
 //     类：PMNet.R3.PMR3Player
 //     稳定键：CLASS:PMNet.R3.PMR3Player
 //     类型 ID：405815557（0x18304105）
-//     类协议摘要：0xB09BCD1C
-//     复制属性：12 个 / RPC：13 条
-//     自动属性（auto-property，由 PMNetWeaver 改写 setter / RawSet）：12 个
+//     类协议摘要：0x67CF0B22
+//     复制属性：13 个 / RPC：13 条
+//     自动属性（auto-property，由 PMNetWeaver 改写 setter / RawSet）：13 个
 // 
 //     生成契约：Docs/plans/net-r2-codegen-contract.md（§2 稳定 ID / §4 API 面）
 //     语言面：C# 7.3 + .NET Standard 2.0（Unity 2019.4 约束，D-R0-48）
@@ -27,7 +27,7 @@ namespace PMNet.R3
         public const uint PMGeneratedClassId = 405815557u;
 
         /// <summary>对象变更掩码总位数（= 本类复制属性数）。</summary>
-        public const ushort PMGeneratedChangeMaskBitCount = 12;
+        public const ushort PMGeneratedChangeMaskBitCount = 13;
 
         /// <summary>
         /// 本类复制属性序号在**整个继承链**上的基址（= 已声明祖先的复制属性总数）。
@@ -71,11 +71,14 @@ namespace PMNet.R3
         /// <summary>_combatWinnerTeamId 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
         public const int PMGeneratedPropertyIndex__combatWinnerTeamId = 9;
 
+        /// <summary>_combatActivationHighWater 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
+        public const int PMGeneratedPropertyIndex__combatActivationHighWater = 10;
+
         /// <summary>_movementSnapshotV1 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
-        public const int PMGeneratedPropertyIndex__movementSnapshotV1 = 10;
+        public const int PMGeneratedPropertyIndex__movementSnapshotV1 = 11;
 
         /// <summary>_combatMaxHp 在 PMRepList / 变更掩码里的序号（= PMGeneratedPropertyIndexBase + 类内槽位）。</summary>
-        public const int PMGeneratedPropertyIndex__combatMaxHp = 11;
+        public const int PMGeneratedPropertyIndex__combatMaxHp = 12;
 
         // ---------------- 编织版本门（冻结格式 v1；见 Docs/plans/net-rpc-weaving-contract.md）----------------
 
@@ -124,6 +127,7 @@ namespace PMNet.R3
             outProps.Add(PMGeneratedPropertyIndex__combatMana, PMNet.PMCond.OwnerOnly, true); // _combatMana（PropertyId=34826）
             outProps.Add(PMGeneratedPropertyIndex__combatHeroId, PMNet.PMCond.None, true); // _combatHeroId（PropertyId=36554）
             outProps.Add(PMGeneratedPropertyIndex__combatWinnerTeamId, PMNet.PMCond.None, true); // _combatWinnerTeamId（PropertyId=38154）
+            outProps.Add(PMGeneratedPropertyIndex__combatActivationHighWater, PMNet.PMCond.OwnerOnly, true); // _combatActivationHighWater（PropertyId=43867）
             outProps.Add(PMGeneratedPropertyIndex__movementSnapshotV1, PMNet.PMCond.None, true); // _movementSnapshotV1（PropertyId=61580）
             outProps.Add(PMGeneratedPropertyIndex__combatMaxHp, PMNet.PMCond.None, true); // _combatMaxHp（PropertyId=64920）
         }
@@ -218,6 +222,15 @@ namespace PMNet.R3
         public void PMNet_Set_combatWinnerTeamId(int value)
         {
             _combatWinnerTeamId = value;
+        }
+
+        /// <summary>
+        /// 兼容访问器（自动属性）：仅转发 `_combatActivationHighWater = value`。
+        /// 标脏不在这里：PMNetWeaver 改写后的 setter 会走 PMNet_PropertySet__combatActivationHighWater，只标脏一次。
+        /// </summary>
+        public void PMNet_Set_combatActivationHighWater(uint value)
+        {
+            _combatActivationHighWater = value;
         }
 
         /// <summary>
@@ -494,6 +507,31 @@ namespace PMNet.R3
         }
 
         /// <summary>
+        /// _combatActivationHighWater 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
+        /// </summary>
+        private void PMNet_PropertyRawSet__combatActivationHighWater(uint value)
+        {
+            throw new System.InvalidOperationException("PMNet property has not been woven");
+        }
+
+        /// <summary>
+        /// _combatActivationHighWater 的赋值入口（由 PMNetWeaver 把 setter 改指到这里）。
+        /// 冻结语义：总是存入新值；只有值真的变化、且本副本有权威、且 PushBased 时才标脏。
+        /// </summary>
+        private void PMNet_PropertySet__combatActivationHighWater(uint value)
+        {
+            // 变化判定用编译期闭合的 EqualityComparer<T>.Default（运行期不做反射扫描）。
+            // 相等也要真的存值：初始化器/构造期原值保留，且 string 引用重赋要保留普通赋值语义。
+            bool pmChanged = !System.Collections.Generic.EqualityComparer<uint>.Default.Equals(this._combatActivationHighWater, value);
+            PMNet_PropertyRawSet__combatActivationHighWater(value);
+
+            if (pmChanged && HasAuthority)
+            {
+                MarkPropertyDirty(PMGeneratedPropertyIndex__combatActivationHighWater);
+            }
+        }
+
+        /// <summary>
         /// _movementSnapshotV1 的原始赋值桩（接收侧写入口；由 PMNetWeaver 改写为 backing field 写入）。
         /// </summary>
         private void PMNet_PropertyRawSet__movementSnapshotV1(byte[] value)
@@ -705,6 +743,22 @@ namespace PMNet.R3
             self.PMNet_PropertyRawSet__combatWinnerTeamId(pmValue);
         }
 
+        /// <summary>写出 _combatActivationHighWater 的当前值。</summary>
+        private static void PMNet_Write__combatActivationHighWater(PMNet.PMNetObject t, PMNet.PMNetWriter w)
+        {
+            PMR3Player self = (PMR3Player)t;
+            w.WriteUInt32(self._combatActivationHighWater);
+        }
+
+        /// <summary>读入并赋值 _combatActivationHighWater（自动属性：先解码到局部值，再直接写 RawSet，绕过 setter）。</summary>
+        private static void PMNet_Read__combatActivationHighWater(PMNet.PMNetObject t, PMNet.PMNetReader r)
+        {
+            PMR3Player self = (PMR3Player)t;
+            uint pmValue = r.ReadUInt32();
+
+            self.PMNet_PropertyRawSet__combatActivationHighWater(pmValue);
+        }
+
         /// <summary>写出 _movementSnapshotV1 的当前值。</summary>
         private static void PMNet_Write__movementSnapshotV1(PMNet.PMNetObject t, PMNet.PMNetWriter w)
         {
@@ -809,9 +863,12 @@ namespace PMNet.R3
                     self.OnRep_CombatWinnerTeamId();
                     return;
                 case 9:
-                    self.OnRep_MovementSnapshot();
+                    self.OnRep_CombatActivationHighWater();
                     return;
                 case 10:
+                    self.OnRep_MovementSnapshot();
+                    return;
+                case 11:
                     self.OnRep_CombatMaxHp();
                     return;
                 default:
@@ -1896,7 +1953,7 @@ namespace PMNet.R3
         {
             PMNet_RequireRpcWeave();
 
-            PMNet.PMPropertyDescriptor[] props = new PMNet.PMPropertyDescriptor[12];
+            PMNet.PMPropertyDescriptor[] props = new PMNet.PMPropertyDescriptor[13];
             PMNet.PMPropertyDescriptor p0 = new PMNet.PMPropertyDescriptor();
             p0.PropertyId = 4259;
             p0.Condition = PMNet.PMCond.None;
@@ -2028,31 +2085,44 @@ namespace PMNet.R3
             p9.Reader = PMNet_Read__combatWinnerTeamId;
             props[9] = p9;
             PMNet.PMPropertyDescriptor p10 = new PMNet.PMPropertyDescriptor();
-            p10.PropertyId = 61580;
-            p10.Condition = PMNet.PMCond.None;
+            p10.PropertyId = 43867;
+            p10.Condition = PMNet.PMCond.OwnerOnly;
             p10.MaskOffset = 10;
             p10.MaskBitCount = 1;
             p10.QuantizerId = 0;
             p10.OnRepMethodId = 9;
             p10.PushBased = true;
-            p10.MemberName = "_movementSnapshotV1";
-            p10.SetterName = "PMNet_Set_movementSnapshotV1";
-            p10.Writer = PMNet_Write__movementSnapshotV1;
-            p10.Reader = PMNet_Read__movementSnapshotV1;
+            p10.MemberName = "_combatActivationHighWater";
+            p10.SetterName = "PMNet_Set_combatActivationHighWater";
+            p10.Writer = PMNet_Write__combatActivationHighWater;
+            p10.Reader = PMNet_Read__combatActivationHighWater;
             props[10] = p10;
             PMNet.PMPropertyDescriptor p11 = new PMNet.PMPropertyDescriptor();
-            p11.PropertyId = 64920;
+            p11.PropertyId = 61580;
             p11.Condition = PMNet.PMCond.None;
             p11.MaskOffset = 11;
             p11.MaskBitCount = 1;
             p11.QuantizerId = 0;
             p11.OnRepMethodId = 10;
             p11.PushBased = true;
-            p11.MemberName = "_combatMaxHp";
-            p11.SetterName = "PMNet_Set_combatMaxHp";
-            p11.Writer = PMNet_Write__combatMaxHp;
-            p11.Reader = PMNet_Read__combatMaxHp;
+            p11.MemberName = "_movementSnapshotV1";
+            p11.SetterName = "PMNet_Set_movementSnapshotV1";
+            p11.Writer = PMNet_Write__movementSnapshotV1;
+            p11.Reader = PMNet_Read__movementSnapshotV1;
             props[11] = p11;
+            PMNet.PMPropertyDescriptor p12 = new PMNet.PMPropertyDescriptor();
+            p12.PropertyId = 64920;
+            p12.Condition = PMNet.PMCond.None;
+            p12.MaskOffset = 12;
+            p12.MaskBitCount = 1;
+            p12.QuantizerId = 0;
+            p12.OnRepMethodId = 11;
+            p12.PushBased = true;
+            p12.MemberName = "_combatMaxHp";
+            p12.SetterName = "PMNet_Set_combatMaxHp";
+            p12.Writer = PMNet_Write__combatMaxHp;
+            p12.Reader = PMNet_Read__combatMaxHp;
+            props[12] = p12;
 
             PMNet.PMReplicationDescriptor rep = new PMNet.PMReplicationDescriptor();
             rep.ClassId = PMGeneratedClassId;

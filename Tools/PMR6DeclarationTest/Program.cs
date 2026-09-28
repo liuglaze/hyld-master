@@ -1,4 +1,4 @@
-// R6-A2 门禁：PMR3Player 的**战斗声明层**（9 条复制属性 + 4 条 RPC）+ 单一生成集合 + OwnerOnly 权限边界。
+﻿// R6-A2 门禁：PMR3Player 的**战斗声明层**（9 条复制属性 + 4 条 RPC）+ 单一生成集合 + OwnerOnly 权限边界。
 //
 // 事实来源：
 //   - `Docs/plans/net-r6-combat-contract.md` §A2（声明：字段/条件/接口/RPC 与参数域）；
@@ -65,19 +65,27 @@ namespace PMR6DeclarationTest
         private const long NewPropCombatMana = 34826L;
         private const long NewPropCombatHeroId = 36554L;
         private const long NewPropCombatWinnerTeamId = 38154L;
+        private const long NewPropCombatActivationHighWater = 43867L;
         private const long NewPropCombatMaxHp = 64920L;
         private const long NewRpcClientCombatMatchResult = 39181L;
         private const long NewRpcServerCombatAttack = 42343L;
         private const long NewRpcClientCombatAttackResult = 44706L;
         private const long NewRpcServerCombatResultAck = 50908L;
 
-        // ── 协议摘要（R6-A2 冻结；0 = 未声明哨兵，非 0 本身就是「摘要真的算过」）──────────
-        private const long NewPlayerClassProtocolHash = 0xB09BCD1CL;
+        // ── 协议摘要（T-LOOP 高危2 协议扩展后重算；旧键与旧 ID 不变）─────────────────
+        //
+        // 新增 OwnerOnly 复制属性 `_combatActivationHighWater` 会改变掩码区间/成员名集合，
+        // 因此**类摘要与全局摘要预期变化**（不是错误地漂移）：ID 锁 diff 只新增一行 PROP 键，
+        // PMR5Projectile 的类摘要与所有旧 PropertyId/RpcId 逐条不变。
+        private const long NewPlayerClassProtocolHash = 0x67CF0B22L;
         private const long NewProjectileClassProtocolHash = 0xD4CB0B42L;
-        private const long NewGlobalProtocolHash = 0xE6130FAAL;
+        private const long NewGlobalProtocolHash = 0xAEA98336L;
 
-        /// <summary>复制属性总数：3（uid/probe/movementSnapshot）+ 9（战斗）= 12。</summary>
-        private const int PlayerPropertyCount = 12;
+        /// <summary>复制属性总数：3（uid/probe/movementSnapshot）+ 9（R6-A2 战斗）+ 1（T-LOOP 激活水位）= 13。</summary>
+        private const int PlayerPropertyCount = 13;
+
+        /// <summary>其中 OwnerOnly（仅 owner 可见）的条数：_combatMana / _combatSuperEnergy / _combatActivationHighWater。</summary>
+        private const int OwnerOnlyPropertyCount = 3;
 
         private static readonly List<string> _combatWarnings = new List<string>();
         private static readonly Dictionary<PMNetWorld, CreateSnapshot> _createSnapshots =
@@ -212,6 +220,9 @@ namespace PMR6DeclarationTest
                       && lockText.Contains("\"RPC:PMNet.R3.PMR3Player.ClientProjectileDecisionV1\": " + FrozenRpcClientProjectileDecision),
                     "锁文件里 PMR3Player 的九条旧 RPC ID 逐条未漂移");
 
+                Check(lockText.Contains("\"PROP:PMNet.R3.PMR3Player._combatActivationHighWater\": " + NewPropCombatActivationHighWater),
+                    "锁文件含 T-LOOP 高危2 新增复制属性的稳定键（只追加新 PROP 键）");
+
                 Check(lockText.Contains("\"PROP:PMNet.R3.PMR3Player._combatHeroId\": " + NewPropCombatHeroId)
                       && lockText.Contains("\"PROP:PMNet.R3.PMR3Player._combatTeamId\": " + NewPropCombatTeamId)
                       && lockText.Contains("\"PROP:PMNet.R3.PMR3Player._combatHp\": " + NewPropCombatHp)
@@ -249,8 +260,8 @@ namespace PMR6DeclarationTest
             CheckEq(global::PMNet.Generated.PMNetGeneratedRegistry.GeneratedClassCount, 2,
                 "单一生成集合里恰好两个网络类（PMR3Player + PMR5Projectile，R6-A2 未新增类）");
             CheckEq(global::PMNet.Generated.PMNetGeneratedRegistry.ProtocolHash, NewGlobalProtocolHash,
-                "生成期整体协议摘要 == R6-A2 冻结值");
-            CheckEq(PMNetRegistry.ProtocolHash, NewGlobalProtocolHash, "运行期整体协议摘要 == R6-A2 冻结值");
+                "生成期整体协议摘要 == T-LOOP 高危2 协议扩展后冻结值");
+            CheckEq(PMNetRegistry.ProtocolHash, NewGlobalProtocolHash, "运行期整体协议摘要 == T-LOOP 高危2 协议扩展后冻结值");
 
             PMNetClassEntry entry;
             Check(PMNetRegistry.TryGetClass(PMR3Player.PMGeneratedClassId, out entry) && entry != null,
@@ -258,13 +269,13 @@ namespace PMR6DeclarationTest
             CheckEq(PMR3Player.PMGeneratedClassId, FrozenPlayerClassId,
                 "PMR3Player 的 ClassId 与冻结值一致（未被新成员挤走 + 未新增类）");
             CheckEq(entry != null && entry.Rep != null ? entry.Rep.ProtocolHash : 0, NewPlayerClassProtocolHash,
-                "PMR3Player 的类协议摘要 == R6-A2 冻结值（掩码区间/条件/成员名参与计算）");
+                "PMR3Player 的类协议摘要 == T-LOOP 高危2 协议扩展后冻结值（掩码区间/条件/成员名参与计算）");
 
             // 位宽与属性数：3 旧 + 9 新。
             CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, PlayerPropertyCount,
-                "复制属性位宽 == 12（Uid + ProbeCount + MovementSnapshot + 9 战斗）");
+                "复制属性位宽 == 13（Uid + ProbeCount + MovementSnapshot + 9 战斗 + 激活水位）");
             CheckEq(entry != null && entry.Rep != null ? entry.Rep.Properties.Length : -1, PlayerPropertyCount,
-                "复制描述符里的属性数 == 12");
+                "复制描述符里的属性数 == 13");
             Check(entry != null && entry.Rep != null && entry.Rep.HasConditionalMask,
                 "描述符标记为含条件属性（OwnerOnly 真的进了条件掩码）");
 
@@ -278,6 +289,7 @@ namespace PMR6DeclarationTest
             CheckCombatProperty(entry, "_combatWinnerTeamId", NewPropCombatWinnerTeamId, PMCond.None);
             CheckCombatProperty(entry, "_combatMana", NewPropCombatMana, PMCond.OwnerOnly);
             CheckCombatProperty(entry, "_combatSuperEnergy", NewPropCombatSuperEnergy, PMCond.OwnerOnly);
+            CheckCombatProperty(entry, "_combatActivationHighWater", NewPropCombatActivationHighWater, PMCond.OwnerOnly);
 
             // 旧属性一条都不能少（新增不能替换旧注册）。
             Check(PropertyOf(entry, "_uid").PropertyId == FrozenPropUid
@@ -358,7 +370,7 @@ namespace PMR6DeclarationTest
             }
 
             CheckEq(PMR3Runtime.ProtocolHash, NewGlobalProtocolHash,
-                "PMR3Runtime.ProtocolHash == R6-A2 冻结值（握手口径唯一来源）");
+                "PMR3Runtime.ProtocolHash == T-LOOP 高危2 协议扩展后冻结值（握手口径唯一来源）");
         }
 
         private static void CheckCombatProperty(PMNetClassEntry entry, string memberName,
@@ -445,8 +457,10 @@ namespace PMR6DeclarationTest
             PMNetRegistry.TryGetClass(PMR3Player.PMGeneratedClassId, out entry);
             int manaSlot = PropertyOf(entry, "_combatMana").MaskOffset;
             int energySlot = PropertyOf(entry, "_combatSuperEnergy").MaskOffset;
+            int highWaterSlot = PropertyOf(entry, "_combatActivationHighWater").MaskOffset;
             ushort manaId = PropertyOf(entry, "_combatMana").PropertyId;
             ushort energyId = PropertyOf(entry, "_combatSuperEnergy").PropertyId;
+            ushort highWaterId = PropertyOf(entry, "_combatActivationHighWater").PropertyId;
             ushort hpId = PropertyOf(entry, "_combatHp").PropertyId;
             int hpSlot = PropertyOf(entry, "_combatHp").MaskOffset;
 
@@ -458,13 +472,18 @@ namespace PMR6DeclarationTest
             List<int> otherSlots = DecodeInitialSlots(otherBatch);
 
             Check(ownerSlots.Count == PlayerPropertyCount,
-                "owner 的 Create 初值携带全部 12 个槽位（实际 " + SlotsToText(ownerSlots) + "）");
-            Check(otherSlots.Count == PlayerPropertyCount - 2,
-                "observer 的 Create 初值只携带 10 个槽位（少了 OwnerOnly 的两条，实际 " + SlotsToText(otherSlots) + "）");
+                "owner 的 Create 初值携带全部 13 个槽位（实际 " + SlotsToText(ownerSlots) + "）");
+            Check(otherSlots.Count == PlayerPropertyCount - OwnerOnlyPropertyCount,
+                "observer 的 Create 初值只携带 10 个槽位（少了 OwnerOnly 的三条，实际 " + SlotsToText(otherSlots) + "）");
             Check(ownerSlots.Contains(manaSlot) && ownerSlots.Contains(energySlot),
                 "★owner 的 Create 初值含 mana/energy 槽位（" + manaSlot + "/" + energySlot + "）");
             Check(!otherSlots.Contains(manaSlot) && !otherSlots.Contains(energySlot),
                 "★observer 的 Create 初值**不含** mana/energy 槽位（初始 Create 不泄资源）");
+            Check(ownerSlots.Contains(highWaterSlot),
+                "★owner 的 Create 初值含激活水位槽位（" + highWaterSlot
+                + "）—— 新客户端实例靠它播种下一个 activationId");
+            Check(!otherSlots.Contains(highWaterSlot),
+                "★★ observer 的 Create 初值**不含**激活水位槽位（非 owner 看不到水位）");
 
             // ── B2：后续资源变更的逐连接属性 ID（Update 通道）─────────────────────────
             PMReplicationChannel channel = new PMReplicationChannel(new PMRepOptions());
@@ -477,10 +496,13 @@ namespace PMR6DeclarationTest
 
             channel.Tick();
 
-            Check(NoPropertyId(otherConn, manaId) && NoPropertyId(otherConn, energyId),
-                "★首次 Update（全量基线）里 observer 也没有 mana/energy 属性（" + manaId + "/" + energyId + "）");
-            Check(HasPropertyId(ownerConn, manaId) && HasPropertyId(ownerConn, energyId),
-                "首次 Update 里 owner 拿到 mana/energy 属性");
+            Check(NoPropertyId(otherConn, manaId) && NoPropertyId(otherConn, energyId)
+                  && NoPropertyId(otherConn, highWaterId),
+                "★首次 Update（全量基线）里 observer 没有 mana/energy/激活水位属性（"
+                + manaId + "/" + energyId + "/" + highWaterId + "）");
+            Check(HasPropertyId(ownerConn, manaId) && HasPropertyId(ownerConn, energyId)
+                  && HasPropertyId(ownerConn, highWaterId),
+                "首次 Update 里 owner 拿到 mana/energy/激活水位属性");
 
             ownerConn.Sent.Clear();
             otherConn.Sent.Clear();
@@ -501,6 +523,21 @@ namespace PMR6DeclarationTest
             // 资源变更**不能**因为 owner-only 就把公共属性的脏位一起卡住（反向对照）。
             Check(channel.Stats.ConditionFiltered > 0,
                 "复制层统计到条件过滤（ConditionFiltered = " + channel.Stats.ConditionFiltered + "）");
+
+            // ── B3：激活水位（T-LOOP 高危2）走同一条条件通道 ────────────────────────
+            // 先写一个**非零**值：默认 0 与「从没发过」不可区分，不写非零就证明不了过滤是定向的。
+            ownerConn.Sent.Clear();
+            otherConn.Sent.Clear();
+
+            Check(ds.PublishCombatActivationHighWater(7u),
+                "DS 侧发布激活水位 = 7（经生成的 Setter 标脏）");
+            channel.Tick();
+
+            Check(NoPropertyId(otherConn, highWaterId),
+                "★★ observer 始终拿不到激活水位（Create 初值与 Update 都不泄水位）");
+            Check(HasPropertyId(ownerConn, highWaterId), "★★ owner 拿到激活水位（真实字节链）");
+            Check(HasSlot(otherConn, hpSlot),
+                "observer 的 Update 里仍有公共属性（排除「整包都没发」）");
 
             bridge.Dispose();
         }
@@ -1060,6 +1097,26 @@ namespace PMR6DeclarationTest
                     "observer 副本同样只看到 DS 真值");
                 Check(observerCopy != null && observerCopy.CombatMana == 0,
                     "observer 副本的 mana 始终未被写入（owner-only + 只有 DS 能写）");
+
+                // F4：激活水位（T-LOOP 高危2）走同一套权限口径。
+                Check(serverPlayer.PublishCombatActivationHighWater(9u),
+                    "★DS（权威世界）侧 PublishCombatActivationHighWater 放行");
+                CheckEq(serverPlayer.CombatActivationHighWater, 9u, "DS 侧水位已写入（经生成的 Setter 标脏）");
+
+                long ownerWaterBefore = ownerCopy.CombatActivationHighWater;
+                int waterRejectBefore = _combatWarnings.Count;
+                bool apWater = ownerCopy.PublishCombatActivationHighWater(12345u);
+                Check(!apWater, "★AP（非权威世界）副本的 PublishCombatActivationHighWater 被拒（客户端不能改权威水位）");
+                CheckEq(ownerCopy.CombatActivationHighWater, ownerWaterBefore, "AP 侧水位未被改写");
+                Check(_combatWarnings.Count > waterRejectBefore, "AP 侧被拒时发出了可观察告警");
+
+                rig.Frame(4);
+                CheckEq(serverPlayer.CombatActivationHighWater, 9u,
+                    "DS 权威水位未被 AP 的越权尝试影响");
+                CheckEq(ownerCopy.CombatActivationHighWater, 9u,
+                    "★★ owner 副本经真实字节链收到水位 = 9（续局播种的唯一来源）");
+                Check(observerCopy != null && observerCopy.CombatActivationHighWater == 0u,
+                    "★★ observer 副本读不到水位（OwnerOnly，恒 0）");
             }
             finally
             {
@@ -1110,7 +1167,8 @@ namespace PMR6DeclarationTest
             // 复位成后续门禁可用的状态。
             PMNetRegistry.Reset();
             PMR3Runtime.Register();
-            CheckEq(PMR3Runtime.ProtocolHash, NewGlobalProtocolHash, "复位后协议摘要仍为 R6-A2 冻结值");
+            CheckEq(PMR3Runtime.ProtocolHash, NewGlobalProtocolHash,
+                "复位后协议摘要仍为 T-LOOP 高危2 协议扩展后冻结值");
         }
 
         // =================================================================================

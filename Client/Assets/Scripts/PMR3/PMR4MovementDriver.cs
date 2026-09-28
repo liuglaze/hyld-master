@@ -398,10 +398,159 @@ namespace PMNet.R3
     }
 
     /// <summary>
+    /// DS 侧「断线宽限窗口」的**纯逻辑**记账（注入墙钟，不依赖 UnityEngine）。
+    ///
+    /// 为什么把它单独做成一个类：T-LOOP5 的宽限时长/拒绝口径是**时序性质**
+    /// （「30s 内可恢复、到期不可恢复、终局一律不可恢复」），而 DS 宿主本体需要 Unity
+    /// 才能运行，自动化门禁跑不起来。把「起点/到期/恢复」这套判定抽成注入时钟的纯逻辑后，
+    /// 门禁可以用真实实现 + 受控时钟把**修前反例**跑成可执行断言（宽限期本身仍由实机验收）。
+    ///
+    /// 语义（T-LOOP1 v1 冻结，见 net-architecture-migration.md 末段）：
+    ///   · 只在**真实断开**时启动，且每个 uid 独立；首次观察记起点，**重复观察不重置起点**
+    ///     （不因每帧都看到断线而无限延期）；
+    ///   · 宽限内可被一次「新票据重绑」恢复，**恢复即摘除记录**（一次断线只恢复一次）；
+    ///   · 到期即不可恢复（超期走原清理/胜负），且记录**保留**为墓碑：迟到的重绑一律拒绝，
+    ///     不能让一个已过期 uid 在清理之后又被当成「刚刚断线」放进来；
+    ///   · 终局（比赛已结束）一律拒绝重绑（不可逆），且保留记录；
+    ///   · **未跟踪**的 uid 在重绑时按「刚刚断开」（elapsed = 0）处理 —— 同帧断线 + 重连必须可用。
+    /// </summary>
+    public sealed class PMR4DisconnectGraceWindow
+    {
+        /// <summary>默认宽限（毫秒）—— T-LOOP1 v1 冻结值：DS 从真实断开起 30s。</summary>
+        public const int DefaultGraceMs = 30000;
+
+        private readonly int _graceMs;
+        private readonly Dictionary<int, long> _sinceMs = new Dictionary<int, long>();
+
+        /// <summary>首次进入宽限的次数（每个 uid 每次断线一次）。</summary>
+        public long Started;
+
+        /// <summary>宽限内被重绑恢复的次数。</summary>
+        public long Recovered;
+
+        /// <summary>因终局被拒绝重绑的次数。</summary>
+        public long RebindRefusedEnded;
+
+        /// <summary>因**到期**被拒绝重绑的次数（含到期后迟到的一次重绑）。</summary>
+        public long RebindRefusedExpired;
+
+        public PMR4DisconnectGraceWindow(int graceMs)
+        {
+            if (graceMs <= 0)
+            {
+                throw new ArgumentOutOfRangeException("graceMs", "宽限必须是正数毫秒");
+            }
+
+            _graceMs = graceMs;
+        }
+
+        public PMR4DisconnectGraceWindow() : this(DefaultGraceMs)
+        {
+        }
+
+        /// <summary>本窗口的宽限时长（毫秒）。</summary>
+        public int GraceMs { get { return _graceMs; } }
+
+        /// <summary>当前被跟踪的 uid 数（含已到期但保留为墓碑的记录）。</summary>
+        public int TrackedCount { get { return _sinceMs.Count; } }
+
+        public bool IsTracked(int uid) { return _sinceMs.ContainsKey(uid); }
+
+        /// <summary>已跟踪 uid 的宽限起点（毫秒）；未跟踪返回 <see cref="long.MinValue"/>。</summary>
+        public long SinceMs(int uid)
+        {
+            long since;
+            return _sinceMs.TryGetValue(uid, out since) ? since : long.MinValue;
+        }
+
+        /// <summary>
+        /// 断线观察：**首次**观察时以 <paramref name="sinceMs"/> 记起点（调用方应传「最后一次真实
+        /// 入站流量时刻」，比「观察到断开」更保守），重复观察**不重置**。
+        ///
+        /// 返回该 uid 的宽限是否**仍然生效**（以 <paramref name="nowMs"/> 判定）：
+        /// false = 已到期 ⇒ 调用方该走原清理/胜负路径。
+        /// </summary>
+        public bool ObserveDisconnected(int uid, long sinceMs, long nowMs)
+        {
+            long since;
+            if (!_sinceMs.TryGetValue(uid, out since))
+            {
+                _sinceMs[uid] = sinceMs;
+                Started++;
+                return nowMs - sinceMs < (long)_graceMs;
+            }
+
+            return nowMs - since < (long)_graceMs;
+        }
+
+        /// <summary>当前是否仍在宽限内（未跟踪 ⇒ false）。</summary>
+        public bool IsWithinGrace(int uid, long nowMs)
+        {
+            long since;
+            if (!_sinceMs.TryGetValue(uid, out since)) { return false; }
+            return nowMs - since < (long)_graceMs;
+        }
+
+        /// <summary>
+        /// 新票据到达时的重绑判定。**成功即摘除记录**；终局/到期一律拒绝且**保留**记录。
+        /// 未跟踪的 uid 按「刚刚断开」（elapsed = 0）处理。
+        /// </summary>
+        public bool TryAuthorizeRebind(int uid, long nowMs, bool matchEnded)
+        {
+            if (matchEnded)
+            {
+                RebindRefusedEnded++;
+                return false;
+            }
+
+            long since;
+            if (!_sinceMs.TryGetValue(uid, out since))
+            {
+                // 没有记录 = 同帧断线 + 重连（宿主那一帧还没来得及跑断线观察）。
+                Started++;
+                Recovered++;
+                return true;
+            }
+
+            if (nowMs - since >= (long)_graceMs)
+            {
+                RebindRefusedExpired++;
+                return false;
+            }
+
+            _sinceMs.Remove(uid);
+            Recovered++;
+            return true;
+        }
+
+        /// <summary>显式摘除一条记录（宿主在「端点重新就绪但没走重绑」这类兜底路径上使用）。</summary>
+        public bool Clear(int uid) { return _sinceMs.Remove(uid); }
+
+        /// <summary>清空全部记录（会话收尾）。</summary>
+        public void Reset() { _sinceMs.Clear(); }
+
+        /// <summary>单行诊断摘要。</summary>
+        public string Describe()
+        {
+            return "graceMs=" + _graceMs
+                   + " tracked=" + _sinceMs.Count
+                   + " started=" + Started
+                   + " recovered=" + Recovered
+                   + " refusedEnded=" + RebindRefusedEnded
+                   + " refusedExpired=" + RebindRefusedExpired;
+        }
+    }
+
+    /// <summary>
     /// 每对象运动驱动。一个网络副本一个实例（DS 侧是权威副本，客户端侧是 AP 或 SP 副本）。
     ///
     /// 实现 <see cref="IPMMovementNetworkDriver"/>（声明层定义的接缝）：
     /// 五个入口全部由 PMR3Player 的声明承载（RPC 业务实现 / RepNotify）转发进来。
+    ///
+    /// T-LOOP5（DS 断线宽限）：Authority 侧另有「断线挂起 / 重连恢复」一对显式入口
+    /// （<see cref="SuspendAuthorityForDisconnect"/> / <see cref="ResumeAuthorityAfterReconnect"/>）：
+    /// 挂起期间**不采纳输入、不推进仿真**，但**不释放任何东西**（对象/账本/投射物留在权威战场，
+    /// 角色原地仍可被他人命中）——「超期才走原清理」由宿主决定窗口，本类只提供可恢复的挂起。
     /// </summary>
     public sealed class PMR4MovementDriver : IPMMovementNetworkDriver, IDisposable
     {
@@ -441,6 +590,13 @@ namespace PMNet.R3
         private uint _streamVersion;
         private int _configVersion;
         private bool _frozen;
+
+        /// <summary>
+        /// T-LOOP5：DS 断线宽限挂起标志。置位期间：不采纳输入、不推进仿真；
+        /// 但**不**释放任何东西。只有「因断线而挂起」才能被恢复（死亡/终局的冻结不可恢复）。
+        /// </summary>
+        private bool _authoritySuspended;
+
         private bool _disposed;
         private bool _initialSnapshotPublished;
 
@@ -571,6 +727,29 @@ namespace PMNet.R3
 
         /// <summary>冻结的 SP 拒绝借复制快照升流的次数（断线冻结保持）。</summary>
         public long SnapshotRebindRejectedFrozen;
+
+        // ---- T-LOOP5：DS 断线宽限挂起（离线权威不采纳输入/不推进；对象与账本全部保留） ----
+
+        /// <summary>挂起期间被丢弃的**入站输入载荷**条数（拒绝采纳的直接证据）。</summary>
+        public long AuthoritySuspendedInputsDropped;
+
+        /// <summary>挂起时从权威缓冲队列里丢弃的已接纳输入条数（挂起前已排队的输入不得在恢复后继续模拟）。</summary>
+        public long AuthoritySuspendedQueuedInputsDropped;
+
+        /// <summary>挂起期间被拒绝推进的 Pump 次数（宿主不调也不该推进；直接调用同样不推进）。</summary>
+        public long AuthoritySuspendedPumpSkips;
+
+        /// <summary>成功建立的断线挂起次数。</summary>
+        public long AuthoritySuspendCount;
+
+        /// <summary>成功恢复的断线挂起次数。</summary>
+        public long AuthorityResumeCount;
+
+        /// <summary>因「已被死亡/终局冻结」而**拒绝**建立可恢复挂起的次数（死者不得被重连复活）。</summary>
+        public long AuthoritySuspendRejectedFrozen;
+
+        /// <summary>没有挂起却调用恢复的次数（调用方口径错误；幂等 API 的拒绝计数）。</summary>
+        public long AuthorityResumeRejected;
 
         /// <summary>不可逆事件派发回调抛异常的次数（状态已前移，不会重复派发同一条事件）。</summary>
         public long EventDispatchFailed;
@@ -827,6 +1006,14 @@ namespace PMNet.R3
 
         /// <summary>是否已冻结（断线）。</summary>
         public bool IsFrozen { get { return _frozen; } }
+
+        /// <summary>
+        /// DS 是否处于「断线宽限挂起」（离线权威不采纳输入、不推进，但对象/账本保留）。
+        /// 与 <see cref="IsFrozen"/> 的区别：挂起**可恢复**（<see cref="ResumeAuthorityAfterReconnect"/>），
+        /// 死亡/终局的冻结不可恢复；挂起同时会把 <see cref="IsFrozen"/> 置位，从而复用宿主既有的
+        /// 「冻结即不 Pump / 不授权」语义（离线玩家不能获得新的攻击授权）。
+        /// </summary>
+        public bool IsAuthoritySuspended { get { return _authoritySuspended; } }
 
         /// <summary>是否已释放。</summary>
         public bool IsDisposed { get { return _disposed; } }
@@ -1220,6 +1407,14 @@ namespace PMNet.R3
             result.CreditMsBefore = _authority.CreditMs;
             result.CreditMsAfter = _authority.CreditMs;
 
+            if (_authoritySuspended)
+            {
+                // 断线宽限：离线权威**不推进**（原地留在权威战场，仍可被他人命中/击杀）。
+                // 这里在**任何**输入采纳之前就返回，因此即使有人直接调 Pump 也不会被旧载荷推动。
+                AuthoritySuspendedPumpSkips++;
+                return result;
+            }
+
             if (hostTickId == _lastHostTickId)
             {
                 DuplicateHostTickRejections++;
@@ -1421,6 +1616,86 @@ namespace PMNet.R3
             ThrowIfDisposed();
             ApplyPending();
             return _model.CloneAux(_authorityAux);
+        }
+
+        // ================================================================ DS：断线宽限挂起 / 恢复
+
+        /// <summary>
+        /// T-LOOP5：DS 侧「断线宽限挂起」——该 uid 的权威端点断开后调用：
+        ///   · 不采纳输入（<see cref="ApplyPendingInputs"/> 直接丢弃入站载荷）、不推进仿真（
+        ///     <see cref="Pump"/> 提前返回零步），并清空挂起前已在队列里的输入；
+        ///   · **不释放任何东西**：player/NetId/投射物/历史都留着，角色原地仍可被他人命中；
+        ///   · 把 <see cref="IsFrozen"/> 置位以复用宿主既有的「冻结即不 Pump / 不授权」语义。
+        ///
+        /// 幂等：已挂起再调返回 true。已经因**死亡/终局**冻结时返回 false 并计数
+        /// （那类冻结不可恢复，绝不能因为同一 uid 拿新票据回来就把死者复活）。
+        /// </summary>
+        public bool SuspendAuthorityForDisconnect(string reason)
+        {
+            EnsureRole(PMNetRole.Authority, "SuspendAuthorityForDisconnect");
+            EnsureThread();
+            ThrowIfDisposed();
+
+            if (_authoritySuspended)
+            {
+                return true;
+            }
+
+            if (_frozen)
+            {
+                // 已被死亡/终局冻结：不建立「可恢复」的挂起（否则重连会把它解冻）。
+                AuthoritySuspendRejectedFrozen++;
+                _player.WarnMovement("[PMR4MovementDriver] 拒绝建立断线挂起：驱动已因死亡/终局冻结"
+                                     + "（reason=" + (reason ?? "(none)") + "）");
+                return false;
+            }
+
+            _authoritySuspended = true;
+            _frozen = true;
+            AuthoritySuspendCount++;
+
+            // 挂起前已到达但尚未模拟的输入：不得在恢复后一次性补跑（那会让角色在重连瞬间跳一段）。
+            AuthoritySuspendedInputsDropped += _pendingInputs.Count;
+            _pendingInputs.Clear();
+
+            if (_authority != null)
+            {
+                AuthoritySuspendedQueuedInputsDropped += _authority.Resync(_epoch, _instanceId, _authorityBoundary);
+            }
+
+            _player.WarnMovement("[PMR4MovementDriver] DS 断线挂起（宽限内不采纳输入/不推进，对象与账本保留）："
+                                 + (reason ?? "(no reason)")
+                                 + " stream=" + _streamVersion + " boundary=" + _authorityBoundary);
+            return true;
+        }
+
+        /// <summary>
+        /// T-LOOP5：新端点已重绑到同一个权威对象后，恢复被断线挂起暂停的权威运动。
+        ///
+        /// 严格条件：只有**确实是断线挂起**建立的暂停才能恢复（死亡/终局的冻结永远不会走到这里）；
+        /// 恢复**不改**位姿/输出边界/累计仿真时间，也不自行升流
+        /// ——「从当前权威边界安全升流并下发完整快照」由调用方紧接调用 <see cref="BeginServerResync"/> 完成。
+        /// </summary>
+        public bool ResumeAuthorityAfterReconnect(string reason)
+        {
+            EnsureRole(PMNetRole.Authority, "ResumeAuthorityAfterReconnect");
+            EnsureThread();
+            ThrowIfDisposed();
+
+            if (!_authoritySuspended)
+            {
+                AuthorityResumeRejected++;
+                return false;
+            }
+
+            _authoritySuspended = false;
+            _frozen = false;
+            AuthorityResumeCount++;
+            _player.WarnMovement("[PMR4MovementDriver] DS 断线挂起已恢复：" + (reason ?? "(no reason)")
+                                 + " stream=" + _streamVersion + " boundary=" + _authorityBoundary
+                                 + "（位姿/边界不变，由调用方随后 BeginServerResync 升流）");
+
+            return true;
         }
 
         // ================================================================ DS：重同步
@@ -1640,6 +1915,15 @@ namespace PMNet.R3
         {
             if (_role != PMNetRole.Authority)
             {
+                _pendingInputs.Clear();
+                return;
+            }
+
+            if (_authoritySuspended)
+            {
+                // T-LOOP5：断线宽限期间**不采纳任何输入**（含同流载荷）。
+                // 丢弃而非入队：离线期间排队的输入不得在重连恢复后被一次性模拟。
+                AuthoritySuspendedInputsDropped += _pendingInputs.Count;
                 _pendingInputs.Clear();
                 return;
             }

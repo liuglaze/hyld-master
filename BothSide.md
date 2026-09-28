@@ -679,3 +679,16 @@ PMR3Player新增声明式输入RPC、完整Sync/Aux快照属性、可靠事件/�
 PMReplicated auto-property支持普通赋值自动Push：只变化且Authority才标脏；客户端写本地副本不获得上行权威。
 Reader直接RawSet，复制层统一OnRep。Pure-property类与RPC类共用编织guard；现有PMR3Player12/PMR5Projectile1成员改同名自动属性，13属性/13RPC/协议0xE6130FAA与ID锁不变。
 PushBased=false现在真正进入轮询；不可见baseline/force/dirty不长期占预算、loss在预算顺延前记录、每连接轮转保证推进。数组同引用原地修改仍需手动Mark或Poll，不扩FastArray。
+
+
+## T-LOOP 原局断线续玩/终局回大厅（当前协议覆盖前文旧hash）
+首杀仍由DS权威结算，客户端只在可信结果已存+本帧ACK发出后弹出胜负/返回大厅；按钮走EndSessionNormally保留只读结论，7s自动兜底。真正中途断线：大厅TCP同账号按真实UID重新登录且原局未终局、断线窗口30s内才自动重签新Nonce票(`PMDSR1:`，同PMDS1二进制布局)，旧票DS墓碑拒绝；DS保留原NetId/Combat/Mover/投射物，角色原地可被击杀、不能继续接受该uid输入，过期才Forfeit；新连接重绑唯一Owner，World全量Create+新复制基线、Mover升流，客户端新World不复用旧预测。已结算不续战，Lobby进程内缓存的上局Result仅`PMDS-END1`只读提示后留大厅（有效期120s），新局进行时不附旧结果；服务进程重启不保留。
+新增PMR3Player OwnerOnly属性 `_combatActivationHighWater` PropertyId43867 防续局首枪ID回绕/撞旧攻击水位；旧13RPC编号和旧属性编号原样保留，PMR3Player现13属性、PMR5Projectile1属性，新ProtocolHash `0xAEA98336`，ID锁SHA256 `767c6e0da859defa61bd15e314d633a83b46e1714f37dc5b4f5f183ce9217826`；前文 `0xE6130FAA` 仅历史版本，绝不能新旧二进制混跑。统一代码门full37/37不代表Unity实机，T-LOOP8需同版三端复测。
+
+
+## T-LIVE 新一轮客户端续局通知/结果UI（覆盖旧“返回后可见”说法）
+Lobby已签发PMDSR1的流程不变；客户端新增严格有界早到通知暂存（30s/当前TCP代次），待UIMatchingPanel注册并在主线程打开后只投递一次；关闭连接/退出清暂存，不日志输出offer/Str/ticket。无服务器协议字段变化，ProtocolHash仍0xAEA98336。终局收到可信Result+ACK时显示胜负按钮，返回大厅后整块HUD隐藏，内存中的可信结果保留到新局/显式Stop（T-LOOP3“返回后可见”被用户新决定覆盖）。Owner瞄准线只消费UI live向量+共享planner，不发RPC/决定伤害；大招能量使用旧圆形FullBG/FullPower径向图而非矩形纯色填充。User双端Unity实机T-LIVE5/原局重连T-LOOP8仍待验。
+
+
+## T-AIM 本地攻击预览与DS判定的明确边界
+本地Owner在细中心线外加半透明近似命中带（标准几何半径=权威弹Spec.RadiusM+目标标准胶囊半径0.4m+Validator容差0.3m，首批约0.8m；每股Plan.Directions同向），纯视觉；旧ShootWidth仅美术，不得当权威伤害半径。DS独立PhysicsScene对白名单墙体用真实PhysX SphereCast/OverlapSphere截停弹；角色命中仅收客户端候选，DS拿权威历史及线段-胶囊数学验证，再由PMCombatSession唯一扣血。UI覆盖带既不预演墙裁剪也不保证命中。无新上行/协议/ID更改，Hash仍0xAEA98336。T-AIM5需新客户端Player实机宽度/观感验收。

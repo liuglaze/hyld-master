@@ -226,6 +226,34 @@ namespace PMNet.Combat
             return result;
         }
 
+        /// <summary>
+        /// 取某个 owner 当前的**单调激活水位**（见过的最大 activationId；**含被拒绝与容量拒绝**推进的水位）。
+        ///
+        /// <para>这是给续局/重连链路用的**纯只读**视图：R6 DS 把它发布成 OwnerOnly 复制属性，
+        /// 新的客户端实例据此从正确水位起分配下一个 activationId —— 否则恢复后的第一枪会拿
+        /// ID=1 去撞 core 的 <see cref="PMCombatRejectReason.StaleId"/> 与 R5 对同 (owner,activationId)
+        /// 的终态记忆（AlreadyTerminal），攻击被拒甚至把假弹反向撤销。</para>
+        ///
+        /// <para>不靠随机数、不靠客户端磁盘落盘猜水位：水位只由本权威核心产生。</para>
+        ///
+        /// <para>本方法**纯只读**：不推进任何状态、不改任何账本、不产生副作用；
+        /// TTL/容量回收**不回落**水位（与 <c>HighWaterActivationId</c> 的既有语义一致）。</para>
+        /// </summary>
+        /// <returns>未知 netId 返回 false（<paramref name="highWater"/> 置 0），不抛异常。</returns>
+        public bool TryGetActivationHighWater(uint netId, out uint highWater)
+        {
+            highWater = 0u;
+
+            PlayerRecord player;
+            if (!_players.TryGetValue(netId, out player))
+            {
+                return false;
+            }
+
+            highWater = player.HighWaterActivationId;
+            return true;
+        }
+
         // ------------------------------------------------------------------ 名册
 
         /// <summary>

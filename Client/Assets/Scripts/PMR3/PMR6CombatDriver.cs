@@ -368,6 +368,15 @@ namespace PMNet.R3
         private readonly Dictionary<uint, PublishedCombatState> _publishedByNetId =
             new Dictionary<uint, PublishedCombatState>();
 
+        /// <summary>
+        /// 每个 roster 成员最近一次**真正写入**过的激活水位（DS 侧发布去重）。
+        ///
+        /// 单独一张表而不是塞进 <see cref="PublishedCombatState"/>：水位的比较必须**独立于**九条字段的
+        /// 「无变化早退」。否则「只有水位变了（例如一次被拒绝/容量拒绝的攻击推进了水位）」这个班次
+        /// 会因为九条字段没变而在 `SameAs` 处被 `continue` 掉，新连接/新客户端实例就拿不到正确水位。
+        /// </summary>
+        private readonly Dictionary<uint, uint> _publishedHighWaterByNetId = new Dictionary<uint, uint>();
+
         /// <summary>九条战斗复制属性的值语义（只用于「有没有变化」的比较与写入）。</summary>
         private struct PublishedCombatState
         {
@@ -461,6 +470,12 @@ namespace PMNet.R3
         public long PendingAttackTimeouts;
         public long PendingAttacksPruned;
         public long ActivationWraps;
+
+        /// <summary>DS：把权威核心的单调激活水位写进复制字段的次数（仅真正写入时递增）。</summary>
+        public long ActivationHighWaterPublishCount;
+
+        /// <summary>AP：本地分配器被复制水位单调抬起（= 吸收）的次数（只增不减）。</summary>
+        public long ActivationHighWaterAbsorbCount;
 
         /// <summary>结算应用路径抛异常的次数（已在订阅边界消化；一旦发生即会话 fault）。</summary>
         public long SettlementApplyFailures;
@@ -587,6 +602,19 @@ namespace PMNet.R3
         public int PendingAttackCount { get { return _pendingAttacks.Count; } }
 
         /// <summary>
+        /// AP：本端为某 owner 已经分配到的最大 activationId（本地分配器水位；0 = 尚未分配）。
+        ///
+        /// <para>只读观测：正常攻击路径下它等于「已发出的最大 activationId」，并且**永不下降**
+        /// （复制水位只抬不降）。续局回归用它断言「新实例不是从 0 重开」。</para>
+        /// </summary>
+        public uint LocalActivationHighWater(uint ownerNetId)
+        {
+            uint current;
+            if (!_nextActivationByOwner.TryGetValue(ownerNetId, out current)) { return 0u; }
+            return current;
+        }
+
+        /// <summary>
         /// DS 待消费的结算条数（**观测 R5 的真实待取缓冲**，不是本地副本）。
         ///
         /// 正常路径下恒为 0：本驱动的订阅者从不抛异常，因此 R5 的每条结算都当场交付；
@@ -684,6 +712,15 @@ namespace PMNet.R3
 
             // R5 侧同一玩家（幂等；失败不致命——上行投射物会走 R5 自己的「无 driver 丢弃」可见路径）。
             _projectiles.BindPlayer(player);
+
+            // AP 续局：Create 初值已在**创建回调之前**由复制层应用（R2 契约：按连接过滤、创建回调前应用），
+            // 因此这里读到的 `_combatActivationHighWater` 就是 DS 权威水位。用它播种本端下一个 activationId，
+            // 否则断线重连后的新客户端实例会从 0 重开，第一枪拿 ID=1 去撞 core 的 StaleId
+            // 与 R5 对同 (owner,activationId) 的 AlreadyTerminal。
+            if (!_isServer)
+            {
+                AbsorbActivationHighWater(player);
+            }
 
             // 新绑定的 player 需要一份初值（若它是名册成员）。
             _stateDirty = true;
@@ -857,6 +894,10 @@ namespace PMNet.R3
                 return false;
             }
 
+            // 续局安全：本端分配器必须**不落后于已复制到的** DS 水位（只增不减）。
+            // 不靠随机数、不靠客户端磁盘猜水位 —— 复制水位是唯一来源，取 max 保证旧包不压低已发 ID。
+            AbsorbActivationHighWater(player);
+
             uint next;
             if (!NextActivation(player.NetId.Value, out next))
             {
@@ -996,6 +1037,32 @@ namespace PMNet.R3
             _nextActivationByOwner[ownerNetId] = current;
             activationId = current;
             return true;
+        }
+
+        /// <summary>
+        /// AP：把**复制到的**单调激活水位吸收进本地分配器（只增不减）。
+        ///
+        /// <para>为什么取 max 而不是直接赋值：复制包可能迟到（重连时旧连接的最后几包、Create 初值与
+        /// Update 交错），而本端**已经发出**的 activationId 绝不能被降低 —— 降低就等于下一次攻击复用
+        /// 已发出的 ID，core 的水位只会把它当旧包拦掉（StaleId），或更糟：让 R5 对同 (owner,activationId)
+        /// 的终态记忆把新假弹误判为旧结论。</para>
+        ///
+        /// <para>非 owner 副本读到的恒为 0（OwnerOnly 不泄），因此这里天然不会为非 owner 抬高分配器。</para>
+        /// </summary>
+        private void AbsorbActivationHighWater(PMR3Player player)
+        {
+            if (_isServer) { return; }
+            if (player == null || !player.NetId.IsValid) { return; }
+
+            uint replicated = player.CombatActivationHighWater;
+            if (replicated == 0u) { return; }
+
+            uint current;
+            if (!_nextActivationByOwner.TryGetValue(player.NetId.Value, out current)) { current = 0u; }
+            if (replicated <= current) { return; }
+
+            _nextActivationByOwner[player.NetId.Value] = replicated;
+            ActivationHighWaterAbsorbCount++;
         }
 
         private static ulong PendingKey(uint ownerNetId, uint activationId)
@@ -1707,6 +1774,30 @@ namespace PMNet.R3
 
                 PublishedCombatState next = PublishedCombatState.From(players[i], outcome);
 
+                // 激活水位：与九条字段**独立**比较（它只增不减，被拒绝/容量拒绝也会推进），
+                // 因此**不能**挂在下面 `next.SameAs` 的无变化早退后面。断线重连后的新连接
+                // 正是靠这次发布（或 Create 初值）拿到正确水位。
+                uint coreHighWater;
+                if (_model.TryGetActivationHighWater(players[i].NetId, out coreHighWater))
+                {
+                    uint publishedHighWater;
+                    bool known = _publishedHighWaterByNetId.TryGetValue(players[i].NetId, out publishedHighWater);
+                    if (!known || publishedHighWater != coreHighWater)
+                    {
+                        if (player.PublishCombatActivationHighWater(coreHighWater))
+                        {
+                            _publishedHighWaterByNetId[players[i].NetId] = coreHighWater;
+                            ActivationHighWaterPublishCount++;
+                        }
+                        else
+                        {
+                            // 与九条字段同一处置：保持脏、下帧重试且可观测。
+                            StatePublishRejected++;
+                            allPublished = false;
+                        }
+                    }
+                }
+
                 PublishedCombatState previous;
                 if (_publishedByNetId.TryGetValue(players[i].NetId, out previous) && previous.SameAs(next))
                 {
@@ -2134,6 +2225,7 @@ namespace PMNet.R3
             _pendingAttacks.Clear();
             _deathsReported.Clear();
             _publishedByNetId.Clear();
+            _publishedHighWaterByNetId.Clear();
             _nextActivationByOwner.Clear();
             _resultAcked.Clear();
             _resultSummary = null;

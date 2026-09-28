@@ -21,8 +21,8 @@ EditorBuildSettings:
     path: 
     guid: 00000000000000000000000000000000
   - enabled: 0
-    path: Assets/RemakeHYLD/Scenes/TestUDP.unity
-    guid: 1f081c6b28dd5f545b69afa7f2099f42
+    path: 
+    guid: 00000000000000000000000000000000
   - enabled: 0
     path: Assets/HYLD1.0/Scenses/HuangYeLuanDouStart.unity
     guid: 742e433371346404581fdf289698e7cc

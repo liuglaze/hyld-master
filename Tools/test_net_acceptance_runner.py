@@ -62,9 +62,11 @@ SMOKE = R.build_plan("smoke")
 FULL = R.build_plan("full")
 
 SMOKE_NAMES = [
-    "PMDeclCheck", "PMReplicationTest", "PMNetE2E", "PMR3RuntimeTest", "PMR3IntegrationTest",
-    "PMR4NetworkTest", "PMR5NetworkTest", "PMR6NetworkTest", "PMNetSessionTest", "PMNetWorldTest",
-    "PMLegacyRetirementTest", "PMNetWeavingEditorTest", "PMClientCheck", "PMR4UnityCheck",
+    "PMDeclCheck", "PMReplicationTest", "PMNetE2E", "PMR3RuntimeTest", "PMEntryInboxTest", "PMR3IntegrationTest",
+    "PMR4NetworkTest", "PMR4UnityAdapterTest", "PMR5NetworkTest", "PMR6NetworkTest", "PMNetSessionTest", "PMNetWorldTest",
+    "PMLegacyRetirementTest", "PMNetWeavingEditorTest", "PMLoginLifecycleTest", "PMCombatHudTest",
+    "PMClientCheck", "PMR4UnityCheck",
+    "PMNetUnityPlayerCheck",
 ]
 FULL_ONLY_NAMES = [
     "PMPropertyWeaverTest", "PMNetWeaverTest", "PMDsControlTest", "PMDsLobbyTest", "PMTransportTest",
@@ -317,13 +319,14 @@ class ManifestTests(unittest.TestCase):
 
     def test_smoke_has_exactly_the_frozen_items(self):
         self.assertEqual([e.name for e in SMOKE], SMOKE_NAMES)
-        self.assertEqual(len(SMOKE), 14)
+        self.assertEqual(len(SMOKE), 19)
 
     def test_smoke_kinds_split(self):
         tests = [e for e in SMOKE if e.kind == "test"]
         builds = [e for e in SMOKE if e.kind == "build"]
-        self.assertEqual(len(tests), 12)
-        self.assertEqual(sorted(e.name for e in builds), ["PMClientCheck", "PMR4UnityCheck"])
+        self.assertEqual(len(tests), 16)
+        self.assertEqual(sorted(e.name for e in builds),
+                         ["PMClientCheck", "PMNetUnityPlayerCheck", "PMR4UnityCheck"])
 
     def test_full_is_smoke_plus_frozen_additions_in_order(self):
         names = [e.name for e in FULL]
@@ -552,9 +555,44 @@ class ReportTests(unittest.TestCase):
         self.assertTrue((run_dir / "summary.json").is_file(),
                         "执行器意外也必须落盘部分报告")
 
+    def test_report_replace_retries_only_transient_windows_lock(self):
+        if os.name != "nt":
+            self.skipTest("仅 Windows 上的 WinError5/32 报告替换争用")
+        run_dir = Path(self.temp) / "report-lock"
+        original = os.replace
+        attempts = []
+        transient = PermissionError(13, "transient sharing violation")
+        transient.winerror = 5
+
+        def fail_once(source, target):
+            attempts.append((source, target))
+            if len(attempts) == 1:
+                raise transient
+            return original(source, target)
+
+        report = {"run_id": "retry-test", "suite": "smoke", "repo": "temp", "started_at": "now",
+                  "timeout_seconds": 1, "items": [], "status": "PASS", "code_only": True,
+                  "unity": {"status": "NOT_RUN", "reason": "Unity 未运行"}}
+        with mock.patch.object(R.os, "replace", side_effect=fail_once):
+            R.write_report(run_dir, report)
+        self.assertGreaterEqual(len(attempts), 3, "json首报重试一次、markdown还应发布一次")
+        self.assertTrue((run_dir / "summary.json").is_file())
+        self.assertTrue((run_dir / "summary.md").is_file())
+
+        persistent = PermissionError(13, "persistent sharing violation")
+        persistent.winerror = 5
+        with mock.patch.object(R.os, "replace", side_effect=persistent):
+            with mock.patch.object(R.time, "sleep", return_value=None):
+                with self.assertRaises(PermissionError):
+                    R.write_report(Path(self.temp) / "persistent-lock", report)
+        self.assertFalse((Path(self.temp) / "persistent-lock" / "summary.json").is_file(),
+                         "持续失败不得发布假报告")
+
     def test_report_contract_fields_and_paths(self):
         executor = FakeExecutor()
-        report, code, run_dir = inproc_run(executor, plan=[SMOKE[0], SMOKE[12]],
+        # 不按列表偏移猜“第一个 build-only”：新测试插入 smoke 后索引会变。
+        client_build = next(e for e in SMOKE if e.name == "PMClientCheck")
+        report, code, run_dir = inproc_run(executor, plan=[SMOKE[0], client_build],
                                            run_dir=Path(self.temp) / "run")
         self.assertEqual(code, R.EXIT_OK)
         self.assertTrue(report["code_only"])

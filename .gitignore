@@ -51,6 +51,10 @@
 /Client/dabao/
 /Client/Log/
 
+# Local Unity player build output; do not commit the oversized resource blob.
+/dabao/
+/Client/Tools/Invosion_Data/resources.assets.resS
+
 # Rider / JetBrains generated plugin in Unity
 /Client/[Aa]ssets/Plugins/Editor/JetBrains*
 

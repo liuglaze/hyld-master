@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      T-LOOP3 门禁：结算弹窗 / 返回大厅按钮的**纯替身可执行**行为门。
+
+      为什么需要它：
+        「只在可信终局结果已存 + 本帧发 ACK 后弹窗」「无结论不弹」「按钮点击经会话身份令牌
+        回调」「退场后按钮只读 + 重复点击不再回调」「回调异常隔离」全是状态机性质，
+        编译期看不出来、实机又不便反复复现。本工程把 Client/Assets/Scripts/PMUnity/
+        PMUnityCombatHud.cs（**真实源码**）编进 net8，用功能性替身（Stubs.cs）驱动它的 OnGUI，
+        并把每条判据变成可执行断言。
+
+      边界（务必看清）：
+        · 只编 HUD（不编宿主）：宿主的按钮**接线**由 Program.cs 尾部的「有界源码约束」补，
+          那些是静态结构断言，**不等于实机**；
+        · 替身不模拟真实渲染/字体/皮肤/版面观感，也不证明 uGUI 不会盖住 IMGUI；
+        · 真实 Unity 2019 的 GUI.Button / GUIStyle / GUISkin 签名面由
+          Tools/PMR4UnityCheck（Editor DLL）与 Tools/PMNetUnityPlayerCheck（Player DLL）覆盖。
+
+      运行：dotnet build Tools/PMCombatHudTest -c Release
+            dotnet Tools/PMCombatHudTest/bin/Release/net8.0/PMCombatHudTest.dll
+      退出码：0 = 全部通过；1 = 存在失败
+    -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>PMCombatHudTest</AssemblyName>
+    <RootNamespace>PMCombatHudTest</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Stubs.cs" />
+
+    <!-- 被测对象：真实源码（不复制、不快照）。 -->
+    <Compile Include="..\..\Client\Assets\Scripts\PMUnity\PMUnityCombatHud.cs" LinkBase="PMUnity" />
+  </ItemGroup>
+
+</Project>

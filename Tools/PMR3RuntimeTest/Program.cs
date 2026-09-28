@@ -199,12 +199,13 @@ namespace PMR3RuntimeTest
             CheckTrue(PMNetRegistry.TryGetClass(PMR3Player.PMGeneratedClassId, out entry) && entry != null,
                 "PMR3Player 的 ClassId 已注册：0x" + PMR3Player.PMGeneratedClassId.ToString("X8"));
             // R4-B（B1）：PMR3Player 新增第 3 个复制属性 `_movementSnapshotV1`（运动权威快照，byte[]）。
-            // R6-A2：再追加 9 条战斗声明属性（7 公共 + 2 OwnerOnly），位宽从 3 变 12。
-            // 这里只更新「新增属性带来的计数」；下面的成员名/写入口断言与 ID/RPC 档位断言一律不放宽。
-            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 12,
-                "复制属性位宽 == 12（Uid + ProbeCount + MovementSnapshotV1 + 9 战斗属性）");
-            CheckEq(entry != null && entry.Rep != null ? entry.Rep.Properties.Length : -1, 12,
-                "复制描述符里的属性数 == 12");
+            // R6-A2：原 9 条战斗属性（7 公共 + 2 OwnerOnly），位宽从 3 变 12；
+            // T-LOOP：续局增加第 10 条 OwnerOnly 激活水位，位宽 = 13。
+            // 只调整真实新声明的计数；既有成员/写入口与 ID/RPC 档位断言不放宽。
+            CheckEq(PMR3Player.PMGeneratedChangeMaskBitCount, 13,
+                "复制属性位宽 == 13（Uid + ProbeCount + MovementSnapshotV1 + 10 战斗属性）");
+            CheckEq(entry != null && entry.Rep != null ? entry.Rep.Properties.Length : -1, 13,
+                "复制描述符里的属性数 == 13");
 
             PMNet.PMPropertyDescriptor snapshotProp = default(PMNet.PMPropertyDescriptor);
             bool hasSnapshotProp = false;
@@ -779,16 +780,67 @@ namespace PMR3RuntimeTest
             PumpUntil(agent, lobby, ref now, done, maxIterations, 100L);
         }
 
+        /// <summary>
+        /// 推进虚拟时钟若干步，每步后可选地「等真实投递到达」。
+        ///
+        /// <para><b>为什么需要 <paramref name="expectTrustedDelivery"/>（来自一次真实的偶发失败）</b>：
+        /// `PMDsLobbyAgent` 用**后台线程**接收（<c>ReceiveLoop</c>，空闲时 <c>Thread.Sleep(20)</c>）并把帧入队，
+        /// 因此「帧什么时候被代理处理到」取决于**真实**调度；而本夹具把 65 虚拟秒压缩在约 2 真实秒内推进。
+        /// 一旦机器繁忙、后台线程被晚调度数十毫秒（≡ 许多虚拟秒），虚拟时钟就会跑赢真实投递，
+        /// 于是 <c>RuntimeLivenessTimeoutMs</c>（按时钟判定）在**没有任何真实缺陷**的情况下触发。
+        /// 这正是当时 `--suite full` 偶发失败、而同一二进制单独跑 3/3 通过的原因。
+        ///
+        /// 修复方式：在「本步确实期待一条可信下行」的场景里，**有界地**等真实投递跟上
+        /// （每步上限 <see cref="DeliveryBudgetMs"/>；有进展就立即返回）。
+        /// 它**不削弱任何断言**：预算耗尽而仍未交付时，后续 H4/H7 等断言照旧会红 —— 只是不再误红。</para>
+        /// </summary>
         private static void PumpUntil(PMDsLobbyAgent agent, FakeLobby lobby, ref long now,
-                                      Func<bool> done, int maxIterations, long stepMs)
+                                      Func<bool> done, int maxIterations, long stepMs,
+                                      bool expectTrustedDelivery = false)
         {
             for (int i = 0; i < maxIterations; i++)
             {
-                agent.Pump(now, 1700000000L + i);
+                long unix = 1700000000L + i;
+                agent.Pump(now, unix);
                 lobby.Pump();
                 if (done()) { return; }
 
+                if (expectTrustedDelivery)
+                {
+                    WaitForTrustedDelivery(agent, lobby, now, unix);
+                    if (done()) { return; }
+                }
+
                 now += stepMs;
+            }
+        }
+
+        /// <summary>单步等真实投递的预算（毫秒）：大于后台接收线程的空闲轮询周期（20ms），但保持有界。</summary>
+        private const int DeliveryBudgetMs = 250;
+
+        /// <summary>
+        /// 有界等待「本虚拟时刻的一条可信下行真的被代理处理到」。
+        ///
+        /// 停止条件（任一成立即返回）：
+        ///   · <c>LastTrustedReceiveMs</c> 已推进到当前虚拟时刻（本步的可信帧已到）；
+        ///   · 代理已拿到结果（后续不再依赖心跳）；
+        ///   · 代理已 fault（后续断言自己要报的那个结局，不需再等）；
+        ///   · 预算耗尽（仍有界返回，交给后续断言如实变红）。
+        /// </summary>
+        private static void WaitForTrustedDelivery(PMDsLobbyAgent agent, FakeLobby lobby, long now, long unix)
+        {
+            long budgetTicks = Stopwatch.Frequency * DeliveryBudgetMs / 1000L;
+            long deadline = Stopwatch.GetTimestamp() + budgetTicks;
+
+            while (Stopwatch.GetTimestamp() < deadline)
+            {
+                if (agent.IsFaulted || agent.HasResult || agent.LastTrustedReceiveMs >= now) { return; }
+
+                // 让后台接收线程/内核有机会把 loopback 字节排空。
+                System.Threading.Thread.Sleep(1);
+
+                agent.Pump(now, unix);
+                lobby.Pump();
             }
         }
 
@@ -840,11 +892,15 @@ namespace PMR3RuntimeTest
 
                     long now = 1000L;
                     PumpUntil(agent, lobby, ref now,
-                        delegate { return lobby.CountOf(PMDsControlMessageType.Ready) > 0; }, 40);
+                        delegate { return lobby.CountOf(PMDsControlMessageType.Ready) > 0; }, 40,
+                        100L, expectTrustedDelivery: true);
                     long readySentAt = now;
 
                     // 65 个 1s 步：虚拟时间跨过旧的 30 秒看门狗两次以上。
-                    PumpUntil(agent, lobby, ref now, delegate { return false; }, 65, 1000L);
+                    // expectTrustedDelivery: true —— 本场景由替身 Lobby 持续应答，因此每步都**有界等待**
+                    // 真实投递跟上（background 接收线程空闲轮询 20ms），避免虚拟时钟跑赢真实 socket。
+                    PumpUntil(agent, lobby, ref now, delegate { return false; }, 65, 1000L,
+                        expectTrustedDelivery: true);
 
                     long virtualMs = now - readySentAt;
                     CheckTrue(virtualMs > 60000L,
@@ -874,7 +930,8 @@ namespace PMR3RuntimeTest
                     CheckTrue(agent.SubmitResult(0, summary, out submitError),
                         "H12 结果提交成功（" + (submitError ?? "ok") + "）");
                     PumpUntil(agent, lobby, ref now,
-                        delegate { return lobby.CountOf(PMDsControlMessageType.Result) > 0; }, 20);
+                        delegate { return lobby.CountOf(PMDsControlMessageType.Result) > 0; }, 20,
+                        100L, expectTrustedDelivery: true);
                     CheckTrue(lobby.CountOf(PMDsControlMessageType.Result) > 0, "H13 Result 已发出");
                     CheckTrue(!agent.ResultAcknowledged, "H14 心跳流不会冒充 ResultAck");
 
@@ -885,7 +942,8 @@ namespace PMR3RuntimeTest
                         // 前置未成立（例如注入故障让代理提前失败）时**不发**这条 Ack：
                         // 下面的断言会如实变红，但不会把「测试构造非法帧」变成未捕获异常。
                         lobby.Send(matchId, dsId, epoch, hash, PMDsControlMessageType.ResultAck, ack, ack.ResultId);
-                        PumpUntil(agent, lobby, ref now, delegate { return exitCode != int.MinValue; }, 20);
+                        PumpUntil(agent, lobby, ref now, delegate { return exitCode != int.MinValue; }, 20,
+                            100L, expectTrustedDelivery: true);
                     }
 
                     CheckTrue(agent.ResultAcknowledged, "H15 匹配的 ResultAck 在心跳流中仍被接受");
@@ -999,6 +1057,98 @@ namespace PMR3RuntimeTest
                     agent.Dispose();
                 }
             }
+
+            // ── H37–H40：确定性复现「虚拟时钟跑赢真实投递」的竞态（先失败后修的可执行证据）──
+            //
+            // 背景（一次真实的偶发失败）：`--suite full` 曾在 H4/H7 红，而同一二进制单独跑 3/3 通过。
+            // 根因是夹具把 65 虚拟秒压缩到约 2 真实秒推进，而帧的到达要经过代理的**后台接收线程**
+            // （空闲 20ms 轮询）⇒ 虚拟时钟可跑赢真实投递，按时钟判定的 RuntimeLivenessTimeoutMs 便误触发。
+            // 下面用 `DeliveryDelayPumps` 把“真实投递滞后”变成**注入量**，因此不再靠碰运气：
+            //   · H37：同一注入 + **旧的泵法**（不等待真实投递）⇒ 必须误报运行期 liveness 失败（before 证据）；
+            //   · H38/H39：同一注入 + **新泵法**（有界等待真实投递）⇒ 长局存活、心跳持续到达（after 证据）。
+            // 若将来有人把等待逻辑删掉，H37 会先变红（它要求的“误报”不再发生）—— 即这条门自己会报警。
+            using (FakeLobby lobby = new FakeLobby(key.CreateControlSigner()))
+            {
+                lobby.AutoReplyHeartbeats = true;
+                lobby.DeliveryDelayPumps = 20;   // 每个出站帧要经过 20 次 Lobby 泵才真正发出（≡ 20 虚拟秒滞后）
+
+                int exitCode = int.MinValue;
+                PMDsLobbyAgent agent = new PMDsLobbyAgent(boot, "127.0.0.1", lobby.Port, boundPort,
+                    PMR3Runtime.CollisionDigest);
+                agent.SceneReady = true;
+                agent.ExitRequested = delegate(int code) { exitCode = code; };
+
+                try
+                {
+                    string startError;
+                    CheckTrue(agent.Start(out startError), "H37 控制通道连接成功（延迟投递注入）");
+                    lobby.Accept();
+
+                    long now = 1000L;
+
+                    // 就绪阶段仍用“等真实投递”的新泵法：本反例针对的是**运行期** liveness 竞态。
+                    PumpUntil(agent, lobby, ref now,
+                        delegate { return agent.LastTrustedReceiveMs > 0L; }, 40, 100L,
+                        expectTrustedDelivery: true);
+                    CheckTrue(agent.LastTrustedReceiveMs > 0L, "H38 已建立可信下行（前置，延迟注入下仍可达）");
+
+                    // ① 旧泵法（不等待真实投递）：在注入的 20 虚拟秒滞后下，必须误报 liveness 失败。
+                    long trustedAt = agent.LastTrustedReceiveMs;
+                    PumpUntil(agent, lobby, ref now, delegate { return agent.IsFaulted; }, 40, 1000L);
+
+                    CheckTrue(agent.IsFaulted,
+                        "H39 旧泵法 + 延迟投递 ⇒ 确定性误报运行期 liveness（这就是当时的偶发失败；实际 faulted="
+                        + agent.IsFaulted + "）");
+                    CheckTrue(agent.FaultReason != null
+                        && agent.FaultReason.IndexOf("运行期", StringComparison.Ordinal) >= 0,
+                        "H40 误报原因确实是运行期 liveness：“" + (agent.FaultReason ?? "<null>") + "”");
+                    // 边界口径与产品一致：代理用的是 `nowMs - lastTrustedRx >= RuntimeLivenessTimeoutMs`（**含等号**），
+                    // 因此这里也必须用 `>=`；写成 `>` 会把“刚好在边界触发”误判成提前触发（本次实测 15000ms）。
+                    CheckTrue(now - trustedAt >= PMDsLobbyAgent.RuntimeLivenessTimeoutMs,
+                        "H41 误报不是提前触发（实际 " + (now - trustedAt) + "ms ≥ "
+                        + PMDsLobbyAgent.RuntimeLivenessTimeoutMs + "ms）");
+                }
+                finally
+                {
+                    agent.Dispose();
+                }
+
+                // ③ 新泵法（同一注入）：长局存活、心跳持续到达 —— 修复后的行为。
+                int exitCode2 = int.MinValue;
+                PMDsLobbyAgent agent2 = new PMDsLobbyAgent(boot, "127.0.0.1", lobby.Port, boundPort,
+                    PMR3Runtime.CollisionDigest);
+                agent2.SceneReady = true;
+                agent2.ExitRequested = delegate(int code) { exitCode2 = code; };
+
+                try
+                {
+                    string startError2;
+                    CheckTrue(agent2.Start(out startError2), "H42 控制通道连接成功（复测）");
+                    lobby.Accept();
+
+                    long now2 = 1000L;
+                    PumpUntil(agent2, lobby, ref now2,
+                        delegate { return lobby.CountOf(PMDsControlMessageType.Ready) > 0; }, 40, 100L,
+                        expectTrustedDelivery: true);
+
+                    long aliveFrom = now2;
+                    PumpUntil(agent2, lobby, ref now2, delegate { return false; }, 25, 1000L,
+                        expectTrustedDelivery: true);
+
+                    CheckTrue(!agent2.IsFaulted,
+                        "H43 新泵法等真实投递 ⇒ 同一延迟注入下长局不再误报（原因="
+                        + (agent2.FaultReason ?? "<none>") + "）");
+                    CheckTrue(exitCode2 == int.MinValue, "H44 没有请求退出（实际 " + exitCode2 + "）");
+                    CheckTrue(now2 - aliveFrom > 20000L,
+                        "H45 虚拟时间已跨过长局窗口（实际 " + (now2 - aliveFrom) + "ms）");
+                    CheckTrue(agent2.HeartbeatsReceived >= 3L,
+                        "H46 心跳持续到达（实际 " + agent2.HeartbeatsReceived + "，期望 ≥ 3）");
+                }
+                finally
+                {
+                    agent2.Dispose();
+                }
+            }
         }
 
         // =================================================================================
@@ -1068,6 +1218,8 @@ namespace PMR3RuntimeTest
             private readonly Dictionary<PMDsControlMessageType, List<PMDsControlMessage>> _received =
                 new Dictionary<PMDsControlMessageType, List<PMDsControlMessage>>();
             private Socket _client;
+            private int _pumpCalls;
+            private readonly Queue<byte[]> _pendingOutbound = new Queue<byte[]>();
 
             public FakeLobby(PMDsControlSigner signer)
             {
@@ -1078,6 +1230,36 @@ namespace PMR3RuntimeTest
             }
 
             public int Port { get; private set; }
+
+            /// <summary>
+            /// 测试注入：&gt;0 时出站帧先入队，每 <b>该值</b> 次 <see cref="Pump"/> 才真正发出一条。
+            /// 默认 0（立即发出）⇒ 既有用例行为逐字不变。
+            /// </summary>
+            public int DeliveryDelayPumps;
+
+            /// <summary>本端是否还有未读的入站字节（供夹具判断“真实投递是否已跟上”）。</summary>
+            public bool HasPendingInbound()
+            {
+                return _client != null && _client.Available > 0;
+            }
+
+            /// <summary>因延迟注入而仍在排队、尚未发出的帧数。</summary>
+            public int QueuedOutboundCount { get { return _pendingOutbound.Count; } }
+
+            /// <summary>已收到的全部帧数（跨类型求和；供夹具判断“有进展”）。</summary>
+            public int TotalReceived
+            {
+                get
+                {
+                    int total = 0;
+                    foreach (KeyValuePair<PMDsControlMessageType, List<PMDsControlMessage>> kv in _received)
+                    {
+                        total += kv.Value.Count;
+                    }
+
+                    return total;
+                }
+            }
 
             /// <summary>
             /// 自动应答开关：收到合法 Ready / Heartbeat 时回一条**同一身份、同一密钥签名**的 Heartbeat。
@@ -1105,6 +1287,17 @@ namespace PMR3RuntimeTest
             public void Pump()
             {
                 if (_client == null) { return; }
+
+                // 测试注入：把本应立刻发出的帧延后若干次 Pump 才发出，用来**确定性**复现
+                // “虚拟时钟跑赢真实投递”的竞态（见 PumpUntil 的文档注释）。默认 0 = 不注入。
+                if (DeliveryDelayPumps > 0 && _pendingOutbound.Count > 0)
+                {
+                    _pumpCalls++;
+                    if (_pumpCalls % DeliveryDelayPumps == 0)
+                    {
+                        Emit(_pendingOutbound.Dequeue());
+                    }
+                }
 
                 while (true)
                 {
@@ -1168,7 +1361,20 @@ namespace PMR3RuntimeTest
             {
                 if (_client == null) { return; }
 
-                // 半包：分两段发，验证 DS 侧的解码器确实支持半包。
+                if (DeliveryDelayPumps > 0)
+                {
+                    _pendingOutbound.Enqueue(frame);
+                    return;
+                }
+
+                Emit(frame);
+            }
+
+            /// <summary>真正写进 socket（半包：分两段发，验证 DS 侧的解码器确实支持半包）。</summary>
+            private void Emit(byte[] frame)
+            {
+                if (_client == null) { return; }
+
                 int half = frame.Length > 1 ? frame.Length / 2 : frame.Length;
                 _client.Send(frame, 0, half, SocketFlags.None);
                 if (frame.Length - half > 0)

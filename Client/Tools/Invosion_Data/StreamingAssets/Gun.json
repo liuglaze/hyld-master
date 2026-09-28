@@ -1,0 +1,26 @@
+{
+  "Guns": [
+    {
+      "damage": 5,
+      "startTimeBtwShots": 0.5,
+      "Count": 1,
+      "name": "Gun1"
+
+    },
+    {
+      "damage": 20,
+      "startTimeBtwShots": 1,
+      "Count": 1,
+      "name": "Gun2"
+    },
+    {
+      "damage": 20,
+      "startTimeBtwShots": 1,
+      "Count": 3,
+      "name": "Gun3"
+    }
+  ]
+
+  
+
+}

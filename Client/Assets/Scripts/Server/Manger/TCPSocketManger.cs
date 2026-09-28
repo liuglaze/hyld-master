@@ -1,4 +1,4 @@
-/****************************************************
+﻿/****************************************************
     Author:            龙之介
     CreatTime:    2021/9/22 18:43:34
     Description:     TCP套接字客户端管理
@@ -63,6 +63,10 @@ namespace Server
                 HYLDManger.Instance.ShowMessage("连接成功");
                 HYLDStaticValue.是否为连接状态 = true;
 
+                // T-LIVE1：告知请求层「新连接代次开始」。收包线程暂存的入局/续局通知只在
+                // 当前代次内有效；重连后属于旧连接的暂存一律作废（不拿旧票开新连接）。
+                RequestManger.NotifySocketConnected();
+
                 //4.开始异步接受消息
                 _ = ReceiveLoopAsync();
             }
@@ -112,6 +116,11 @@ namespace Server
             {
                 Logging.HYLDDebug.LogError($"[TCP][CloseSocketError] reason={reason} stage=close ex={ex}");
             }
+
+            // T-LIVE1：关闭 socket 必须清掉**待用票**（暂存槽里的入局/续局通知），并让连接代次 +1。
+            // 这里覆盖所有关闭路径（OnDestroy / 发送失败 / 接收循环结束），因此「关闭清暂存」
+            // 不依赖调用方是否记得清；同时也保证旧连接上到达的通知不会在重连后仍然生效。
+            RequestManger.NotifySocketClosed(reason);
         }
         /// <summary>
         /// 异步接受消息

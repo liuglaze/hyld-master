@@ -48,6 +48,22 @@ namespace PMNet.Session
         /// <summary>客户端握手最大尝试次数（超过即报失败，不无限重试）。</summary>
         public const int MaxHandshakeHellos = 24;
 
+        /// <summary>
+        /// T-LOOP1（续局 v1 冻结接口）：**续局**（<c>offer.IsResume</c>）专用的 ClientHello 尝试上限。
+        ///
+        /// 为什么只对续局放长：常规 24×250ms≈6s 的预算覆盖不了「断线续局时必须等 DS 侧旧 UDP 会话
+        /// 按 Transport 空闲超时（10s）先腾出 uid」这条路径 —— 旧连接还在时，新端点的握手会被账本的
+        /// uid 占用/墓碑规则拒掉。80×250ms=20s 仍在冻结的 30s 断线宽限与票据窗口之内。
+        ///
+        /// 边界：这**不是**放宽准入。旧票、错身份、错摘要、已终局一律照旧被拒；常规入场、
+        /// 无效/伪造 offer 一律继续用 <see cref="MaxHandshakeHellos"/>，DS 侧的资源上限
+        /// （每 Pump 收包预算 / 连接数 / 空闲超时）一个都不改。
+        /// </summary>
+        public const int MaxHandshakeHellosResume = 80;
+
+        /// <summary>续局握手的纯等待窗口（毫秒）；只用于诊断/门禁对账，不参与任何判定。</summary>
+        public const int ResumeHandshakeWindowMs = MaxHandshakeHellosResume * HandshakeRetryIntervalMs;
+
         /// <summary>服务端会话空闲超时默认值（毫秒；0 表示不做端点级空闲判定）。</summary>
         public const int DefaultSessionIdleTimeoutMs = 30000;
 
@@ -114,6 +130,12 @@ namespace PMNet.Session
         // 客户端
         private readonly PMHandshakeClient _handshakeClient;
         private readonly IPEndPoint _remote;
+
+        /// <summary>本端是否按**续局**预算做 ClientHello 重试（服务端侧恒为 false）。</summary>
+        private readonly bool _resumeHandshake;
+
+        /// <summary>本端（客户端）的 ClientHello 尝试上限；服务端侧不适用（诊断入口只读返回 0）。</summary>
+        private readonly int _maxHandshakeHellos;
         private PMTransportConnection _clientConnection;
         private bool _clientActivated;
         private bool _clientFailed;
@@ -194,7 +216,7 @@ namespace PMNet.Session
         private PMUdpSessionEndpoint(PMNetSessionBridge bridge, Socket socket, PMTransportConfig transportConfig,
                                      int sessionIdleTimeoutMs, PMDsBootstrappedMatch boot,
                                      PMDsEndpointLedger ledger, PMHandshakeServer handshakeServer, int maxConnections,
-                                     PMHandshakeClient handshakeClient, IPEndPoint remote)
+                                     PMHandshakeClient handshakeClient, IPEndPoint remote, bool resumeHandshake)
         {
             _bridge = bridge;
             _socket = socket;
@@ -207,6 +229,10 @@ namespace PMNet.Session
             _maxConnections = maxConnections;
             _handshakeClient = handshakeClient;
             _remote = remote;
+
+            // 续局预算只可能来自客户端 offer 的显式 IsResume；服务端端点没有这条通道（恒 false）。
+            _resumeHandshake = !_server && resumeHandshake;
+            _maxHandshakeHellos = _resumeHandshake ? MaxHandshakeHellosResume : MaxHandshakeHellos;
 
             IPEndPoint local = socket.LocalEndPoint as IPEndPoint;
             _boundPort = local != null ? local.Port : 0;
@@ -261,7 +287,7 @@ namespace PMNet.Session
             Socket socket = CreateSocket(address, port);
 
             return new PMUdpSessionEndpoint(bridge, socket, transportConfig, sessionIdleTimeoutMs,
-                boot, ledger, handshakeServer, maxBindings, null, null);
+                boot, ledger, handshakeServer, maxBindings, null, null, false);
         }
 
         /// <summary>
@@ -288,8 +314,9 @@ namespace PMNet.Session
                 : IPAddress.Any;
             Socket socket = CreateSocket(bindAddress, 0);
 
+            // T-LOOP1：续局（PMDSR1）只影响**客户端**的 ClientHello 重试上限，不改任何准入判据。
             return new PMUdpSessionEndpoint(bridge, socket, transportConfig, 0,
-                null, null, null, 0, handshakeClient, remote);
+                null, null, null, 0, handshakeClient, remote, offer.IsResume);
         }
 
         // =================================================================================
@@ -340,6 +367,15 @@ namespace PMNet.Session
 
         /// <summary>客户端侧是否已确定失败（不再重试）。</summary>
         public bool ClientFailed { get { return _clientFailed; } }
+
+        /// <summary>
+        /// 本端（客户端）当前的 ClientHello 尝试上限（常规 24 / 续局 80）；服务端侧为 0（不适用）。
+        /// 只读诊断：门禁据此断言「续局预算只在 IsResume 时生效，且没有顺手放宽常规入场」。
+        /// </summary>
+        public int HandshakeHelloLimit { get { return _server ? 0 : _maxHandshakeHellos; } }
+
+        /// <summary>本端是否按续局预算重试握手（只读诊断）。</summary>
+        public bool IsResumeHandshake { get { return _resumeHandshake; } }
 
         /// <summary>
         /// 本端点是否已释放。返回现有 <c>_disposed</c> 的只读快照：<see cref="Dispose"/> 置位后为 true，
@@ -760,10 +796,16 @@ namespace PMNet.Session
                 return;
             }
 
-            if (_handshakeClient.HellosSent >= MaxHandshakeHellos)
+            if (_handshakeClient.HellosSent >= _maxHandshakeHellos)
             {
-                RaiseFailed("入局握手超时：已发送 " + _handshakeClient.HellosSent
-                            + " 次 ClientHello 仍未通过关联校验（对端可能不在本局/票据已过期）");
+                // 失败文案必须区分预算来源：续局的 20s 是**有界等待旧连接腾位**，不是「对端在本局」。
+                RaiseFailed(_resumeHandshake
+                    ? "续局握手超时：已发送 " + _handshakeClient.HellosSent
+                      + " 次 ClientHello（续局预算 " + MaxHandshakeHellosResume + "×"
+                      + HandshakeRetryIntervalMs + "ms）仍未通过关联校验（旧 UDP/Transport 会话未腾出 uid、"
+                      + "终局已锁定或票据不可用）"
+                    : "入局握手超时：已发送 " + _handshakeClient.HellosSent
+                      + " 次 ClientHello 仍未通过关联校验（对端可能不在本局/票据已过期）");
                 _clientFailed = true;
                 return;
             }

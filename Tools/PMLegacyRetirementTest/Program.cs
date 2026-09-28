@@ -78,6 +78,7 @@ namespace PMLegacyRetirementTest
         private const string DsHostRel = "Client/Assets/Scripts/Server/Boot/PMDsHost.cs";
         private const string ControllersRel = "Server/Controller/Controllers.cs";
         private const string UiMatchingRel = "Client/Assets/Scripts/Server/Panel/UIMatchingPanel.cs";
+        private const string StartUiMangerRel = "Client/Assets/Scripts/Server/Manger/Start/StartUIManger.cs";
 
         /// <summary>
         /// 旧链已删类型（C# 标识符）。契约 §B/§A/§C 列出；限定本项目源码命名空间/文件。
@@ -205,14 +206,30 @@ namespace PMLegacyRetirementTest
         /// 契约 §D 的「禁改输入/输出」SHA256 冻结值，取自 Docs/plans/_legacy_asset_detach_report.md §4.5。
         /// 这是**固定锚**：若后续有意重烘（源变化），必须由人更新说明与锚值，门禁不写默认 PASS。
         /// </summary>
+        /// <summary>
+        /// 冻结资产锚（6 个）：这些是「禁改输入/输出」的 SHA256 基线，用来发现**无意**的资产漂移。
+        ///
+        /// 重冻结记录（2026-09-26，用户确认后）：两条锚被有意更新 ——
+        ///   · `Resources/PMNet/BattleMapV1.prefab`：用户重新执行 C1 烘焙后 Unity 重写了该 prefab。
+        ///     主侧按**路径**逐节点比对 HEAD 版与工作区版：**277/277 路径集合一致**，
+        ///     每个路径的 localPosition/Rotation/Scale、MeshFilter 的 (fileID, guid)、
+        ///     Collider 类型集合、MeshRenderer 材质引用**全部一致**，差异只出现在 Unity 内部 fileID
+        ///     （重序列化/文件 ID 重分配）；同目录清 `BattleContentV1.json`（含 contentDigest）**未变**。
+        ///     验证方法：解析两侧 YAML，按 GameObject 名称路径归并后逐字段比较（忽略 fileID）。
+        ///   · `ProjectSettings/EditorBuildSettings.asset`：Unity 把已删除场景
+        ///     `Assets/RemakeHYLD/Scenes/TestUDP.unity` 的条目清空（path 置空 + guid 置 0），属环境性写回。
+        ///
+        /// 备注：本锚是「记录基线」而不是「内容不变式」—— 每次重新烘焙都会重分配 fileID，
+        /// 因此重烘后需要**显式重冻结**（并附上上面的内容等价证据），而不是默认放行。
+        /// </summary>
         private static readonly string[][] FrozenAnchors =
         {
             new[] { "Client/Assets/Scenes/HYLDGame.unity", "72e708d51613804fc16eb21585ec6e625254833699dbb08ff80b160af4953bb4" },
             new[] { "Client/Assets/Resources/Remake/Player.prefab", "6ba5cb30be52d7b759fe39311363803e16b13ae513d2c52be022ffc25c24dc54" },
             new[] { "Client/Assets/Resources/PMNet/BattleContentV1.json", "898cbe51fddf10bbe0c9d782912fde93d263b67c2b2327ce1f0adc4e8f7e339a" },
-            new[] { "Client/Assets/Resources/PMNet/BattleMapV1.prefab", "dabe768d6e40fa5a7180dae342526080f16299b4eaf771a8d255f149b7c1c297" },
+            new[] { "Client/Assets/Resources/PMNet/BattleMapV1.prefab", "2866aa39317cd5d4fec1ed91949a8ff49e58c2e3132a51cffd28da8b5d2aedb6" },
             new[] { "Client/Assets/Resources/PMNet/PlayerVisualV1.prefab", "dc5c9db2dbc2f1b4b69cf4fe2908f85f43159e4b3d027044332981bad91b7ed5" },
-            new[] { "Client/ProjectSettings/EditorBuildSettings.asset", "0f49797cfd99d5ec3c2574aaa3d5218b222100fba26ea3194b2ab2033165e7bd" },
+            new[] { "Client/ProjectSettings/EditorBuildSettings.asset", "9179514a988dfd891791303b65e1a07fcef2dee2d19e05bd7d1631b46fb08c82" },
         };
 
         /// <summary>契约 §D：两个已解挂组件的 GUID，必须在 Client/Assets 的 *.unity / *.prefab 里出现 0 次。</summary>
@@ -294,7 +311,6 @@ namespace PMLegacyRetirementTest
             ParseArgs(args, out repoArg, out reportPath, out runSelfTest);
 
             RepoLayout layout = new RepoLayout(ResolveRepoRoot(repoArg));
-
             Say("===== PMLegacyRetirementTest（旧链退役静态禁回归门禁）=====");
             Say("检查根目录   = " + layout.Root);
             Say("权威 proto   = " + protoProbeForDisplay(layout));
@@ -439,6 +455,14 @@ namespace PMLegacyRetirementTest
             Say("");
             Say("---- G8 资产 GUID 反查为 0 + 冻结 SHA 锚 ----");
             Append(CheckG8_Assets(layout));
+
+            Say("");
+            Say("---- G9 UIMatchingPanel 入局渲染抑制/恢复（T-VIS1；检出力由 N7a..N7d 反例自证）----");
+            Append(CheckG9_UiMatchingRenderLifecycle(layout));
+
+            Say("");
+            Say("---- G10 UIMatchingPanel 栈安全退场（T-VIS1b；检出力由 N8a..N8g 反例自证）----");
+            Append(CheckG10_UiMatchingStackExit(layout));
         }
 
         private static void Append(List<CheckResult> list)
@@ -885,6 +909,271 @@ namespace PMLegacyRetirementTest
                     ? "UIMatchingPanel 只识别 PMDS1（PMDsEntryCodec）入局通知"
                     : "UIMatchingPanel 未引用 PMDsEntryCodec：新链入局通知无接收者"));
 
+            return results;
+        }
+
+        // =====================================================================================
+        //  G9 UIMatchingPanel 入局渲染抑制 / 恢复（T-VIS1）
+        // =====================================================================================
+
+        /// <summary>
+        /// T-VIS1：入局成功后**只停用所属 Canvas 组件**的渲染（并完整保留原始 enabled 值），
+        /// 会话结束（正常终局 / 会话故障 / 显式 Stop）以及面板停用/销毁时按原值恢复。
+        ///
+        /// 本组只做**源接线静态事实**判定（先词法剥离注释与字符串）：
+        ///   · 它的检出力由负例自测 N7a..N7d 证明 —— 退役前的旧实现
+        ///     （只 <c>ExitMathcing.SetActive(false)</c>、无 Canvas 抑制、无生命周期恢复）必须被判 FAIL；
+        ///   · 它**不**验证运行期渲染是否真的消失/恢复（那需要 Unity 实机，T-VIS5 PENDING_USER），
+        ///     也不冒充网络会话、战斗结算或旧 UI 栈的正确性。
+        /// </summary>
+        internal static List<CheckResult> CheckG9_UiMatchingRenderLifecycle(RepoLayout L)
+        {
+            List<CheckResult> results = new List<CheckResult>();
+            string path = L.P(UiMatchingRel);
+            if (!File.Exists(path))
+            {
+                results.Add(new CheckResult("G9", "G9.uimatching-present", false, "缺输入：" + UiMatchingRel));
+                return results;
+            }
+
+            string code = CodeStripper.Strip(File.ReadAllText(path));
+
+            // 1) 只停用 Canvas 组件的渲染（不是停用 GameObject，也不是隐藏子按钮），且必须读过原始 enabled。
+            bool hasCanvas = HasIdent(code, "Canvas");
+            bool disablesRender = Regex.IsMatch(code, @"\benabled\s*=\s*false\s*;");
+            bool readsEnabled = Regex.IsMatch(code, @"\.enabled\s*;");
+            results.Add(new CheckResult("G9", "G9.uimatching-owns-canvas-render-suppressed",
+                hasCanvas && disablesRender && readsEnabled,
+                "Canvas=" + hasCanvas + " enabled=false=" + disablesRender + " 读取原始enabled=" + readsEnabled
+                + "（旧实现只隐藏 ExitMathcing 子按钮，本项必 FAIL）"));
+
+            // 2) 完整保留原 enabled 值：记录字段必须取自 Canvas.enabled（不是字面量），
+            //    恢复必须走纯策略回放该记录，且不得出现无条件的 enabled=true。
+            bool hasSnapshotField = Regex.IsMatch(code, @"\bbool\s+_owningCanvasWasEnabled\s*;");
+            bool recordsFromCanvas = Regex.IsMatch(code, @"_owningCanvasWasEnabled\s*=\s*[A-Za-z_][A-Za-z0-9_]*\.enabled\s*;");
+            bool guardedRecord = Regex.IsMatch(code, @"PMMatchingPanelRenderPolicy\.SnapshotMustBeRecorded\s*\(");
+            bool restoresFromRecord = Regex.IsMatch(code, @"PMMatchingPanelRenderPolicy\.RestoreEnabledValue\s*\(");
+            bool noLiteralTrueRestore = !Regex.IsMatch(code, @"\.enabled\s*=\s*true\s*;");
+            results.Add(new CheckResult("G9", "G9.uimatching-preserves-original-canvas-enabled",
+                hasSnapshotField && recordsFromCanvas && guardedRecord && restoresFromRecord && noLiteralTrueRestore,
+                "快照字段=" + hasSnapshotField + " 取自Canvas.enabled=" + recordsFromCanvas
+                + " 幂等记录守卫=" + guardedRecord + " 按记录恢复=" + restoresFromRecord
+                + " 无字面量true=" + noLiteralTrueRestore));
+
+            // 3) 不得停用面板 GameObject，也不得再回到「只隐藏退出匹配子按钮」的旧做法。
+            bool hidesExitButton = Regex.IsMatch(code, @"ExitMathcing\s*\.\s*SetActive");
+            bool disablesPanelGo = Regex.IsMatch(code, @"(transform\s*\.\s*)?gameObject\s*\.\s*SetActive\s*\(\s*false");
+            results.Add(new CheckResult("G9", "G9.uimatching-no-gameobject-or-button-deactivation",
+                !hidesExitButton && !disablesPanelGo,
+                "隐藏退出匹配子按钮=" + hidesExitButton + " 停用面板GameObject=" + disablesPanelGo
+                + "（两者都必须为 false：Canvas.enabled=false 时 MonoBehaviour 仍执行，隐藏按钮等于旧缺陷）"));
+
+            // 4) 生命周期恢复：宿主不活跃时恢复 + 面板停用/销毁兜底。
+            string pump = ExtractMethodBody(code, "PumpRenderLifecycle");
+            string update = ExtractMethodBody(code, "Update");
+            string onDisable = ExtractMethodBody(code, "OnDisable");
+            string onDestroy = ExtractMethodBody(code, "OnDestroy");
+            bool pumpPollsHost = pump != null && HasIdent(pump, "IsActive")
+                                 && Regex.IsMatch(pump, @"PMMatchingPanelRenderPolicy\.Decide\s*\(");
+            bool updatePumps = update != null && Regex.IsMatch(update, @"PumpRenderLifecycle\s*\(");
+            bool disableRestores = onDisable != null && Regex.IsMatch(onDisable, @"RestoreOwnCanvasRender\s*\(");
+            bool destroyRestores = onDestroy != null && Regex.IsMatch(onDestroy, @"RestoreOwnCanvasRender\s*\(");
+            results.Add(new CheckResult("G9", "G9.uimatching-restores-on-host-inactive",
+                pumpPollsHost && updatePumps && disableRestores && destroyRestores,
+                "策略轮询宿主IsActive=" + pumpPollsHost + " Update泵=" + updatePumps
+                + " OnDisable恢复=" + disableRestores + " OnDestroy恢复=" + destroyRestores));
+
+            // 5) 决策 / 记录 / 恢复三条规则都必须经过同一个引擎无关纯策略（单一决策源）。
+            bool policyDecide = Regex.IsMatch(code, @"PMMatchingPanelRenderPolicy\.Decide\s*\(");
+            bool policySnapshot = Regex.IsMatch(code, @"PMMatchingPanelRenderPolicy\.SnapshotMustBeRecorded\s*\(");
+            bool policyRestore = Regex.IsMatch(code, @"PMMatchingPanelRenderPolicy\.RestoreEnabledValue\s*\(");
+            results.Add(new CheckResult("G9", "G9.uimatching-render-policy-single-source",
+                HasIdent(code, "PMMatchingPanelRenderPolicy") && HasIdent(code, "PMMatchingPanelRenderAction")
+                && policyDecide && policySnapshot && policyRestore,
+                "策略类/枚举存在=" + (HasIdent(code, "PMMatchingPanelRenderPolicy") && HasIdent(code, "PMMatchingPanelRenderAction"))
+                + " Decide=" + policyDecide + " SnapshotMustBeRecorded=" + policySnapshot
+                + " RestoreEnabledValue=" + policyRestore));
+
+            // 6) 不得为这件事新增全局单例 / 自建 DontDestroyOnLoad 宿主。
+            bool noPanelStatic = !Regex.IsMatch(code, @"\bstatic\s+UIMatchingPanel\b");
+            bool noStaticInstance = !Regex.IsMatch(code, @"\bstatic\s+[A-Za-z_][A-Za-z0-9_<>,.\[\]]*\s+(Instance|_instance)\b");
+            bool noDontDestroy = !HasIdent(code, "DontDestroyOnLoad");
+            results.Add(new CheckResult("G9", "G9.uimatching-no-new-global-singleton",
+                noPanelStatic && noStaticInstance && noDontDestroy,
+                "无面板static=" + noPanelStatic + " 无static单例字段=" + noStaticInstance
+                + " 无DontDestroyOnLoad=" + noDontDestroy));
+
+            return results;
+        }
+
+        // =====================================================================================
+        //  G10 匹配面板「栈安全退场」（T-VIS1b）
+        // =====================================================================================
+
+        /// <summary>
+        /// T-VIS1b：会话结束（正常终局 / 会话故障 / 显式 Stop）后，**只有**在新 API
+        /// <c>StartUIManger.CloseIfTop</c> 的三重校验（栈顶就是本面板 + 栈里至少两层 + 注册表条目可用）
+        /// 全部通过时才关闭匹配面板并弹掉一条栈、回主菜单；否则**本帧不改任何栈状态**。
+        ///
+        /// 与 G9 一样，本组只做**源接线静态事实**判定（先词法剥离注释与字符串）；
+        /// 检出力由 N8a..N8g 负例自证。运行期是否真的不再遮住地图、退场后是否真的回主菜单，
+        /// 一律以 T-VIS5 实机为准（本轮不冒称）。
+        /// </summary>
+        internal static List<CheckResult> CheckG10_UiMatchingStackExit(RepoLayout L)
+        {
+            List<CheckResult> results = new List<CheckResult>();
+
+            string panelPath = L.P(UiMatchingRel);
+            string managerPath = L.P(StartUiMangerRel);
+            bool panelPresent = File.Exists(panelPath);
+            bool managerPresent = File.Exists(managerPath);
+            if (!panelPresent || !managerPresent)
+            {
+                results.Add(new CheckResult("G10", "G10.inputs-present", false,
+                    "缺输入（必须 FAIL，不得空扫描绿）："
+                    + (panelPresent ? "" : UiMatchingRel + " ") + (managerPresent ? "" : StartUiMangerRel)));
+                return results;
+            }
+
+            results.Add(new CheckResult("G10", "G10.inputs-present", true,
+                "输入就位：" + UiMatchingRel + " + " + StartUiMangerRel));
+
+            string panel = CodeStripper.Strip(File.ReadAllText(panelPath));
+            string manager = CodeStripper.Strip(File.ReadAllText(managerPath));
+
+            // ---- 1) 新 API 的签名 + 两道「拒绝」闸门：栈里至少两层、栈顶必须就是目标面板 ----
+            string api = ExtractMethodBody(manager, "CloseIfTop");
+            bool apiSignature = Regex.IsMatch(manager, @"public\s+bool\s+CloseIfTop\s*\(\s*string\s");
+            bool apiDepthGuard = api != null && Regex.IsMatch(api, @"_panelStack\s*\.\s*Count\s*<\s*2");
+            bool apiTopGuard = api != null && Regex.IsMatch(api, @"_panelStack\s*\.\s*Peek\s*\(\s*\)\s*!=\s*panel");
+            results.Add(new CheckResult("G10", "G10.exit-api-strict-top-and-depth",
+                api != null && apiSignature && apiDepthGuard && apiTopGuard,
+                "CloseIfTop=" + (api != null) + " 签名=" + apiSignature + " 栈里至少两层=" + apiDepthGuard
+                + " 栈顶必须等于目标面板=" + apiTopGuard
+                + "（旧 Close() 无脑弹栈顶、单元素栈还会 Peek 抛异常，本项两者都必须为 true）"));
+
+            // ---- 2) 注册表必须真的指向当前面板（目标 + 弹出后要恢复的下一层都要可用） ----
+            bool apiRegistryTarget = api != null
+                && Regex.IsMatch(api, @"recycleDic\s*\.\s*TryGetValue\s*\(\s*panel\s*,\s*out\s+[A-Za-z_][A-Za-z0-9_]*\s*\)");
+            bool apiRegistryNext = api != null
+                && Regex.IsMatch(api, @"recycleDic\s*\.\s*TryGetValue\s*\(\s*order\s*\[\s*1\s*\]\s*,\s*out\s+[A-Za-z_][A-Za-z0-9_]*\s*\)");
+            int apiNullChecks = api == null ? 0 : Regex.Matches(api, @"==\s*null").Count;
+            results.Add(new CheckResult("G10", "G10.exit-api-registry-validated",
+                apiRegistryTarget && apiRegistryNext && apiNullChecks >= 2,
+                "注册表校验目标面板=" + apiRegistryTarget + " 注册表校验下一层=" + apiRegistryNext
+                + " 空/已销毁条目判定数=" + apiNullChecks + "（>=2）"));
+
+            // ---- 3) 任何校验失败都不得动栈：Pop 只能有一个，且必须排在全部校验之后 ----
+            int popCount = api == null ? 0 : Regex.Matches(api, @"\.\s*Pop\s*\(\s*\)").Count;
+            int popIndex = api == null ? -1 : api.IndexOf(".Pop()", StringComparison.Ordinal);
+            int countGuardIndex = api == null ? -1 : api.IndexOf("Count < 2", StringComparison.Ordinal);
+            Match topGuardMatch = api == null ? null : Regex.Match(api, @"_panelStack\s*\.\s*Peek\s*\(\s*\)\s*!=\s*panel");
+            Match nextGuardMatch = api == null ? null : Regex.Match(api, @"recycleDic\s*\.\s*TryGetValue\s*\(\s*order\s*\[\s*1\s*\]");
+            bool popAfterValidation = popIndex > 0
+                && popIndex > countGuardIndex
+                && topGuardMatch != null && topGuardMatch.Success && popIndex > topGuardMatch.Index
+                && nextGuardMatch != null && nextGuardMatch.Success && popIndex > nextGuardMatch.Index;
+            results.Add(new CheckResult("G10", "G10.exit-api-no-mutation-before-validation",
+                popCount == 1 && popAfterValidation,
+                "Pop 次数=" + popCount + "（必须为 1）Pop 偏移=" + popIndex
+                + " 在两层校验=" + countGuardIndex + " / 栈顶校验="
+                + (topGuardMatch != null && topGuardMatch.Success ? topGuardMatch.Index : -1)
+                + " / 注册表下一层校验="
+                + (nextGuardMatch != null && nextGuardMatch.Success ? nextGuardMatch.Index : -1)
+                + " 之后=" + popAfterValidation + "（异常/拒绝时绝不先弹栈）"));
+
+            // ---- 4) 面板侧：只走新 API；不得回到「自己关面板 / 只恢复退出按钮」的老路 ----
+            string pump = ExtractMethodBody(panel, "PumpRenderLifecycle");
+            string exitPath = ExtractMethodBody(panel, "ReturnToMainMenuIfSafe");
+            string clearPath = ExtractMethodBody(panel, "ClearReturnToMain");
+            string healthPath = ExtractMethodBody(panel, "ResolveStackManager");
+            string onDisable = ExtractMethodBody(panel, "OnDisable");
+            string onDestroy = ExtractMethodBody(panel, "OnDestroy");
+            string enterPolicy = ExtractMethodBody(panel, "ShouldEnterReturnToMain");
+            string attemptPolicy = ExtractMethodBody(panel, "ShouldAttemptReturnToMain");
+            string giveUpPolicy = ExtractMethodBody(panel, "ShouldGiveUpReturnToMain");
+            string keepWaitPolicy = ExtractMethodBody(panel, "ShouldKeepWaitingForReturnToMain");
+
+            bool usesSafeApi = exitPath != null && Regex.IsMatch(exitPath, @"CloseIfTop\s*\(\s*nameof\s*\(");
+            bool noBareClose = exitPath != null
+                               && !Regex.IsMatch(exitPath, @"(?<![A-Za-z0-9_])Close\s*\(\s*\)");
+            bool noButtonInsteadOfClose = exitPath != null && !HasIdent(exitPath, "ExitMathcing");
+            results.Add(new CheckResult("G10", "G10.panel-exit-uses-safe-api-not-button",
+                usesSafeApi && noBareClose && noButtonInsteadOfClose,
+                "调用 CloseIfTop=" + usesSafeApi + " 无裸 Close()=" + noBareClose
+                + " 退场路径不碰退出按钮=" + noButtonInsteadOfClose
+                + "（裸 UIbasePanel.Close 会留下脏栈条目、无参 UIBaseManger.Close 会无脑弹栈顶）"));
+
+            // ---- 5) 先还 Canvas 渲染，再谈退场 ----
+            int restoreIndex = pump == null ? -1 : pump.IndexOf("RestoreOwnCanvasRender(", StringComparison.Ordinal);
+            int exitIndex = pump == null ? -1 : pump.IndexOf("ReturnToMainMenuIfSafe(", StringComparison.Ordinal);
+            bool restoreBeforeExit = restoreIndex >= 0 && exitIndex > restoreIndex;
+            results.Add(new CheckResult("G10", "G10.panel-restores-canvas-before-exit",
+                restoreBeforeExit,
+                "恢复 Canvas 偏移=" + restoreIndex + " 退场调用偏移=" + exitIndex
+                + " 恢复在前=" + restoreBeforeExit));
+
+            // ---- 6) 只有「会话已不在进行中 + 已登记退场」才允许尝试关闭 ----
+            bool pumpGatedByHost = pump != null
+                && Regex.IsMatch(pump, @"PMMatchingPanelExitPolicy\.ShouldAttemptReturnToMain\s*\(\s*hostActive\s*,");
+            bool policyRequiresInactive = attemptPolicy != null
+                && Regex.IsMatch(attemptPolicy, @"!\s*hostActive") && HasIdent(attemptPolicy, "pendingReturnToMain");
+            bool latchSetOnRestore = pump != null
+                && Regex.IsMatch(pump, @"PMMatchingPanelExitPolicy\.ShouldEnterReturnToMain\s*\(")
+                && Regex.IsMatch(pump, @"_pendingReturnToMain\s*=\s*true\s*;");
+            results.Add(new CheckResult("G10", "G10.panel-exit-gated-by-host-inactive",
+                pumpGatedByHost && policyRequiresInactive && latchSetOnRestore,
+                "泵按 hostActive 传参=" + pumpGatedByHost + " 纯策略要求 !hostActive=" + policyRequiresInactive
+                + " 恢复成功才登记退场=" + latchSetOnRestore));
+
+            // ---- 7) 登记只消费一次：被拒绝时必须保留登记、只有确认关成功才清 ----
+            int clearAssignments = clearPath == null
+                ? 0
+                : Regex.Matches(clearPath, @"_pendingReturnToMain\s*=\s*false\s*;").Count;
+            int waitGuardIndex = exitPath == null
+                ? -1
+                : exitPath.IndexOf("ShouldKeepWaitingForReturnToMain(", StringComparison.Ordinal);
+            int lastClearCallIndex = exitPath == null
+                ? -1
+                : exitPath.LastIndexOf("ClearReturnToMain(", StringComparison.Ordinal);
+            bool clearOnlyOnSuccess = waitGuardIndex >= 0 && lastClearCallIndex > waitGuardIndex;
+            results.Add(new CheckResult("G10", "G10.panel-exit-registration-one-shot",
+                clearAssignments == 1 && clearOnlyOnSuccess,
+                "清登记赋值次数=" + clearAssignments + "（必须为 1）被拒先 return 的判定偏移=" + waitGuardIndex
+                + " 最后一次清登记偏移=" + lastClearCallIndex + " 关成功才清=" + clearOnlyOnSuccess));
+
+            // ---- 8) OnDisable / OnDestroy 兜底不得新建 manager、不得动栈 ----
+            // 缺 OnDisable / OnDestroy 本身就是 FAIL（真实面板两个都有）；且必须短路，不能把 null 喂给正则。
+            bool teardownClean = onDisable != null && onDestroy != null;
+            if (teardownClean)
+            {
+                teardownClean = !HasIdent(onDisable, "UIRoot") && !HasIdent(onDestroy, "UIRoot")
+                    && !HasIdent(onDisable, "StartUIManger") && !HasIdent(onDestroy, "StartUIManger")
+                    && !HasIdent(onDisable, "CloseIfTop") && !HasIdent(onDestroy, "CloseIfTop")
+                    && !HasIdent(onDisable, "_pendingReturnToMain") && !HasIdent(onDestroy, "_pendingReturnToMain")
+                    && !Regex.IsMatch(onDisable, @"(?<![A-Za-z0-9_])Pop(?![A-Za-z0-9_])")
+                    && !Regex.IsMatch(onDestroy, @"(?<![A-Za-z0-9_])Pop(?![A-Za-z0-9_])")
+                    && !Regex.IsMatch(onDisable, @"(?<![A-Za-z0-9_])new(?![A-Za-z0-9_])")
+                    && !Regex.IsMatch(onDestroy, @"(?<![A-Za-z0-9_])new(?![A-Za-z0-9_])");
+            }
+            results.Add(new CheckResult("G10", "G10.panel-teardown-touches-no-manager-or-stack",
+                teardownClean,
+                "OnDisable/OnDestroy 只调 RestoreOwnCanvasRender，不碰 UIRoot/StartUIManger/CloseIfTop/Pop/new/退场登记="
+                + teardownClean));
+
+            // ---- 9) 退场决策必须全部来自同一个引擎无关纯策略 ----
+            bool policyUsed = Regex.IsMatch(panel, @"PMMatchingPanelExitPolicy\.ShouldEnterReturnToMain\s*\(")
+                && Regex.IsMatch(panel, @"PMMatchingPanelExitPolicy\.ShouldAttemptReturnToMain\s*\(")
+                && Regex.IsMatch(panel, @"PMMatchingPanelExitPolicy\.ShouldGiveUpReturnToMain\s*\(")
+                && Regex.IsMatch(panel, @"PMMatchingPanelExitPolicy\.ShouldKeepWaitingForReturnToMain\s*\(");
+            bool policyDefined = enterPolicy != null && attemptPolicy != null
+                && giveUpPolicy != null && keepWaitPolicy != null;
+            bool managerTypeUsed = healthPath != null && Regex.IsMatch(healthPath, @"UIRoot\s*\.\s*UIManger");
+            results.Add(new CheckResult("G10", "G10.exit-policy-single-source",
+                policyUsed && policyDefined && managerTypeUsed,
+                "四条纯策略规则都在用=" + policyUsed + " 四条规则都有定义=" + policyDefined
+                + " 只读既有 UIRoot.UIManger=" + managerTypeUsed
+                + "（不新建 manager、不新增全局单例）"));
             return results;
         }
 
@@ -1547,7 +1836,7 @@ namespace PMLegacyRetirementTest
             _inSelfTest = true;
             try
             {
-                RunNegativeSelfTestCases();
+                RunNegativeSelfTestCases(realLayout);
             }
             catch (Exception ex)
             {
@@ -1564,7 +1853,7 @@ namespace PMLegacyRetirementTest
             Say("  负例自测汇总：通过 " + _negativePassed + " / 失败 " + _negativeFailed);
         }
 
-        private static void RunNegativeSelfTestCases()
+        private static void RunNegativeSelfTestCases(RepoLayout realLayout)
         {
             // 沙盒根：必须落在 %TEMP% 下（绝不写仓库）。
             try
@@ -1592,6 +1881,13 @@ namespace PMLegacyRetirementTest
             N4_ResurrectedActionDetected();
             // N5 资产 GUID 残留必须被检出
             N5_AssetGuidResidueDetected();
+            // N7 UIMatchingPanel 入局渲染抑制/恢复：旧实现必须被拒、真实实现基线全绿、两种回退必须被检出
+            //（T-VIS1；真实文件只读，只往 %TEMP% 沙盒写）
+            N7_UiMatchingRenderLifecycle(realLayout);
+            // N8 UIMatchingPanel 栈安全退场（T-VIS1b）：上一轮状态必须被拒、真实实现基线全绿、
+            // 五种回退（不校验栈顶 / 单元素栈 / 只恢复按钮 / 不清登记 / 先 Pop）必须被检出
+            //（真实文件只读，只往 %TEMP% 沙盒写）
+            N8_UiMatchingStackExit(realLayout);
         }
 
         private static bool HasAnyFail(List<CheckResult> results, string id)
@@ -1820,6 +2116,289 @@ namespace PMLegacyRetirementTest
                 "注入 GUID 后被检出=" + guidFail + " 干净沙盒不误报=" + guidPass);
         }
 
+        // -------------------------------------------------------------------------------------
+        //  N7（T-VIS1）：UIMatchingPanel 入局渲染抑制 / 恢复的检出力自证
+        // -------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// 四件事，全部在 %TEMP% 沙盒里做（真实生产文件只读）：
+        ///   N7a：「退役前旧实现」夹具（只 <c>ExitMathcing.SetActive(false)</c>、无 Canvas 抑制、
+        ///        无生命周期恢复）必须被 G9 判 FAIL —— 这就是任务书要求的「旧实现会失败的反例」；
+        ///   N7b：真实 UIMatchingPanel.cs 在沙盒里复跑 G9 必须全绿（证明 G9 不是恒 FAIL 的假门）；
+        ///   N7c：在真实实现基础上注入「丢掉原始 enabled 值（记录处写死 true）」必须被检出；
+        ///   N7d：在真实实现基础上注入「恢复处写死 enabled=true」必须被检出。
+        ///
+        /// N7c/N7d 的注入字符串必须命中真实源码：没命中就是「注入未生效」，一律判 FAIL，
+        /// 不许静默变成「没检测到问题 = 绿」。（与 N4 的「干净基线 + 注入」同一套路。）
+        /// </summary>
+        private static void N7_UiMatchingRenderLifecycle(RepoLayout realLayout)
+        {
+            // (1) 旧实现夹具：与退役前真实代码同形（OnResponse 里只隐藏 ExitMathcing 子按钮）。
+            string oldImpl =
+                "namespace MVC {\n" +
+                "  public class UIMatchingPanel : UIbasePanel {\n" +
+                "    public GameObject ExitMathcing;\n" +
+                "    public override void OnResponse(MainPack pack) {\n" +
+                "      PMNet.Unity.PMClientSessionHost.Enter(offer);\n" +
+                "      if (PMNet.Unity.PMClientSessionHost.IsActive && ExitMathcing != null) {\n" +
+                "        ExitMathcing.SetActive(false);\n" +
+                "      }\n" +
+                "    }\n" +
+                "  }\n" +
+                "}\n";
+            List<CheckResult> oldRun = RunG9OnSandboxText("n7a-old-impl", oldImpl);
+            bool oldNoCanvasSuppress = HasAnyFail(oldRun, "G9.uimatching-owns-canvas-render-suppressed");
+            bool oldHidesExitButton = HasAnyFail(oldRun, "G9.uimatching-no-gameobject-or-button-deactivation");
+            bool oldNoLifecycleRestore = HasAnyFail(oldRun, "G9.uimatching-restores-on-host-inactive");
+            NegativeCase("N7a 旧实现（只隐藏退出匹配子按钮）必须被 G9 拒绝",
+                oldNoCanvasSuppress && oldHidesExitButton && oldNoLifecycleRestore,
+                "无Canvas抑制=" + oldNoCanvasSuppress + " 仍隐藏子按钮=" + oldHidesExitButton
+                + " 无生命周期恢复=" + oldNoLifecycleRestore);
+
+            // 真实源码是 N7b..N7d 的唯一输入；读不到一律 FAIL（禁止缺输入绿）。
+            string realPath = realLayout.P(UiMatchingRel);
+            if (!File.Exists(realPath))
+            {
+                NegativeCase("N7b 真实实现基线必须让 G9 全绿", false, "缺输入：" + UiMatchingRel);
+                NegativeCase("N7c 丢掉原始 enabled 值必须被检出", false, "缺输入：" + UiMatchingRel);
+                NegativeCase("N7d 恢复处写死 enabled=true 必须被检出", false, "缺输入：" + UiMatchingRel);
+                return;
+            }
+
+            string realCode = File.ReadAllText(realPath);
+
+            // (2) 正对照：真实实现基线必须全绿。
+            bool baselinePass = G9AllGreen(RunG9OnSandboxText("n7b-baseline", realCode));
+            NegativeCase("N7b 真实实现基线必须让 G9 全绿", baselinePass,
+                "真实 " + UiMatchingRel + " 沙盒复跑 G9 全绿=" + baselinePass
+                + "（与 N7a 对照，证明 G9 既会拒旧实现、也能认可正确实现）");
+
+            // (3) 注入：记录处写死 true（丢掉原始 enabled 值）。
+            const string recordLine = "_owningCanvasWasEnabled = canvas.enabled;";
+            string lostOriginal = realCode.Replace(recordLine, "_owningCanvasWasEnabled = true;");
+            bool lostInjected = lostOriginal != realCode;
+            bool lostDetected = lostInjected
+                                && HasAnyFail(RunG9OnSandboxText("n7c-lost-original", lostOriginal),
+                                              "G9.uimatching-preserves-original-canvas-enabled");
+            NegativeCase("N7c 丢掉原始 enabled 值（记录处写死 true）必须被检出",
+                lostInjected && lostDetected,
+                "注入命中=" + lostInjected + " 被检出=" + lostDetected);
+
+            // (4) 注入：恢复处写死 true（无条件点亮大厅 Canvas）。
+            const string restoreLine =
+                "canvas.enabled = PMMatchingPanelRenderPolicy.RestoreEnabledValue(_owningCanvasWasEnabled);";
+            string literalTrue = realCode.Replace(restoreLine, "canvas.enabled = true;");
+            bool literalInjected = literalTrue != realCode;
+            bool literalDetected = literalInjected
+                                   && HasAnyFail(RunG9OnSandboxText("n7d-literal-true", literalTrue),
+                                                 "G9.uimatching-preserves-original-canvas-enabled");
+            NegativeCase("N7d 恢复处写死 enabled=true 必须被检出",
+                literalInjected && literalDetected,
+                "注入命中=" + literalInjected + " 被检出=" + literalDetected);
+        }
+
+        //  N8（T-VIS1b）：匹配面板「栈安全退场」的检出力自证
+        // -------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// 七件事，全部在 %TEMP% 沙盒里做（真实生产文件只读）：
+        ///   N8a：**上一轮的状态**（只按原值恢复 Canvas、根本不关面板）必须被 G10 判 FAIL
+        ///        —— 这就是任务书要求的「旧只有恢复不关闭」反例；
+        ///   N8b：真实 UIMatchingPanel.cs + StartUIManger.cs 在沙盒里复跑 G10 必须全绿；
+        ///   N8c：注入「不校验栈顶」（把栈顶比较换成 if (false)）必须被检出；
+        ///   N8d：注入「单元素栈也敢关」（Count < 2 放宽成 Count < 1）必须被检出；
+        ///   N8e：注入「退场只把退出匹配按钮恢复成可点、不关面板」必须被检出；
+        ///   N8f：注入「关成功后不清退场登记」必须被检出（重复局会被上一轮的登记误关）；
+        ///   N8g：注入「先 Pop 再校验」必须被检出（异常/拒绝时已经破坏了栈）。
+        ///
+        /// N8c..N8g 的注入字符串必须命中真实源码：没命中就是「注入未生效」，一律判 FAIL，
+        /// 不许静默变成「没检测到问题 = 绿」。（与 N4 / N7c / N7d 同一套路。）
+        /// </summary>
+        private static void N8_UiMatchingStackExit(RepoLayout realLayout)
+        {
+            // (1) 上一轮状态夹具：只按原值恢复 Canvas，**没有**任何栈退场接线。
+            string oldPanel =
+                @"namespace MVC {
+  public class UIMatchingPanel : UIbasePanel {
+    private Canvas _owningCanvas;
+    private bool _owningCanvasWasEnabled;
+    private bool _renderSuppressed;
+    private void Update() { PumpRenderLifecycle(); }
+    private void PumpRenderLifecycle() {
+      PMMatchingPanelRenderAction action = PMMatchingPanelRenderPolicy.Decide(PMNet.Unity.PMClientSessionHost.IsActive, _renderSuppressed);
+      if (action == PMMatchingPanelRenderAction.Restore) { RestoreOwnCanvasRender(null); }
+    }
+    private bool RestoreOwnCanvasRender(string reason) {
+      if (!_renderSuppressed) { return false; }
+      _renderSuppressed = false;
+      Canvas canvas = ResolveOwningCanvas();
+      if (canvas == null) { return false; }
+      canvas.enabled = PMMatchingPanelRenderPolicy.RestoreEnabledValue(_owningCanvasWasEnabled);
+      return true;
+    }
+    private Canvas ResolveOwningCanvas() { return _owningCanvas; }
+  }
+}
+";
+            // 旧 StartUIManger：无 CloseIfTop，Close() 无脑弹栈顶且单元素栈会 Peek 抛异常。
+            string oldManager =
+                @"namespace LongZhiJie {
+  public class StartUIManger : UIBaseManger {
+    public Dictionary<string, MVC.UIbasePanel> recycleDic = new Dictionary<string, MVC.UIbasePanel>();
+    private Stack<string> _panelStack = new Stack<string>();
+    public override void Open(string panel) { if (recycleDic[panel].Open()) _panelStack.Push(panel); }
+    public override void Close() {
+      base.Close();
+      if (_panelStack.Count != 0) {
+        string panel = _panelStack.Pop();
+        recycleDic[panel].Close();
+        recycleDic[_panelStack.Peek()].OnRecovery();
+      }
+    }
+  }
+}
+";
+            List<CheckResult> oldRun = RunG10OnSandboxText("n8a-restore-only", oldPanel, oldManager);
+            bool oldNoStrictApi = HasAnyFail(oldRun, "G10.exit-api-strict-top-and-depth");
+            bool oldNoSafeCloseCall = HasAnyFail(oldRun, "G10.panel-exit-uses-safe-api-not-button");
+            bool oldNoExitOrder = HasAnyFail(oldRun, "G10.panel-restores-canvas-before-exit");
+            bool oldNoOneShot = HasAnyFail(oldRun, "G10.panel-exit-registration-one-shot");
+            NegativeCase("N8a 上一轮状态（只恢复 Canvas、不关面板）必须被 G10 拒绝",
+                oldNoStrictApi && oldNoSafeCloseCall && oldNoExitOrder && oldNoOneShot,
+                "无严格Stack API=" + oldNoStrictApi + " 面板未调用安全关闭=" + oldNoSafeCloseCall
+                + " 无先恢复后退场次序=" + oldNoExitOrder + " 无一次性登记=" + oldNoOneShot);
+
+            // 真实源码是 N8b..N8g 的唯一输入；读不到一律 FAIL（禁止缺输入绿）。
+            string panelPath = realLayout.P(UiMatchingRel);
+            string managerPath = realLayout.P(StartUiMangerRel);
+            if (!File.Exists(panelPath) || !File.Exists(managerPath))
+            {
+                for (int i = 0; i < 6; i++)
+                {
+                    NegativeCase("N8b..N8g 真实源码输入", false, "缺输入：" + UiMatchingRel + " / " + StartUiMangerRel);
+                }
+
+                return;
+            }
+
+            string realPanel = File.ReadAllText(panelPath);
+            string realManager = File.ReadAllText(managerPath);
+
+            // (2) 正对照：真实实现基线必须全绿。
+            bool baselinePass = G10AllGreen(RunG10OnSandboxText("n8b-baseline", realPanel, realManager));
+            NegativeCase("N8b 真实实现基线必须让 G10 全绿", baselinePass,
+                "真实 " + UiMatchingRel + " + " + StartUiMangerRel + " 沙盒复跑 G10 全绿=" + baselinePass
+                + "（与 N8a 对照，证明 G10 既会拒旧状态、也能认可正确实现）");
+
+            // (3) 注入 N8c：不校验栈顶（把「栈顶必须等于目标面板」换成 if (false)）。
+            const string topGuardLine = "            if (_panelStack.Peek() != panel)";
+            string noTopCheck = realManager.Replace(topGuardLine, "            if (false)");
+            bool noTopInjected = noTopCheck != realManager;
+            List<CheckResult> noTopRun = noTopInjected
+                ? RunG10OnSandboxText("n8c-no-top-check", realPanel, noTopCheck)
+                : null;
+            bool noTopDetected = noTopInjected
+                && HasAnyFail(noTopRun, "G10.exit-api-strict-top-and-depth")
+                && HasAnyFail(noTopRun, "G10.exit-api-no-mutation-before-validation");
+            NegativeCase("N8c 不校验栈顶（可能误关别的面板）必须被检出",
+                noTopInjected && noTopDetected,
+                "注入命中=" + noTopInjected + " 被检出=" + noTopDetected);
+
+            // (4) 注入 N8d：单元素栈也敢关（Count < 2 放宽成 Count < 1）。
+            const string depthGuardLine = "            if (_panelStack.Count < 2)";
+            string singleEntry = realManager.Replace(depthGuardLine, "            if (_panelStack.Count < 1)");
+            bool singleInjected = singleEntry != realManager;
+            List<CheckResult> singleRun = singleInjected
+                ? RunG10OnSandboxText("n8d-single-entry-stack", realPanel, singleEntry)
+                : null;
+            bool singleDetected = singleInjected
+                && HasAnyFail(singleRun, "G10.exit-api-strict-top-and-depth");
+            NegativeCase("N8d 单元素栈也敢关（弹出后 Peek 空栈）必须被检出",
+                singleInjected && singleDetected,
+                "注入命中=" + singleInjected + " 被检出=" + singleDetected);
+
+            // (5) 注入 N8e：退场只把「退出匹配」按钮恢复成可点，不关面板（旧做法的变体）。
+            const string exitCallLine = "                ReturnToMainMenuIfSafe();";
+            string buttonRestore = realPanel.Replace(exitCallLine, "                ExitMathcing.SetActive(true);");
+            bool buttonInjected = buttonRestore != realPanel;
+            List<CheckResult> buttonRun = buttonInjected
+                ? RunG10OnSandboxText("n8e-button-restore-only", buttonRestore, realManager)
+                : null;
+            bool buttonDetected = buttonInjected
+                && HasAnyFail(buttonRun, "G10.panel-restores-canvas-before-exit");
+            NegativeCase("N8e 退场只恢复退出按钮而不关面板必须被检出",
+                buttonInjected && buttonDetected,
+                "注入命中=" + buttonInjected + " 被检出=" + buttonDetected);
+
+            // (6) 注入 N8f：关成功后不清退场登记（下一局会被上一轮的登记误关 / 重复局不一致）。
+            const string latchClearLine = "            _pendingReturnToMain = false;";
+            string latchNeverCleared = realPanel.Replace(latchClearLine, "            _pendingReturnToMain = _pendingReturnToMain;");
+            bool latchInjected = latchNeverCleared != realPanel;
+            List<CheckResult> latchRun = latchInjected
+                ? RunG10OnSandboxText("n8f-latch-never-cleared", latchNeverCleared, realManager)
+                : null;
+            bool latchDetected = latchInjected
+                && HasAnyFail(latchRun, "G10.panel-exit-registration-one-shot");
+            NegativeCase("N8f 关成功后不清退场登记（重复局不一致）必须被检出",
+                latchInjected && latchDetected,
+                "注入命中=" + latchInjected + " 被检出=" + latchDetected);
+
+            // (7) 注入 N8g：先 Pop 而不校验栈顶（异常或拒绝时栈已经被破坏）。
+            string popTooEarly = realManager.Replace(topGuardLine, "            _panelStack.Pop();");
+            bool popInjected = popTooEarly != realManager;
+            List<CheckResult> popRun = popInjected
+                ? RunG10OnSandboxText("n8g-pop-before-validation", realPanel, popTooEarly)
+                : null;
+            bool popDetected = popInjected
+                && HasAnyFail(popRun, "G10.exit-api-no-mutation-before-validation");
+            NegativeCase("N8g 先 Pop 而不校验栈顶（先破坏栈）必须被检出",
+                popInjected && popDetected,
+                "注入命中=" + popInjected + " 被检出=" + popDetected);
+        }
+
+        /// <summary>把面板 + 管理器源码文本写进新沙盒再跑 G10（真实生产文件只读）。</summary>
+        private static List<CheckResult> RunG10OnSandboxText(string tag, string panelText, string managerText)
+        {
+            string sb = NewSandbox(tag);
+            RepoLayout layout = new RepoLayout(sb);
+            WriteFileUnder(sb, UiMatchingRel, panelText);
+            WriteFileUnder(sb, StartUiMangerRel, managerText);
+            return CheckG10_UiMatchingStackExit(layout);
+        }
+
+        /// <summary>G10 全绿判定：必须至少有一条检查且没有一条 FAIL（防止「扫到 0 条 ⇒ 绿」）。</summary>
+        private static bool G10AllGreen(List<CheckResult> results)
+        {
+            if (results == null || results.Count == 0) return false;
+            foreach (CheckResult r in results)
+            {
+                if (!r.Pass) return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>把给定源码文本写进新沙盒再跑 G9（真实生产文件只读）。</summary>
+        private static List<CheckResult> RunG9OnSandboxText(string tag, string text)
+        {
+            string sb = NewSandbox(tag);
+            RepoLayout layout = new RepoLayout(sb);
+            WriteFileUnder(sb, UiMatchingRel, text);
+            return CheckG9_UiMatchingRenderLifecycle(layout);
+        }
+
+        /// <summary>G9 全绿判定：必须至少有一条检查且没有一条 FAIL（防止「扫到 0 条 ⇒ 绿」）。</summary>
+        private static bool G9AllGreen(List<CheckResult> results)
+        {
+            if (results == null || results.Count == 0) return false;
+            foreach (CheckResult r in results)
+            {
+                if (!r.Pass) return false;
+            }
+
+            return true;
+        }
+
         private static void CleanupSelfTest()
         {
             if (string.IsNullOrEmpty(_selfTestRoot)) return;
@@ -1934,6 +2513,16 @@ namespace PMLegacyRetirementTest
             sb.AppendLine("  `class`/`enum`/`Serializer`（含 `PM` 前缀形态），且 `global::SocketProto.*` 类型引用必须本文件有声明。");
             sb.AppendLine("- **G8** 两个已解挂 GUID 在 `Client/Assets` 的 `*.unity`/`*.prefab` 中出现 0 次（并强制资产文件数 > 0，");
             sb.AppendLine("  禁止「扫到 0 个文件就绿」）；6 个冻结锚的 SHA256 必须等于 `_legacy_asset_detach_report.md` §4.5 的固定值。");
+            sb.AppendLine("- **G9**（T-VIS1）`UIMatchingPanel` 入局后只停用**所属 Canvas 组件**的渲染（不停用面板 GameObject、");
+            sb.AppendLine("  不停用宿主事件更新），完整保留并回放原 `enabled`（不得写死 true），不再只隐藏「退出匹配」子按钮，");
+            sb.AppendLine("  宿主不活跃/面板停用/面板销毁时都能恢复，三条规则走同一个引擎无关纯策略，且不新增全局单例。");
+            sb.AppendLine("  它**不**验证运行期渲染真的消失/恢复（那需要 Unity 实机，T-VIS5 PENDING_USER），也不冒充网络会话与旧 UI 栈。");
+            sb.AppendLine("- **G10**（T-VIS1b）`StartUIManger.CloseIfTop` 只在「栈顶就是该面板 + 栈里至少两层 + 注册表条目");
+            sb.AppendLine("  可用（目标与弹出后要恢复的下一层都校验）」三条同时成立时才关闭弹栈，且全部校验都排在 `Pop()` 之前；");
+            sb.AppendLine("  `UIMatchingPanel` 只在会话已不在进行中且本局确实压制过 Canvas 时调用它，先恢复 Canvas 再退场，");
+            sb.AppendLine("  被拒时保留登记、不改任何栈状态，OnDisable/OnDestroy 兜底不新建 manager、不动栈。");
+            sb.AppendLine("  它**不**验证运行期是否真的回到主菜单（那需要 Unity 实机，T-VIS5 PENDING_USER），也不冒充网络会话与战斗结算。");
+
             sb.AppendLine();
             sb.AppendLine("- 不做的事：不运行 Unity、不启动服务端、不提交、不 `git add`/暂存、不递归委派；");
             sb.AppendLine("  不重做业务测试（本工具只做静态事实判定）。");
@@ -1963,7 +2552,13 @@ namespace PMLegacyRetirementTest
                 sb.AppendLine();
                 sb.AppendLine("负例覆盖：缺输入必须 FAIL（不是空扫描绿）、旧 class 复活必须被检出、");
                 sb.AppendLine("注释/字符串里的同词**不得**误报（并带一组「代码里的 7777 必须被检出」的正对照，");
-                sb.AppendLine("防止「不误报」是靠整体失灵换来的）、旧 Action 定义复活必须被检出、资产 GUID 残留必须被检出。");
+                sb.AppendLine("防止「不误报」是靠整体失灵换来的）、旧 Action 定义复活必须被检出、资产 GUID 残留必须被检出、");
+                sb.AppendLine("`UIMatchingPanel` 旧实现（只隐藏退出匹配子按钮、无 Canvas 渲染抑制、无生命周期恢复）必须被 G9 拒绝，");
+
+                sb.AppendLine("且真实实现基线全绿 + 两种典型回退（丢掉原始 enabled / 恢复处写死 true）必须被检出；");
+                sb.AppendLine("`UIMatchingPanel` 栈安全退场（T-VIS1b）的上一轮状态（只恢复 Canvas、不关面板）必须被 G10 拒绝，");
+                sb.AppendLine("且真实实现基线全绿 + 五种回退（不校验栈顶 / 单元素栈也敢关 / 只恢复退出按钮 / 关成功后不清登记 / 先 Pop 再校验）必须被检出。");
+
                 sb.AppendLine();
             }
 

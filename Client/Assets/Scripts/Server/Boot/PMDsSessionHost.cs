@@ -53,6 +53,23 @@
 //     **死亡 ≠ 掉线**：死者仍在线、仍要 ACK 结果，因此死亡路径不 unbind；
 //   · `ResultReadyForLobby` 后**单次** `Lobby.SubmitResult(WinnerTeamId, 冻结摘要)`，既有 ResultAck/Exited 链不变。
 //
+// T-LOOP5（原局断线续玩：DS 权威重绑定 + 全量状态 + 预测流；契约见主计划末尾「T-LOOP1 原局断线续玩 v1 冻结接口」）：
+//   · **断线不清理**：`PruneDisconnectedDrivers` 改成宽限制——原 uid 端点不再就绪时只挂起该 uid 的权威运动
+//     （`PMR4MovementDriver.SuspendAuthorityForDisconnect`：不采纳输入、不推进，**不** Freeze/Dispose/Unbind、
+//     不 `core.Disconnect`、不判 Forfeit），角色留在权威战场**原地**，仍可被他人击杀（core 仍认为它 Connected）；
+//   · **窗口 30s**：起点取该 uid 端点最后一次**真实入站流量**时刻（比「观察到断开」更保守，
+//     因为传输层空闲超时默认 10s），到期才走原清理/胜负（补 Alive=false 样本 → Freeze → Dispose →
+//     `CombatDriver.UnbindPlayer` ⇒ `core.Disconnect`）；
+//   · **重绑不 Spawn**：新票据握手通过（账本/名册/摘要/世代全部由既有链校验）且旧端点不再就绪、名册身份一致、
+//     未终局、未过宽限时，`HandleReconnect` 只把原玩家的**唯一** `OwnerConnection` 换成新连接；
+//     拒绝时显式断开新连接（不让对端误以为已入局），原权威/账本一字不动；
+//   · **升流时机**：重绑只在本帧 `_endpoint.Pump` **之后**才 `BeginServerResync`
+//     （`FlushPendingRebindResyncs`）——因为新连接的 Create 是在那次 Pump 内部的 bridge.Update 里
+//     flush 的，而重同步走同一可靠流，必须先 Create 后 RPC；
+//   · **状态不回档**：升流从**当前**权威位姿/输出边界出发，并发布完整快照；新连接的 `World.AddConnection`
+//     会补发全部存活对象的 Create，复制层从新基线全量重发（含 HP/资源/终局等），客户端据此重建 AP 时间轴。
+//     终局不可逆：`_combatOutcomeFrozen` / `core.Ended` 一律拒绝重绑。
+//
 // 语言面：Unity 侧（需要 GameObject/BoxCollider 建场景），但**不使用任何渲染/输入/UI API**。
 
 using System;
@@ -485,6 +502,16 @@ namespace PMNet.Unity
         /// </summary>
         public const int CombatStartDeadlineMs = 30000;
 
+        /// <summary>
+        /// T-LOOP5：DS 侧断线宽限（毫秒）—— T-LOOP1 v1 冻结值，与
+        /// <see cref="PMR4DisconnectGraceWindow.DefaultGraceMs"/> 同源（不另造第二个数字）。
+        ///
+        /// 窗口起点取「该 uid 权威端点最后一次**真实入站流量**时刻」（比「DS 观察到断开」更早、更保守）：
+        /// DS 只有在传输层空闲超时（默认 10s）后才知道对端没了，拿观察时刻当起点会把窗口悄悄拉长，
+        /// 等于借了自己一端的宽松延期；而 Lobby 的 30s 是从大厅 TCP 断开起算。
+        /// </summary>
+        public const int DisconnectGraceMs = PMR4DisconnectGraceWindow.DefaultGraceMs;
+
         private PMNetLaunchOptions _options;
         private PMDsBootstrappedMatch _boot;
         private PMSession _session;
@@ -558,6 +585,42 @@ namespace PMNet.Unity
 
         /// <summary>名册人数（决定 Z 行居中量）。</summary>
         private int _rosterCount;
+
+        // ---- T-LOOP5：原局断线续玩（DS 权威重绑定 + 宽限窗口） ----
+
+        /// <summary>
+        /// 断线宽限窗口（每 uid 独立；纯逻辑 + 注入宿主单调墙钟）。
+        /// 语义见 <see cref="PMR4DisconnectGraceWindow"/>。
+        /// </summary>
+        private readonly PMR4DisconnectGraceWindow _disconnectGrace = new PMR4DisconnectGraceWindow();
+
+        /// <summary>uid → 宿主最后一次观察到该 uid 权威端点**有真实入站流量**的墙钟（毫秒）。</summary>
+        private readonly Dictionary<int, long> _lastInboundActivityMsByUid = new Dictionary<int, long>();
+
+        /// <summary>uid → 上一次读到的传输层入站数据报计数（只用来判「本帧是否真有流量」）。</summary>
+        private readonly Dictionary<int, long> _lastInboundRxByUid = new Dictionary<int, long>();
+
+        /// <summary>
+        /// 本帧已完成重绑、但尚未升流的 uid。升流必须晚于「新连接的 Create 已入可靠流」
+        /// （契约：Create 先于 RPC），而 Create 是在 <c>_endpoint.Pump</c> 内的 bridge.Update
+        /// 里 flush 的，所以只能在那一帧的 Pump 之后执行。
+        /// </summary>
+        private readonly List<int> _pendingRebindResyncUids = new List<int>(2);
+
+        /// <summary>已启动的断线宽限次数（诊断）。</summary>
+        private long _disconnectGraceStarts;
+
+        /// <summary>成功重绑原权威对象（不 Spawn 第二个 NetId）的次数（诊断）。</summary>
+        private long _disconnectRebinds;
+
+        /// <summary>被拒绝的重连次数（终局/过期/名册不符/旧端点仍就绪）（诊断）。</summary>
+        private long _disconnectRebindRejects;
+
+        /// <summary>宽限到期、走原清理/胜负路径的次数（诊断）。</summary>
+        private long _disconnectGraceExpiries;
+
+        /// <summary>重绑后实际完成的升流重同步次数（诊断）。</summary>
+        private long _disconnectRebindResyncs;
 
         /// <summary>DS 自己决定的权威服务帧（独立于客户端预测帧，不与 AP 帧做算术）。</summary>
         private PMFrameId _movementServerFrame;
@@ -1276,6 +1339,14 @@ namespace PMNet.Unity
             _endpoint.Pump(nowMs, nowUnixSeconds);
             if (_faulted) { return; }
 
+            // T-LOOP5：本帧重绑过的 uid 在此刻升流并下发完整运动快照。
+            // 为什么必须在这之后：新连接的 Create 记录是在 `_endpoint.Pump` 内部的 bridge.Update
+            // 里才 flush 出去的（世界 AddConnection 补发的全量 Create），而重同步快照走**同一个可靠流**。
+            // 若在 OnConnected 里提前发，Create 会排在 RPC 之后 ⇒ 客户端拿到一条目标对象还不存在的
+            // RPC（被丢弃），新会话的预测时间轴就只能靠不可靠快照自己收敛。
+            FlushPendingRebindResyncs();
+            if (_faulted) { return; }
+
             PumpMovement(nowMs);
             if (_faulted) { return; }
 
@@ -1305,7 +1376,7 @@ namespace PMNet.Unity
             SubmitCombatResultIfReady();
             if (_faulted) { return; }
 
-            CheckPlayerDrops();
+            CheckPlayerDrops(nowMs);
             CheckSmoke(nowMs);
 
             if (_lobby != null)
@@ -1385,14 +1456,23 @@ namespace PMNet.Unity
         }
 
         /// <summary>
-        /// 断线收尾：连接不再就绪的副本一律**先 Freeze 再 Dispose**（契约 §B3）。
+        /// 断线收尾（T-LOOP5 改口径：**宽限内不清理**）。
         ///
-        /// Freeze 在前不是形式：Freeze 让 AP 侧进入"只等显式重新同步"、不再推进预测；
+        /// T-LOOP1 v1 冻结：「断线时不即时 Freeze/Dispose/Unbind/core.Disconnect、不立即判 Forfeit；
+        /// 该 uid 权威输入停止、角色原地仍可被他人打死；30s 到期才走原有 Unbind/Disconnect/胜负」。
+        /// 本方法逐 uid 执行这条时序：
+        ///   · 端点仍就绪 ⇒ 只是在线：刷新「最后一次真实入站流量」并清掉残留宽限记录；
+        ///   · 首次观察到断开 ⇒ 建立宽限（并挂起该 uid 的权威运动：不采纳输入、不推进）；
+        ///   · 宽限内 ⇒ 什么都不清理（对象/NetId/战斗账本/投射物/历史全部留着）；
+        ///   · 到期 ⇒ 才是原有清理：补一条 Alive=false 历史样本 → Freeze → Dispose →
+        ///     <c>CombatDriver.UnbindPlayer</c>（内含 R5 unbind + <c>core.Disconnect</c> ⇒ 胜负可出）。
+        ///
+        /// 为什么挂起/清理都必须先 Freeze：Freeze 让驱动进入「不再推进」的稳定态；
         /// 直接 Dispose 会让一个正在被引用（可能还有本帧待处理入站）的 Driver 突然失效。
         /// </summary>
-        private void PruneDisconnectedDrivers()
+        private void PruneDisconnectedDrivers(long nowMs)
         {
-            if (_driversByUid.Count == 0) { return; }
+            if (_driversByUid.Count == 0 && _disconnectGrace.TrackedCount == 0) { return; }
 
             List<int> uids = new List<int>(_driversByUid.Keys);
             for (int i = 0; i < uids.Count; i++)
@@ -1407,6 +1487,18 @@ namespace PMNet.Unity
 
                 if (player.OwnerConnection != null && player.OwnerConnection.IsReady)
                 {
+                    // 在线：刷新「最后一次真实入站流量」（断线窗口的保守起点）并清掉残留记录。
+                    ObserveInboundActivity(uid, player, nowMs);
+                    if (_disconnectGrace.IsTracked(uid)) { _disconnectGrace.Clear(uid); }
+                    continue;
+                }
+
+                // 宽限起点 = 最后一次真实入站流量（缺失时退回「本次观察时刻」）。
+                long graceSince = ResolveDisconnectGraceStartMs(uid, nowMs);
+                if (_disconnectGrace.ObserveDisconnected(uid, graceSince, nowMs))
+                {
+                    // 仍在宽限内：不 Freeze/Dispose/Unbind、不判胜负；只确保权威运动已挂起。
+                    EnsureAuthoritySuspended(uid, player);
                     continue;
                 }
 
@@ -1416,6 +1508,10 @@ namespace PMNet.Unity
                     _driversByUid.Remove(uid);
                     continue;
                 }
+
+                _disconnectGraceExpiries++;
+                _lastInboundActivityMsByUid.Remove(uid);
+                _lastInboundRxByUid.Remove(uid);
 
                 // F2：先拿断线前最后一份权威事实补一条 Alive=false 样本，**再**释放驱动。
                 // 顺序反了就没得可取（driver 已 Dispose），断线者会留在历史里继续可命中。
@@ -1440,7 +1536,7 @@ namespace PMNet.Unity
                 //
                 // R6-C：正式玩法走 `CombatDriver.UnbindPlayer`（它同时做 R5 unbind + `core.Disconnect`）——
                 // 后者保留水位与死亡真值，并在**只剩唯一在线队伍**时判 Forfeit 获胜 ⇒ 结果可出。
-                // 这条路径**只**用于真断线；死亡不是断线，绝不走这里（死者仍要 ACK 结果）。
+                // 这条路径**只**用于**宽限到期**的真断线；死亡不是断线，绝不走这里（死者仍要 ACK 结果）。
                 if (_combatEnabled && _combatDriver != null && !_combatDriver.IsDisposed)
                 {
                     try
@@ -1468,8 +1564,140 @@ namespace PMNet.Unity
                     }
                 }
 
-                Warn("玩家断线：已尝试冻结和释放运动驱动、投射物接缝已摘（异常见前述日志）（uid="
+                Warn("断线宽限到期（" + DisconnectGraceMs.ToString(CultureInfo.InvariantCulture)
+                     + "ms）：已冻结和释放运动驱动、投射物/战斗接缝已摘、core 已判负（异常见前述日志）（uid="
                      + uid.ToString(CultureInfo.InvariantCulture) + "）");
+            }
+        }
+
+        /// <summary>
+        /// 记录「本帧该 uid 的权威端点确实有入站流量」（用于断线窗口的保守起点）。
+        ///
+        /// 为什么用传输层数据报数而不是应用消息数：应用消息只在客户端真有输入/确认时才增，
+        /// 静静站着不动的客户端会让它长时间不增 —— 那会把窗口起点错误地推到很久以前（一断线就到期）。
+        /// 传输层保活（默认 1s 间隔）保证**活着**的连接至少每秒都有入站数据报，
+        /// 因此它才是「最后一次还听到对端」的可信近似。
+        /// </summary>
+        private void ObserveInboundActivity(int uid, PMR3Player player, long nowMs)
+        {
+            PMTransportConnection connection = player.OwnerConnection as PMTransportConnection;
+            if (connection == null || connection.Transport == null) { return; }
+
+            long rx = connection.Transport.Stats.DatagramsReceived;
+            long previous;
+            if (!_lastInboundRxByUid.TryGetValue(uid, out previous))
+            {
+                previous = long.MinValue;
+            }
+
+            if (rx != previous)
+            {
+                _lastInboundRxByUid[uid] = rx;
+                _lastInboundActivityMsByUid[uid] = nowMs;
+            }
+        }
+
+        /// <summary>断线窗口的起点：优先取最后一次真实入站流量（且不得晚于现在），否则退回本次观察时刻。</summary>
+        private long ResolveDisconnectGraceStartMs(int uid, long nowMs)
+        {
+            long activity;
+            if (_lastInboundActivityMsByUid.TryGetValue(uid, out activity)
+                && activity > 0L && activity <= nowMs)
+            {
+                return activity;
+            }
+
+            return nowMs;
+        }
+
+        /// <summary>
+        /// 确保该 uid 的权威运动已「因断线挂起」（幂等）。
+        ///
+        /// 失败路径：驱动已被死亡/终局冻结（<c>SuspendAuthorityForDisconnect</c> 返回 false）——
+        /// 这是**正常**的（死者不能被重连复活），只是告警；驱动不存在/已释放也仅告警，
+        /// 因为那种情形下已经没有任何运动/授权面可以推进。
+        /// </summary>
+        private bool EnsureAuthoritySuspended(int uid, PMR3Player player)
+        {
+            PMR4MovementDriver driver;
+            if (!_driversByUid.TryGetValue(uid, out driver) || driver == null || driver.IsDisposed)
+            {
+                return false;
+            }
+
+            if (driver.IsAuthoritySuspended)
+            {
+                return true;
+            }
+
+            try
+            {
+                if (!driver.SuspendAuthorityForDisconnect("ds-disconnect-grace"))
+                {
+                    Warn("断线宽限：uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                         + " 的运动驱动已因死亡/终局冻结，不建立可恢复挂起");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Fail("断线宽限挂起失败（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                     + "）：" + ex.GetType().Name + " " + ex.Message);
+                return false;
+            }
+
+            _disconnectGraceStarts++;
+            Info("断线宽限开始：uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                 + " netId=" + player.NetId.Value.ToString(CultureInfo.InvariantCulture)
+                 + "（窗口 " + DisconnectGraceMs.ToString(CultureInfo.InvariantCulture)
+                 + "ms；离线期间不采纳输入、角色原地仍可被击杀；到期才 Freeze/Dispose/Unbind 并判胜负）");
+            return true;
+        }
+
+        /// <summary>
+        /// T-LOOP5：执行本帧挂起的重绑升流（在 <c>_endpoint.Pump</c> 之后调用，见 <see cref="Pump"/>）。
+        ///
+        /// 失败即 Fail 整个宿主：新的 streamVersion 与客户端本地代次不一致会让新会话永远追不上，
+        /// 那是一个「连接在跑但状态永不收敛」的假成功。
+        /// </summary>
+        private void FlushPendingRebindResyncs()
+        {
+            if (_pendingRebindResyncUids.Count == 0) { return; }
+
+            List<int> uids = new List<int>(_pendingRebindResyncUids);
+            _pendingRebindResyncUids.Clear();
+
+            for (int i = 0; i < uids.Count; i++)
+            {
+                int uid = uids[i];
+
+                PMR4MovementDriver driver;
+                if (!_driversByUid.TryGetValue(uid, out driver) || driver == null || driver.IsDisposed)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    if (!driver.BeginServerResync("ds-reconnect-rebind"))
+                    {
+                        Fail("重绑后升流重同步失败（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                             + "）：BeginServerResync 返回 false");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Fail("重绑后升流重同步异常（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                         + "）：" + ex.GetType().Name + " " + ex.Message);
+                    return;
+                }
+
+                _disconnectRebindResyncs++;
+                Info("断线重绑已升流：uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                     + " stream=" + driver.StreamVersion.ToString(CultureInfo.InvariantCulture)
+                     + " boundary=" + driver.OutputBoundary.Value.ToString(CultureInfo.InvariantCulture)
+                     + "（从当前权威位姿/边界安全升流，位姿不回档；完整快照已发布）");
             }
         }
 
@@ -1725,9 +1953,13 @@ namespace PMNet.Unity
             if (connection == null) { return; }
 
             int uid = connection.Identity.Uid;
-            if (_playersByUid.ContainsKey(uid))
+
+            // T-LOOP5：同一 uid 的新端点（原局断线续玩）⇒ **重绑原玩家唯一 OwnerConnection**，
+            // 绝不 Spawn 第二个 NetId（那会造出双权威/双 NetId，客户端侧只能有一套副本/事件）。
+            PMR3Player existing;
+            if (_playersByUid.TryGetValue(uid, out existing) && existing != null)
             {
-                Warn("同一 uid 重复入局（uid=" + uid.ToString(CultureInfo.InvariantCulture) + "），本局已存在该副本");
+                HandleReconnect(uid, existing, connection);
                 return;
             }
 
@@ -1778,6 +2010,137 @@ namespace PMNet.Unity
                  + " 名册进度=" + _playersByUid.Count.ToString(CultureInfo.InvariantCulture)
                  + "/" + _expectedUids.Count.ToString(CultureInfo.InvariantCulture)
                  + " 出生=" + DescribeSpawn(uid));
+        }
+
+        /// <summary>
+        /// T-LOOP5：同一 uid 的**新端点**接入 —— 原局断线续玩。
+        ///
+        /// 冻结口径（T-LOOP1 v1）：旧端点不再就绪、原 UID/名册身份一致、未终局、未过宽限时，
+        /// **只把原权威玩家的唯一 <see cref="PMNetObject.OwnerConnection"/> 换成新连接**，不 Spawn 第二个
+        /// NetId；随后从**当前**权威位姿/输出边界升流并发布完整快照（见 <see cref="FlushPendingRebindResyncs"/>）。
+        /// 拒绝条件（任一 ⇒ 断开新连接，**不动**原权威）：旧端点仍就绪（v1 不做顶号）、名册不符、
+        /// 已终局、宽限过期。
+        ///
+        /// 为何不做顶号：同 uid 的有效 MAC 只证明「票据是真的」，不证明「Lobby 允许踢掉正在用的连接」
+        /// （契约：实现若要在 DS 提前抢占旧活跃连接，必须先另证新票确由 Lobby 允许且旧端点已被标断线）。
+        /// </summary>
+        private void HandleReconnect(int uid, PMR3Player existing, PMTransportConnection connection)
+        {
+            // 本帧唯一的单调墙钟（在 `_endpoint.Pump` 之前已设好，握手回调里拿到的就是本帧值）。
+            long nowMs = (long)_projectileWallNowMs;
+
+            if (existing.OwnerConnection != null && existing.OwnerConnection.IsReady)
+            {
+                RejectReconnect(uid, connection,
+                    "旧端点仍就绪（v1 不做未经证明的顶号）");
+                return;
+            }
+
+            // 名册身份一致：uid 在名册内，team/hero 与引导文件名册**逐字相同**。
+            int rosterTeam;
+            int rosterHero;
+            if (!_expectedUids.Contains(uid)
+                || !_rosterTeamByUid.TryGetValue(uid, out rosterTeam)
+                || !_rosterHeroByUid.TryGetValue(uid, out rosterHero)
+                || rosterTeam != connection.Identity.TeamId
+                || rosterHero != connection.Identity.HeroId)
+            {
+                RejectReconnect(uid, connection,
+                    "名册身份不一致（uid/team/hero 与引导文件名册不符：连接 team="
+                    + connection.Identity.TeamId.ToString(CultureInfo.InvariantCulture)
+                    + " hero=" + connection.Identity.HeroId.ToString(CultureInfo.InvariantCulture) + "）");
+                return;
+            }
+
+            // 终局不可逆 + 宽限窗口（两端各自有界；过期/终局一律拒绝重绑）。
+            bool matchEnded = _combatOutcomeFrozen
+                              || (_combatEnabled && _combatModel != null && _combatModel.Ended);
+            // 授权检查必须使用当前时刻，不能把断线起点当作 now：
+            // 否则 now-since 恒为0，恰好在到期同帧先处理握手时会放过过期票。
+            // 断线起点在 ObserveDisconnected 时已记录在窗口内部。
+            if (!_disconnectGrace.TryAuthorizeRebind(uid, nowMs, matchEnded))
+            {
+                RejectReconnect(uid, connection, matchEnded
+                    ? "对局已终局（终局不可逆，不得重绑）"
+                    : "断线宽限已过期（必须由 Lobby 重新发新票/新局）");
+                return;
+            }
+
+            // ① 唯一 owner 来源换成新连接。刻意**不**动 Owner / NetConnection：
+            //    再设一条就会形成第二个冲突拥有者链（桥在两者不一致时直接拒绝发送）。
+            existing.OwnerConnection = connection;
+
+            // ② 恢复离线期间被挂起的权威运动（死者/终局驱动上根本没有可恢复挂起）。
+            bool movementResumed = false;
+            PMR4MovementDriver driver;
+            if (_driversByUid.TryGetValue(uid, out driver) && driver != null && !driver.IsDisposed)
+            {
+                if (driver.IsAuthoritySuspended)
+                {
+                    try
+                    {
+                        movementResumed = driver.ResumeAuthorityAfterReconnect("ds-reconnect-rebind");
+                    }
+                    catch (Exception ex)
+                    {
+                        Fail("重绑恢复权威运动异常（uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                             + "）：" + ex.GetType().Name + " " + ex.Message);
+                        return;
+                    }
+                }
+                else if (!driver.IsFrozen)
+                {
+                    // 同帧断线 + 重连：宿主本帧还没来得及跑断线观察，权威本来就没停，也无需恢复。
+                    movementResumed = true;
+                }
+            }
+
+            // ③ 入站流量观察从新端点重新开始（旧计数不能用来判新端点是否活着）。
+            _lastInboundRxByUid.Remove(uid);
+            _lastInboundActivityMsByUid.Remove(uid);
+
+            _disconnectRebinds++;
+
+            if (movementResumed)
+            {
+                // 升流必须晚于「本帧 Create 已入可靠流」⇒ 记入待办，由 Pump 在 `_endpoint.Pump` 后执行。
+                _pendingRebindResyncUids.Add(uid);
+
+                Info("断线续玩重绑：uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                     + " netId=" + existing.NetId.Value.ToString(CultureInfo.InvariantCulture)
+                     + " stream=" + driver.StreamVersion.ToString(CultureInfo.InvariantCulture)
+                     + " boundary=" + driver.OutputBoundary.Value.ToString(CultureInfo.InvariantCulture)
+                     + "（OwnerConnection 已指向新端点，未 Spawn 新 NetId；升流在本帧 Create 之后执行）");
+            }
+            else
+            {
+                Warn("断线续玩重绑：uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                     + " 的运动驱动已因死亡/终局冻结（保持冻结，不升流；仍会收到结果并 ACK）");
+            }
+        }
+
+        /// <summary>
+        /// 拒绝一次重连：**不动**原权威对象/账本，明确断开新连接。
+        ///
+        /// 为何要显式断开：握手阶段已经给对端回过 ServerHello（票据/MAC 校验是真通过了的），
+        /// 若在这里只 return，对方会以为自己入局成功，但世界里根本没有它的身份
+        /// （它发上来的 RPC 全部因无归属被拒、也收不到任何 Create）——那是一个无法自愈的假入局。
+        /// </summary>
+        private void RejectReconnect(int uid, PMTransportConnection connection, string reason)
+        {
+            _disconnectRebindRejects++;
+            Warn("拒绝断线重绑：uid=" + uid.ToString(CultureInfo.InvariantCulture)
+                 + " conn=" + connection.Name + " 原因=" + reason
+                 + "（原权威对象/账本不动；明确断开该新连接，不让对端误以为已入局）");
+
+            try
+            {
+                connection.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Warn("拒绝重绑后断开连接异常：" + ex.GetType().Name + " " + ex.Message);
+            }
         }
 
         /// <summary>为已创建的权威副本建运动驱动，并在首次 flush 前发布初始快照。失败返回 false。</summary>
@@ -2311,10 +2674,11 @@ namespace PMNet.Unity
             Warn("UDP 端点事件：" + reason);
         }
 
-        private void CheckPlayerDrops()
+        private void CheckPlayerDrops(long nowMs)
         {
-            // R4-B（B3）：断线必须冻结/释放该玩家的运动驱动（先于"测试局"级别的判定）。
-            PruneDisconnectedDrivers();
+            // R4-B（B3）+ T-LOOP5：断线先走**宽限**（宽限内不清理、不判胜负），到期才冻结/释放。
+            // 次序不变：必须在“测试局”级别的判定之前跑，否则刚断线的瞬间就会被当成已清理。
+            PruneDisconnectedDrivers(nowMs);
 
             if (_endpoint == null || _playersByUid.Count == 0) { return; }
             if (_endpoint.ConnectionCount >= _playersByUid.Count) { return; }
@@ -2322,7 +2686,9 @@ namespace PMNet.Unity
 
             _playerDropReported = true;
             Warn("检测到玩家连接减少（存活 " + _endpoint.ConnectionCount.ToString(CultureInfo.InvariantCulture)
-                 + " / 已创建 " + _playersByUid.Count.ToString(CultureInfo.InvariantCulture) + "）");
+                 + " / 已创建 " + _playersByUid.Count.ToString(CultureInfo.InvariantCulture)
+                 + "）：正式玩法进入断线宽限（" + DisconnectGraceMs.ToString(CultureInfo.InvariantCulture)
+                 + "ms，角色原地仍可被击杀，不立即 Unbind/判胜负）；smoke 仍按原口径立即中止测试局");
 
             if (_options != null && _options.ServerSmoke)
             {
@@ -2554,6 +2920,12 @@ namespace PMNet.Unity
             _formalTeamIndexByUid.Clear();
             _formalMaxSpeedByUid.Clear();
             _rosterHeroByUid.Clear();
+
+            // T-LOOP5：重连账本/墙钟观察一起收尾（不留在静态事件或被下一次会话读到）。
+            _pendingRebindResyncUids.Clear();
+            _lastInboundActivityMsByUid.Clear();
+            _lastInboundRxByUid.Clear();
+            _disconnectGrace.Reset();
 
             _playersByUid.Clear();
             _world = null;
@@ -3568,6 +3940,33 @@ namespace PMNet.Unity
             HYLDDebug.LogError("[PMDsSessionHost] " + message);
         }
 
+        /// <summary>
+        /// T-LOOP5：断线宽限/重绑的单行诊断摘要（进 <see cref="Describe"/>）。
+        /// 只读统计，不参与任何判定；实机验收靠 T-LOOP8。
+        /// </summary>
+        private string DescribeDisconnectWiring()
+        {
+            int suspended = 0;
+            List<int> uids = new List<int>(_driversByUid.Keys);
+            for (int i = 0; i < uids.Count; i++)
+            {
+                PMR4MovementDriver driver;
+                if (_driversByUid.TryGetValue(uids[i], out driver) && driver != null && driver.IsAuthoritySuspended)
+                {
+                    suspended++;
+                }
+            }
+
+            return "graceMs=" + DisconnectGraceMs.ToString(CultureInfo.InvariantCulture)
+                   + " window=" + _disconnectGrace.Describe()
+                   + " suspended=" + suspended.ToString(CultureInfo.InvariantCulture)
+                   + " starts=" + _disconnectGraceStarts.ToString(CultureInfo.InvariantCulture)
+                   + " rebinds=" + _disconnectRebinds.ToString(CultureInfo.InvariantCulture)
+                   + " rebindRejects=" + _disconnectRebindRejects.ToString(CultureInfo.InvariantCulture)
+                   + " rebindResyncs=" + _disconnectRebindResyncs.ToString(CultureInfo.InvariantCulture)
+                   + " expiries=" + _disconnectGraceExpiries.ToString(CultureInfo.InvariantCulture);
+        }
+
         /// <summary>单行诊断摘要（测试宿主/日志对账用）。</summary>
         public string Describe()
         {
@@ -3586,6 +3985,7 @@ namespace PMNet.Unity
                    + " hostTick=" + _movementHostTickId.ToString(CultureInfo.InvariantCulture)
                    + " projectile=" + DescribeProjectileWiring()
                    + " combat=" + DescribeCombatWiring()
+                   + " reconnect=" + DescribeDisconnectWiring()
                    + " fault=" + (_faulted ? _faultReason : "<none>");
         }
     }

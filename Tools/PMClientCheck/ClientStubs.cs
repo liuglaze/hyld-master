@@ -1028,16 +1028,78 @@ namespace UnityEngine
     }
 
     /// <summary>
-    /// R6-C：IMGUI 的最小替身（只含 PMUnityCombatHud 真正用到的两个真实重载）。
+    /// R6-C / T-LOOP3：IMGUI 替身（只含 PMUnityCombatHud 真正用到的真实重载）。
     ///
-    /// 真实签名（Unity 2019.4）：<c>public static void Box(Rect position, string text)</c> /
-    /// <c>public static void Label(Rect position, string text)</c>。
-    /// 本门禁只能保证调用形状正确，**不**验证绘制语义（那必须回到 Unity）。
+    /// 真实签名（Unity 2019.4，均在 UnityEngine.IMGUIModule）：
+    ///   · <c>public static void Box(Rect position, string text)</c>；
+    ///   · <c>public static void Box(Rect position, string text, GUIStyle style)</c>；
+    ///   · <c>public static void Label(Rect position, string text)</c>；
+    ///   · <c>public static void Label(Rect position, string text, GUIStyle style)</c>；
+    ///   · <c>public static bool Button(Rect position, string text)</c>；
+    ///   · <c>public static bool Button(Rect position, string text, GUIStyle style)</c>；
+    ///   · <c>public static GUISkin skin { get; set; }</c>。
+    /// 本门禁只能保证调用形状正确，**不**验证绘制语义（那必须回到 Unity）；
+    /// 真实签名由 PMR4UnityCheck / PMNetUnityPlayerCheck（引用真 Unity2019 DLL）负责校验。
     /// </summary>
     public static class GUI
     {
+        public static GUISkin skin { get; set; }
+
         public static void Box(Rect position, string text) { }
+        public static void Box(Rect position, string text, GUIStyle style) { }
+
         public static void Label(Rect position, string text) { }
+        public static void Label(Rect position, string text, GUIStyle style) { }
+
+        public static bool Button(Rect position, string text) { return false; }
+        public static bool Button(Rect position, string text, GUIStyle style) { return false; }
+    }
+
+    /// <summary>
+    /// T-LOOP3：GUIStyle / GUIStyleState / GUISkin 的最小替身（只含结算弹窗用到的成员）。
+    ///
+    /// 真实签名（Unity 2019.4）：<c>GUIStyle()</c>、<c>GUIStyle(GUIStyle other)</c>、
+    /// <c>public int fontSize { get; set; }</c>、<c>public FontStyle fontStyle { get; set; }</c>、
+    /// <c>public TextAnchor alignment { get; set; }</c>、<c>public bool wordWrap { get; set; }</c>、
+    /// <c>public GUIStyleState normal { get; set; }</c>、<c>GUIStyleState.textColor</c>、
+    /// <c>GUISkin.label / box / button</c>。替身只保证形状，不模拟皮肤/字体渲染。
+    /// （GameObject / Rect / Screen / FontStyle / TextAnchor 在本文件其它位置已有替身。）
+    /// </summary>
+    public class GUIStyleState
+    {
+        public Color textColor { get; set; }
+    }
+
+    public class GUIStyle
+    {
+        public GUIStyle()
+        {
+            normal = new GUIStyleState();
+        }
+
+        public GUIStyle(GUIStyle other)
+        {
+            normal = new GUIStyleState();
+            if (other == null) { return; }
+
+            fontSize = other.fontSize;
+            fontStyle = other.fontStyle;
+            alignment = other.alignment;
+            wordWrap = other.wordWrap;
+        }
+
+        public int fontSize { get; set; }
+        public FontStyle fontStyle { get; set; }
+        public TextAnchor alignment { get; set; }
+        public bool wordWrap { get; set; }
+        public GUIStyleState normal { get; set; }
+    }
+
+    public class GUISkin
+    {
+        public GUIStyle label { get; set; }
+        public GUIStyle box { get; set; }
+        public GUIStyle button { get; set; }
     }
 
     public struct Touch

@@ -42,6 +42,40 @@
 // 首批输入仍是键盘 WASD/Space（PMUnityMoverInput），攻击尚未接入 —— 不宣称完整玩法。
 //
 // ---------------------------------------------------------------------------------------------
+// 视觉修复（T-VIS2）：相机与按键 Yaw 解耦 + 隔离物理场景遮挡回退
+// ---------------------------------------------------------------------------------------------
+// 用户实机现象：正式地图里按左右方向键镜头 90/180 度瞬转，贴墙时镜头穿进几何体出现黑遮挡。
+// 根因（代码事实）：PMUnityBattlePresentation.CreateTestCamera 把相机**挂在角色根节点下**，
+// 而宿主每帧按 Mover predicted Yaw 旋转根，而 PMUnityMoverInput 的左右键会推导出 ∓90/180 的
+// 世界 Yaw —— 子节点因此继承了按键转向；相机的固定后距也不会因墙而收短。
+//
+// ---------------------------------------------------------------------------------------------
+// T-PLAY1/2（本轮）：把取景与背影还原成**用户选型的旧游戏**
+// ---------------------------------------------------------------------------------------------
+// 用户二次实机反馈：新链能跑通，但“不是原俯视射击”——诊断期的相机（yaw 0 / 俯角 12 / 后距 6）
+// 不是旧游戏风格；可见角色转身与画面看到的朝向对不上（旧 Capsule 自带 270° 被叠加）。
+// 本轮修复（仅在允许写入的三个文件内）：
+//   · 取景改为旧预制体确定值（纯几何模块的 LegacyPrefab* 常量）：yaw −90 / 俯角 68.191 /
+//     FOV 60 / 近裁面 0.3 / 远裁面 1000；后距 = 旧 HYLDCameraManger 相对偏移 (6,12,0) 的模长；
+//   · 位置按旧链 SmoothTime（0.08s）临界阻尼跟随（平滑的是观察目标；rotation 仍为固定常量，
+//     且首帧/出生/瞬移（跳变 ≥ 8m）直接贴合，不拖尾）；
+//   · 遮挡探测方向与相机后向同一口径（即按新 yaw/俯角更新），仍只读、仍不改权威碰撞；
+//   · 可见转身：权威 Mover Yaw 写到旧链同一个 **Capsule** 可见节点上（角色根只做位置/scale），
+//     烘焙的 270° 不参与叠加；**不动**权威 Mover.Yaw / 网络协议 / 攻击朝向。
+// 修复（只在本轮允许的文件内）：
+//   · 相机改为**独立顶层对象**（不挂在角色根下）⇒ 结构上不可能继承按键 Yaw；
+//   · 每帧位姿由纯几何模块 PMBattleCameraGeometry 求解：固定方位角 + 固定观察目标
+//     （角色世界位置 + 观察高度）+ 旧预制体确定的后距/近裁面；
+//   · 遮挡：在**同一隔离 PhysicsScene** 里对地图白名单 layer 做只读球体扫掠
+//     （小半径，保守近似；不用无体积射线，以免从墙角擦过），
+//     命中则把后距收短到命中距离 - 安全边距（并保留下限）。查询仅影响表现，
+//     **不改**权威碰撞、不参与 Mover 仿真、不需要改 DS。
+//   · 生命周期：建 rig 时创建（占位位姿）→ 每 Update 的 PumpMovement 里随 predicted 位姿重写；
+//     冻结（断线/终局/死亡）时 PumpMovement 早返回 ⇒ 相机停住；Dispose 先单独销毁相机对象
+//     再销毁角色根（相机不在根下，不单独销毁就是“留下第二个活跃相机”）。
+//   · 隔离性：只对**正式模式 + 本地 owner** 生效；远端 SP 与诊断（胶囊）路径逐字不变。
+//
+// ---------------------------------------------------------------------------------------------
 // R5-C 新增：诊断投射物（客户端预测 + 候选收集 + 薄表现）
 // ---------------------------------------------------------------------------------------------
 // 本批接的是**诊断投射物探针**，不是英雄普通攻击/大招，也不产生任何伤害：
@@ -102,6 +136,32 @@
 //   · 已知可信终局后 DS 正常退场/端点 idle 关闭**不当作 Fail**；按正常路径释放会话（隔离物理场景卸载、
 //     相机恢复、端点释放）回到原大厅，只读终局 HUD 保留到**下一 Enter 或显式 Stop**才销毁；
 //   · 未收到可信终局时断网仍然 Fail（任何 disconnect 都不当胜利）；旧链 BattleReview 不参与伪造。
+//
+// ---------------------------------------------------------------------------------------------
+// T-PLAY4 新增：旧局内 UI / 摇杆的**后端输入接口**（不含 Canvas/Prefab，不做美术）
+// ---------------------------------------------------------------------------------------------
+// 用户选型冻结（Docs/plans/net-architecture-migration.md「T-PLAY4 UI与输入接口冻结」）：
+// 旧 `Resources/Prefabs/GameUI.prefab` 只当**只读美术源**，新建独立 Canvas；输入组（本文件）
+// 只提供三个对外冻结入口，UI 组**只读**依赖：
+//   · `TrySetUiMove(float screenX, float screenY) bool`     —— 移动摇杆；
+//   · `TryQueueUiAttack(bool isSuper, float screenX, float screenY) bool` —— 攻击 + 独立瞄准；
+//   · `TryGetUiCombatSnapshot(out PMUiCombatSnapshot) bool` —— 只读 HP/MaxHp/Mana/Energy/死/终局/就绪/拒绝。
+// 屏幕系（相对用户选定相机，世界 yaw −90，与 T-PLAY1 同源）：screen up → world −X，
+// screen right → world +Z；纯变换与来源选择在 `PMUnityMoverInput`（可在 net8 逐条断言）。
+//
+// 纪律（逐条落实）：
+//   · UI **永不**直接发 RPC、**永不**写 HP/Mana/Energy/复制字段/本地伤害；
+//   · 非法输入（NaN/±Infinity/超量程）一律显式拒（不吞非法、不静默钳制）；
+//   · 限幅单位向量；摇杆释放（零输入）清移动，键盘立即恢复；
+//   · 攻击边沿在主线程 Pump **统一一次消费**；只有活动会话/Owner 已核对/未 dead/未 terminal/未 frozen 才排攻击；
+//   · **一次攻击的方向 / 枪口 / planner / 上行声明用同一个向量**：UI 取独立瞄准向量（不绑 Mover yaw），
+//     键盘 F/G 仍用 predicted yaw 兼底；玩家可见朝向仍只跟移动；
+//   · 重复提交不堆上行（未消费的边沿还在时直接拒）；间隔门（planner FireIntervalMs）与 DS 裁决未弱化；
+//   · Stop / 死亡 / 终局 / 换局一律清 UI 输入，不带出上一局的推杆与排队攻击；
+//   · 客户端仍只做 planner + 预测，DS 的审批与资源权威不变；反例（UI 只改显示）由 R6 真实字节链的
+//     方向槽校验拦住（见 Tools/PMR6NetworkTest 的 UI 瞄准同源一节）。
+// 本文件在此覆盖上面 R4-C 「首批输入仍是键盘 WASD/Space，攻击尚未接入」的历史描述：
+// 键盘仍是可用兼底，UI 是新增的**独立**输入源，两者共用同一条上行/预测链。
 
 using System;
 using System.Collections.Generic;
@@ -114,11 +174,133 @@ using PMNet.Prediction;
 using PMNet.Projectile;
 using PMNet.R3;
 using PMNet.Session;
+using PMNet.Shared;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace PMNet.Unity
 {
+    /// <summary>
+    /// T-PLAY4：UI 只读战斗快照（**公开值类型**，namespace PMNet.Unity）。
+    ///
+    /// 公开契约（UI 表现组**只读**依赖，见 Docs/plans/net-architecture-migration.md
+    /// 「T-PLAY4 UI与输入接口冻结」）：Hp / MaxHp / Mana / SuperEnergy / Dead / MatchEnded /
+    /// NormalReady / SuperReady / LastReject（附 MatchId）。
+    ///
+    /// 为什么必须是值类型、且**只含值**：
+    ///   · UI 只能拿到「这一刻的数字」，拿不到会话对象、拿不到 <c>PMR3Player</c>、也没有任何可写入口
+    ///     —— 结构上排除「UI 顺手改资源 / 写复制字段」这类越权；
+    ///   · 资源四项全部来自 DS 的复制字段（HP/MaxHp/Dead/MatchEnded 为公共复制，
+    ///     Mana/SuperEnergy 为 OwnerOnly）：本快照**不**读旧 HYLDManger/BattleData/旧 BattleReview，
+    ///     也不做任何胜负/命中/资源判定。
+    ///
+    /// 就绪位（NormalReady/SuperReady）是「本地门 + 复制资源」的合成建议（**DS 仍是唯一裁决**）：
+    /// 身份已与 offer 核对、未死/未终局/未冻结、planner 支持该形态（抛物线/无子弹型大招会被拒）、
+    /// 本地开火间隔已过，且本人复制资源足够（普通攻击看 Mana ≥ 该英雄普通攻击蓝耗；大招看能量满）。
+    /// 它只用于 UI 置灰/提示，**不**构成新的权威，也不阻止 UI 尝试（尝试仍由 TryCombatAttack 真实判定）。
+    ///
+    /// <see cref="LastReject"/> 是最近一次「本地 planner 拒绝」或「DS 裁决拒绝」的人读原因（无则 null）。
+    /// </summary>
+    public struct PMUiCombatSnapshot
+    {
+        /// <summary>本人当前 HP（DS 复制值）。</summary>
+        public readonly int Hp;
+
+        /// <summary>本人 MaxHp（DS 复制值；尚未复制到时为 0）。</summary>
+        public readonly int MaxHp;
+
+        /// <summary>本人当前 Mana（OwnerOnly 复制值）。</summary>
+        public readonly int Mana;
+
+        /// <summary>本人当前 SuperEnergy（OwnerOnly 复制值）。</summary>
+        public readonly int SuperEnergy;
+
+        /// <summary>本人是否已死（DS 复制结论）。</summary>
+        public readonly bool Dead;
+
+        /// <summary>本局是否已终局（DS 复制结论，或已收到可信结果）。</summary>
+        public readonly bool MatchEnded;
+
+        /// <summary>普通攻击此刻是否满足**本地**就绪门（只用于 UI 提示）。</summary>
+        public readonly bool NormalReady;
+
+        /// <summary>大招此刻是否满足**本地**就绪门（只用于 UI 提示）。</summary>
+        public readonly bool SuperReady;
+
+        /// <summary>最近一次拒绝原因（本地 planner 或 DS 裁决）；无拒绝时为 null。</summary>
+        public readonly string LastReject;
+
+        /// <summary>当前对局 ID（不在局内/未知时为 null）。</summary>
+        public readonly string MatchId;
+
+        public PMUiCombatSnapshot(int hp, int maxHp, int mana, int superEnergy,
+                                  bool dead, bool matchEnded, bool normalReady, bool superReady,
+                                  string lastReject, string matchId)
+        {
+            Hp = hp;
+            MaxHp = maxHp;
+            Mana = mana;
+            SuperEnergy = superEnergy;
+            Dead = dead;
+            MatchEnded = matchEnded;
+            NormalReady = normalReady;
+            SuperReady = superReady;
+            LastReject = lastReject;
+            MatchId = matchId;
+        }
+    }
+
+    /// <summary>
+    /// T-LOOP6：**同局（MatchId+Epoch）重入**的准入决策（唯一决策源，引擎无关）。
+    ///
+    /// 为什么需要一台独立决策：三条路径在运行期可区分、但后果完全不同 ——
+    ///   · <see cref="RejectActiveHealthy"/>：旧会话仍健康（端点就绪）却拿新票进来，
+    ///     顶替会把一套**活着的** 世界/预测/输入/表现拆掉重建（双权威、重复输入的源头）⇒ 必须拒绝；
+    ///   · <see cref="RejectEndedMatch"/>：该对局已有**可信终局**，恢复它就是回档胜负
+    ///     （冻结接口：终局后不恢复输入/战斗）⇒ 必须拒绝；
+    ///   · <see cref="ReplaceFaulted"/>：旧会话已故障 / 端点已失败 ⇒ 这是断线续局唯一合法的入口：
+    ///     允许**先安全释放**旧状态，再建一个**全新**的 World/预测/表现/输入。
+    ///
+    /// 注意它**不是**准入校验：票/名册/摘要/世代的核验在 <c>Enter</c> 与 DS 侧照旧执行，
+    /// 本决策只管「同局重入时旧状态能不能被替换」。
+    /// </summary>
+    internal enum PMClientSameMatchEntry
+    {
+        /// <summary>旧会话仍活跃健康：拒绝顶替（不拆活会话）。</summary>
+        RejectActiveHealthy = 0,
+
+        /// <summary>该对局已结束（已有可信终局）：拒绝恢复（终局不可逆）。</summary>
+        RejectEndedMatch = 1,
+
+        /// <summary>旧会话已故障 / 端点已失败：允许释放旧状态并重建全新会话。</summary>
+        ReplaceFaulted = 2,
+    }
+
+    /// <summary><see cref="PMClientSameMatchEntry"/> 的纯策略（单一决策源）。</summary>
+    internal static class PMClientSameMatchEntryPolicy
+    {
+        /// <summary>
+        /// 决策表：
+        ///   matchEndedKnown=true                → RejectEndedMatch（终局优先，端点故障也不例外）
+        ///   sessionFaulted || !endpointUsable   → ReplaceFaulted
+        ///   其它（活跃健康）                     → RejectActiveHealthy
+        /// </summary>
+        public static PMClientSameMatchEntry Decide(bool sessionFaulted, bool endpointUsable, bool matchEndedKnown)
+        {
+            if (matchEndedKnown)
+            {
+                return PMClientSameMatchEntry.RejectEndedMatch;
+            }
+
+            if (sessionFaulted || !endpointUsable)
+            {
+                return PMClientSameMatchEntry.ReplaceFaulted;
+            }
+
+            return PMClientSameMatchEntry.RejectActiveHealthy;
+        }
+    }
+
     /// <summary>
     /// 客户端侧新链会话宿主（契约 §7.4）。
     ///
@@ -147,6 +329,27 @@ namespace PMNet.Unity
 
         /// <summary>累加器的上限（毫秒）。落后太多时宁可丢时间，也不一帧内追赶出巨量子步。</summary>
         private const double MaxStepAccumulatorMs = 200.0;
+
+        // ---- 本轮视觉修复：正式模式相机遮挡探测 ----
+
+        /// <summary>
+        /// 相机遮挡球体扫掠的命中缓冲容量（只取最近的一个，容量小且有界）。
+        /// **静态复用**：宿主同一时刻只有一个会话、且这些方法只在主线程调（与所有驱动调用同纪）。
+        /// </summary>
+        private const int CameraOcclusionHitCapacity = 8;
+
+        /// <summary>复用的命中缓冲（避免每帧遮挡探测都新分配数组）。</summary>
+        private static readonly RaycastHit[] CameraOcclusionHits = new RaycastHit[CameraOcclusionHitCapacity];
+
+        /// <summary>
+        /// 相机遮挡球体扫掠**命中缓冲饱和**的累计次数（T-VIS2b 登记的残留风险度量）。
+        ///
+        /// 饱和 = <c>count &gt;= 容量</c>：批量重载不保证有序，被丢弃的命中里理论上可能有更近的一面墙。
+        /// 本宿主**不**因此把遮挡当 "无遮挡"（那会让相机退到想要距离 = 穿墙），
+        /// 而是仍然取已返回的最近命中，并把饱和次数暴露出来（首次出现时上一条警告）。
+        /// 这只能度量、不能强保证——真实防穿墙仍需 Unity 内实机验证（见 Docs/plans/_visual_camera_fix.md）。
+        /// </summary>
+        private static int CameraOcclusionSaturationCount;
 
         // ---- R5-C：诊断投射物（契约「C宿主首个可执行入口」）----
 
@@ -232,6 +435,33 @@ namespace PMNet.Unity
             public PMR4MovementDriver Driver;
             public IRigPresentation Presentation;
             public bool IsOwner;
+
+            /// <summary>
+            /// 正式模式（ContentFormal）下的正式角色表现；诊断模式或 SP 非正式路径下为 null。
+            ///
+            /// 相机位姿需要直接写到 <see cref="PMUnityBattlePresentation.ApplyTestCameraPose"/>，
+            /// 而 <see cref="IRigPresentation"/> 只有 Apply/Dispose 两个面，因此这里额外持一个强类型引用；
+            /// 它只用于相机（本地 owner），不改变 Apply 的唯一写入口语义。
+            /// </summary>
+            public PMUnityBattlePresentation BattlePresentation;
+
+            /// <summary>
+            /// 正式相机跟随的**观察目标**平滑状态（米，世界坐标）。
+            ///
+            /// 为什么平滑的是“观察目标”而不是“相机位置”：相机位置 = 观察目标 + 固定后向 × 距离，
+            /// 平滑观察目标就等价于按旧链的 SmoothTime（0.08s）跟随，同时让遮挡探测 / 近裁面 /
+            /// 遮挡回退都继续在**同一条固定后向**上求解（不会因为平滑而与探测方向脱节）。
+            /// </summary>
+            public PMVector3 CameraLookTarget;
+
+            /// <summary>平滑速度状态（交给 <c>PMBattleCameraGeometry.SmoothFollowPosition</c> 逐帧带回）。</summary>
+            public PMVector3 CameraLookVelocity;
+
+            /// <summary>
+            /// 相机跟随是否已初始化。false 时首个位姿**直接贴合**：出生/进场/换局不得看到
+            /// 镜头从占位位姿滑动过去（旧链同样有首帧直接到位的语义）。
+            /// </summary>
+            public bool CameraFollowInitialized;
 
             /// <summary>
             /// R6-C：该副本已按**复制结论**（<c>CombatDead</c>）冻结（幂等，只冻结一次）。
@@ -411,6 +641,9 @@ namespace PMNet.Unity
             /// <summary>薄只读战斗 HUD（客户端专有；显式 Stop / 下一 Enter 时 Dispose）。</summary>
             public PMUnityCombatHud Hud;
 
+            /// <summary>本局安全局内摇杆/UI；只读旧皮肤、输入委托新链，退局一定释放。</summary>
+            public PMUnityBattleControls Controls;
+
             /// <summary>
             /// 本人身份已与 offer 核对通过（hero/team 都等于 offer 的 Identity）。
             ///
@@ -430,6 +663,26 @@ namespace PMNet.Unity
 
             /// <summary>收到可信终局的墙钟（毫秒）；仅当 <see cref="TerminalResultObserved"/> 为真时有意义。</summary>
             public double TerminalResultWallMs;
+
+            /// <summary>
+            /// T-LOOP3：本会话的**终局 ACK 已发出**证据（见 <see cref="FlushCombatState"/>）。
+            ///
+            /// 只有它为真时，宿主的正常退场入口才受理「返回大厅」按钮，HUD 才绘制可点的结算弹窗
+            /// （契约：「同帧先发 ServerCombatResultAck 才使按钮可点」）。
+            /// </summary>
+            public bool TerminalAckSent;
+
+            /// <summary>T-LOOP3：本会话发过终局 ACK 的帧数（只增；诊断/门禁对账用）。</summary>
+            public long TerminalAckSends;
+
+            /// <summary>
+            /// T-LOOP3：本次会话的身份令牌（<see cref="PMClientSessionHost"/> 发号，非 0）。
+            ///
+            /// 它是「结算弹窗的返回大厅按钮属于哪一局」的唯一凭据：HUD 在终局后会被保留
+            /// （跨到大厅、可能跨到下一局），宿主入口逐次比对令牌，不匹配一律拒绝
+            /// （跨局陈旧回调绝不关闭新会话）。
+            /// </summary>
+            public long IdentityToken;
 
             /// <summary>
             /// 端点失败回调（<see cref="OnEndpointFailed"/>）记下的「待本帧定性」原因。
@@ -465,10 +718,107 @@ namespace PMNet.Unity
             public long AttackFiresAccepted;
             public long TargetsSkippedDead;
             public long TargetsSkippedTeam;
+
+            // ---- T-PLAY4：UI 摇杆与独立瞄准（对外冻结入口是 static 方法；状态属于本会话）----
+
+            /// <summary>
+            /// UI 攻击边沿（由 <see cref="TryQueueUiAttack"/> 入队，主线程 Pump 统一消费一次）。
+            ///
+            /// 与 F/G 键盘边沿**分开两个位**：它们是两个不同的输入源，且 UI 边沿自带
+            /// 独立瞄准向量（“攻击摇杆独立决定弹道”），不能与“按 predicted yaw 推前向”混成一个位。
+            /// </summary>
+            public bool UiAttackEdgeBuffered;
+
+            /// <summary>排队的 UI 攻击是否为大招（与边沿同生同死）。</summary>
+            public bool UiAttackIsSuper;
+
+            /// <summary>
+            /// 排队的 UI 攻击的**世界单位瞄准向量**。
+            ///
+            /// 同一次攻击的 planner 方向、枪口偏移、与上行方向全部取这一个向量
+            /// （不能用“UI 显示一个方向、上行另一个方向”）。
+            /// </summary>
+            public float UiAimWorldX;
+            public float UiAimWorldZ;
+
+            // ---- T-PLAY4 可观测计数（只增；心跳/门禁对账用）----
+
+            public long UiMoveAccepted;
+            public long UiMoveRejected;
+            public long UiAttackQueued;
+            public long UiAttackRejected;
+            public long UiAttackDuplicate;
+
+            // ---- T-LIVE3：世界空间瞄准指示（纯表现；只为本地 Owner）----
+
+            /// <summary>
+            /// 瞄准指示器（纯表现）。创建失败时保持 null（降级为“无瞄准线”，**不**判整局失败）——
+            /// 一条瞄准线不应该让玩家打不了这一局；但原因一定记在 <see cref="AimIndicatorError"/>
+            /// 并进心跳，绝不静默。DS/远端 SP 不创建、不更新。
+            /// </summary>
+            public PMUnityBattleAimIndicator AimIndicator;
+
+            /// <summary>瞄准指示器创建失败的原因（null = 正常）；只用于诊断/对账。</summary>
+            public string AimIndicatorError;
+
+            /// <summary>当前是否处于“按住瞄准摇杆”的实时预览态（由 <see cref="TrySetUiAim"/> 维护）。</summary>
+            public bool AimPreviewActive;
+
+            /// <summary>预览中的摇杆是否大招（仅为重建计划缓存用）。</summary>
+            public bool AimPreviewIsSuper;
+
+            /// <summary>
+            /// 预览中的**世界单位**瞄准向量。
+            ///
+            /// 与排队攻击的 <see cref="UiAimWorldX"/> **分开两个字段**：排队向量属于“即将上行的一次攻击”，
+            /// 本字段属于“此刻正按住的方向”；两者取值路径相同（都是 TryScreenAimDirection），
+            /// 但生命周期不同（前者在消费点清，后者在松手/停局清）。
+            /// </summary>
+            public float AimPreviewWorldX;
+            public float AimPreviewWorldZ;
+
+            /// <summary>预览用的计划缓存（长度/扇形只来自它；与 TryCombatAttack 同一 planner 入口）。</summary>
+            public PMCombatAttackPlan AimPlan;
+            public int AimPlanHeroId;
+            public bool AimPlanIsSuper;
+            public float AimPlanDirX;
+            public float AimPlanDirZ;
+
+            /// <summary>扇形方向的复用缓冲（避免每帧为 LineRenderer 分配数组）。</summary>
+            public float[] AimFanDirX;
+            public float[] AimFanDirZ;
+
+            // ---- T-LIVE3 可观测计数（只增；心跳/门禁对账用）----
+
+            public long AimPreviewPushes;
+            public long AimPreviewRejected;
+            public long AimPreviewClears;
+            public long AimPlanBuilds;
+            public long AimIndicatorUpdates;
+            public long AimIndicatorRejected;
         }
 
         private static Session _active;
         private static bool _stopping;
+
+        /// <summary>
+        /// T-LIVE3：预览计划的**缓存量化**阈值（世界方向分量差）。
+        ///
+        /// 为什么需要：拖动摇杆时方向几乎每帧都变，但 planner 每建一次计划就要分配一个
+        /// `Directions` 数组；把“几乎同向”的连续帧视为同一方向，可避免无意义分配，
+        /// 同时不会让画出的方向与上行方向出现可感知差异（这只是**预览**缓存，上行仍用当帧真实向量）。
+        /// </summary>
+        private const float AimPlanDirectionEpsilon = 1e-3f;
+
+        /// <summary>
+        /// 会话建立时记录的**主线程** id（T-PLAY4）。
+        ///
+        /// 为什么必须记：UI 输入只能在主线程入队（Unity 的 uGUI 事件本来就在主线程，
+        /// 但本入口是 static 的，其他线程也能调到）。若允许异线程入队，它就会与本帧 Pump 里
+        /// 的消费争同一个状态位（“谁先跑”不确定）；因此这里**显式拒绝并计数**，
+        /// 而不是“看上去能用”。0 = 尚未记录（不入局时不误拒）。
+        /// </summary>
+        private static int _mainThreadId;
 
         /// <summary>
         /// R6-C：保留中的只读终局 HUD（收到可信终局结果后不销毁，直到**下一 Enter 或显式 Stop**）。
@@ -478,11 +828,22 @@ namespace PMNet.Unity
         /// </summary>
         private static PMUnityCombatHud _retainedHud;
 
+        /// <summary>
+        /// T-LOOP3：会话身份令牌的发号器（每个 <see cref="Enter"/> 递增，全生命周期内唯一）。
+        ///
+        /// 用途：把「结算弹窗的返回大厅按钮」与**具体某一次会话**绑定。HUD 在终局后会被保留
+        /// （跨到大厅、可能跨到下一局），令牌是「这次点击属于哪一局」的唯一凭据；
+        /// 令牌不匹配一律拒绝，因此陈旧回调不可能关掉新会话。
+        /// 从 1 开始（0 = 未绑定）；到达 long.MaxValue 时回到 1（实际不可能到达，仅为有界性）。
+        /// </summary>
+        private static long _nextSessionToken = 1L;
+
         // ---- R6-C：最近一次可信终局快照（只读，供后续大厅 UI；下一 Enter / 显式 Stop 清除）----
 
         private static bool _lastCombatResultValid;
         private static uint _lastCombatOutcomeId;
         private static int _lastCombatWinnerTeamId;
+        private static int _lastCombatLocalTeamId;
         private static string _lastCombatMatchId;
         private static Action<uint, int, string> _combatResultObserved;
 
@@ -548,6 +909,14 @@ namespace PMNet.Unity
         public static string LastCombatMatchId { get { return _lastCombatResultValid ? _lastCombatMatchId : null; } }
 
         /// <summary>
+        /// 最近一次可信终局时**本方**的队伍号（原始 TeamId；未知为 0）。
+        ///
+        /// 只供大厅只读展示（“胜/负/平”）用：它来自当时会话的 offer / 本人副本，
+        /// **不参与任何权威判定**，也不是从上行包自报采纳的。
+        /// </summary>
+        public static int LastCombatLocalTeamId { get { return _lastCombatResultValid ? _lastCombatLocalTeamId : 0; } }
+
+        /// <summary>
         /// 只读结果事件（大厅 UI 订阅入口）：每次收到第一份可信终局时触发一次。
         ///
         /// 参数 =（outcomeId, winnerTeamId 原始队伍号, matchId）。本宿主只负责发布；
@@ -568,8 +937,390 @@ namespace PMNet.Unity
             return _lastCombatResultValid;
         }
 
+        /// <summary>
+        /// T-LOOP3 公开入口：请求从「结算弹窗」返回大厅（**会话身份绑定**）。
+        ///
+        /// 它是 <see cref="PMUnityCombatHud"/> 里「返回大厅」按钮唯一的宿主落点，四条判据全部 fail closed：
+        ///   · 已退场/已换局（<c>_active</c> 为空）→ 拒绝（陈旧点击无效）；
+        ///   · 令牌与**当前**会话不一致（含令牌为 0 的未绑定态）→ 拒绝
+        ///     —— **跨局陈旧回调绝不关闭新会话**；
+        ///   · 未拿到可信终局（<see cref="Session.TerminalResultObserved"/> 为假）→ 拒绝
+        ///     （不得绕过结算直接从按钮退场）；
+        ///   · 本帧终局 ACK 未发出（<see cref="Session.TerminalAckSent"/> 为假）→ 拒绝
+        ///     （契约：「同帧先发 ServerCombatResultAck 才使按钮可点」）。
+        ///
+        /// 受理后走 <see cref="EndSessionNormally"/>（**不是** <see cref="Stop"/>）：
+        /// 会话按正常路径释放（隔离物理场景卸载、相机恢复、端点释放、帧驱动保留），
+        /// 只读终局 HUD/结论**保留**到下一 Enter 或显式 Stop。
+        /// </summary>
+        /// <param name="sessionToken">HUD 绑定时登记、点击时回传的会话身份令牌。</param>
+        /// <returns>true = 已受理并真正退场；false = 拒绝（任何一条判据不满足）。</returns>
+        public static bool TryRequestReturnToLobbyFromHud(long sessionToken)
+        {
+            Session session = _active;
+            if (session == null) { return false; }
+            if (session.IdentityToken == 0L || session.IdentityToken != sessionToken) { return false; }
+            if (!session.TerminalResultObserved) { return false; }
+            if (!session.TerminalAckSent) { return false; }
+
+            EndSessionNormally(session, "玩家点击『返回大厅』（会话身份校验通过）");
+
+            // “受理”必须以**真的退场了**为准：若 EndSessionNormally 因重入闩锁/已收尾而早退，
+            // 这里必须返回 false，让 HUD 把这次点击计入拒绝（而不是假装成功、按钮却还点着）。
+            return !ReferenceEquals(_active, session);
+        }
+
         /// <summary>保留中的只读终局 HUD 是否还在（诊断/门禁对账）。</summary>
         public static bool HasRetainedHud { get { return _retainedHud != null && !_retainedHud.IsDisposed; } }
+
+        // =================================================================================
+        //  T-PLAY4：UI 输入与只读快照（对外冻结面）
+        // =================================================================================
+        //  公开契约（UI 表现组**只读**依赖，Docs/plans/net-architecture-migration.md
+        //  「T-PLAY4 UI与输入接口冻结」）：
+        //    · TrySetUiMove(float screenX, float screenY) bool
+        //    · TryQueueUiAttack(bool isSuper, float screenX, float screenY) bool
+        //    · TryGetUiCombatSnapshot(out PMUiCombatSnapshot) bool
+        //  屏幕系约定：相对**用户选定相机**（世界 yaw −90，与 T-PLAY1 同源）：
+        //    screen up → world −X；screen right → world +Z（变换在 PMUnityMoverInput 里，可在 net8 断言）。
+        //
+        //  三条铁律（本区的实现约束）：
+        //    1) UI **永不**直接发 RPC、永不写 HP/Mana/Energy/复制字段：它只能“入队一次输入意图”，
+        //       上行声明仍然由 Pump 里的 TryCombatAttack 经生成的 RPC 发出（主线程统一消费一次）；
+        //    2) 非法输入（NaN/±Infinity/超量程）一律**显式拒绝**（返回 false + 计数），
+        //       不静默钳制、不吞掉——否则 UI 显示与上行方向可能不一致；
+        //    3) 一次攻击的方向/枪口/planner/上行必须是**同一个向量**（UI 路径取 UI 瞄准向量，
+        //       键盘 F/G 取 predicted yaw 兼底），不允许“只改 UI 显示”。
+
+        /// <summary>
+        /// UI 移动摇杆（冻结入口）：屏幕坐标（相对用户选定相机世界 yaw −90 的 [-1,1]）→ 本局移动输入。
+        ///
+        /// 返回值语义：true = 本次输入已生效（含「释放」这种零输入）；false = 拒纳
+        /// （不在局内 / 非主线程 / 非 finite / 超量程 / 本局已冻结、终局或本人已死）。
+        /// **拒绝不改变已有摇杆状态**（非法值不会被静静写成某个合法值），但下列两种情形会顺手清掉推杆：
+        ///   · 本局不再接受输入（冻结/终局/死亡）时的非零推动；
+        ///   · 释放（零输入）本身。
+        /// 这样“摇杆粘住”不可能跨过冻结/终局/换局（契约：Stop/结束/换局不带出上局 UI 输入）。
+        /// </summary>
+        public static bool TrySetUiMove(float screenX, float screenY)
+        {
+            Session session = _active;
+            if (session == null || session.Faulted) { return false; }
+            if (!IsMainThreadForUi(session)) { session.UiMoveRejected++; return false; }
+
+            PMUnityMoverInput input = session.Input;
+            if (input == null) { return false; }
+
+            float worldX;
+            float worldZ;
+            if (!PMUnityMoverInput.TryScreenVectorToWorld(screenX, screenY, out worldX, out worldZ))
+            {
+                // 非 finite / 超量程：不吞非法（返回 false 让 UI 能看见），也不改已有状态。
+                session.UiMoveRejected++;
+                return false;
+            }
+
+            // 释放（零向量）：**合法且总是接受**——清空不会产生任何位移，
+            // 因此即使在冻结/死亡帧也必须能清（否则冻结后再释放也清不掉，摇杆会永久粘住）。
+            if (worldX == 0f && worldZ == 0f)
+            {
+                input.ClearUiMove();
+                return true;
+            }
+
+            // 非零推动：本局已不接受输入时拒绝，并顺手清掉可能残留的推动。
+            if (session.MovementFrozen || session.MatchEndedFrozen || session.TerminalResultObserved
+                || IsOwnerDeadOrEnded(session))
+            {
+                input.ClearUiMove();
+                session.UiMoveRejected++;
+                return false;
+            }
+
+            input.SetUiMoveWorld(worldX, worldZ);
+            session.UiMoveAccepted++;
+            return true;
+        }
+
+        /// <summary>
+        /// T-LIVE3 冻结入口：攻击摇杆的**实时瞄准预览**（按住/拖动期间反复调用；<paramref name="active"/>=false 表示隐藏）。
+        ///
+        /// 与 <see cref="TryQueueUiAttack"/> 的关系（本区最关键的一条）：
+        ///   · 两者用**同一份** <c>PMUnityMoverInput.TryScreenAimDirection</c> 把屏幕向量转成世界**单位**向量，
+        ///     因此“看到的方向”就是“打出去的方向”（不偏轴、不是两个源）；
+        ///   · 本入口**只**改预览状态：绝不排队攻击、绝不发 RPC、绝不写权威 ——
+        ///     一次手势仍只由松手边沿的 <see cref="TryQueueUiAttack"/> 提交一次。
+        ///
+        /// 返回值：true = 已受理（含 active=false 的隐藏）；false = 拒纳（非本局/非主线程/非有限值/
+        /// 本局已冻结、终局、本人已死、本人身份未核对）。
+        /// </summary>
+        public static bool TrySetUiAim(bool isSuper, bool active, float screenX, float screenY)
+        {
+            Session session = _active;
+            if (session == null || session.Faulted) { return false; }
+            if (!IsMainThreadForUi(session)) { session.AimPreviewRejected++; return false; }
+
+            if (!active)
+            {
+                // 隐藏总是合法：松手/取消/停局路径必须能**立刻**关掉线（不等下一帧）。
+                ClearUiAim(session);
+                return true;
+            }
+
+            float aimX;
+            float aimZ;
+            if (!PMUnityMoverInput.TryScreenAimDirection(screenX, screenY, out aimX, out aimZ))
+            {
+                // 非 finite / 超量程 / 零方向：不吞非法（返回 false 让 UI 能看见），也不改已有预览。
+                session.AimPreviewRejected++;
+                return false;
+            }
+
+            PMR3Player owner = session.OwnerPlayer;
+            if (owner == null || !session.OwnerIdentityVerified)
+            {
+                session.AimPreviewRejected++;
+                return false;
+            }
+
+            if (session.MovementFrozen || session.MatchEndedFrozen || session.TerminalResultObserved
+                || IsOwnerDeadOrEnded(session))
+            {
+                // 本局已不接受输入：拒纳并清掉预览（不留一根冻住的线）。
+                ClearUiAim(session);
+                session.AimPreviewRejected++;
+                return false;
+            }
+
+            session.AimPreviewActive = true;
+            session.AimPreviewIsSuper = isSuper;
+            session.AimPreviewWorldX = aimX;
+            session.AimPreviewWorldZ = aimZ;
+            session.AimPreviewPushes++;
+            return true;
+        }
+
+        /// <summary>
+        /// UI 攻击（冻结入口）：把一次「攻击手势 + 独立瞄准方向」入队，由主线程 Pump **统一消费一次**。
+        ///
+        /// 排攻击的前置（契约原文「只有活动会话 Owner 正确/未 dead/未 terminal/未 frozen 时排攻击」）：
+        ///   · 在局内且会话未 fault；
+        ///   · 主线程；
+        ///   · 本人副本已复制且身份已与 offer 核对（<see cref="Session.OwnerIdentityVerified"/>）
+        ///     —— “Owner 正确”不能拿“默认 0 也是合法英雄”蒙过去；
+        ///   · 未 dead、未终局、未冻结；
+        ///   · 瞄准方向合法（非 finite/超量程/零方向一律拒绝：**不默认**替玩家选一个方向）。
+        ///
+        /// 资源/间隔门**不**在这里判（它们由消费点的 planner + 本地间隔门 + DS 裁决负责），
+        /// 但就绪与否由 <see cref="TryGetUiCombatSnapshot"/> 的 NormalReady/SuperReady 提前告知 UI。
+        ///
+        /// 重复提交（同一帧重复调、按住拖动反复调）**不会**堆出多次上行：已有未消费的攻击边沿时直接拒绝
+        /// （计 UiAttackDuplicate），因此一次手势只对应一次 RPC，不会因为 UI 毛刺多打一枪。
+        /// </summary>
+        public static bool TryQueueUiAttack(bool isSuper, float screenX, float screenY)
+        {
+            Session session = _active;
+            if (session == null || session.Faulted) { return false; }
+            if (!IsMainThreadForUi(session)) { session.UiAttackRejected++; return false; }
+
+            float aimX;
+            float aimZ;
+            if (!PMUnityMoverInput.TryScreenAimDirection(screenX, screenY, out aimX, out aimZ))
+            {
+                session.UiAttackRejected++;
+                return false;
+            }
+
+            PMR3Player owner = session.OwnerPlayer;
+            if (owner == null || !session.OwnerIdentityVerified)
+            {
+                session.UiAttackRejected++;
+                return false;
+            }
+
+            if (owner.CombatDead || owner.CombatMatchEnded
+                || session.MovementFrozen || session.MatchEndedFrozen || session.TerminalResultObserved)
+            {
+                // 本局已不接受攻击：拒绝并清掉本会话全部 UI 输入（含已排队的边沿）。
+                session.UiAttackRejected++;
+                ClearUiInput(session);
+                return false;
+            }
+
+            if (session.UiAttackEdgeBuffered)
+            {
+                // 同一帧已有未消费的攻击边沿：不重复排队（一次手势 = 一次上行）。
+                session.UiAttackDuplicate++;
+                return false;
+            }
+
+            session.UiAttackEdgeBuffered = true;
+            session.UiAttackIsSuper = isSuper;
+            session.UiAimWorldX = aimX;
+            session.UiAimWorldZ = aimZ;
+            session.UiAttackQueued++;
+            return true;
+        }
+
+        /// <summary>
+        /// 只读战斗快照（冻结入口）：本人 HP/MaxHp/Mana/SuperEnergy、死亡/终局、F/G 就绪位、
+        /// 最近拒绝原因，以及本局 matchId（可空）。
+        ///
+        /// 返回 false 的两种情况：不在局内（已 Stop/换局/从未入局），或本人副本尚未复制。
+        /// 它**只读**：不读旧链真值、不写任何资源、不改变本会话输入状态。
+        /// </summary>
+        public static bool TryGetUiCombatSnapshot(out PMUiCombatSnapshot snapshot)
+        {
+            snapshot = default(PMUiCombatSnapshot);
+
+            Session session = _active;
+            if (session == null) { return false; }
+
+            PMR3Player owner = session.OwnerPlayer;
+            if (owner == null) { return false; }
+
+            bool normalReady;
+            bool superReady;
+            ComputeUiReadyFlags(session, owner, out normalReady, out superReady);
+
+            bool matchEnded = owner.CombatMatchEnded || session.MatchEndedFrozen || session.TerminalResultObserved;
+
+            snapshot = new PMUiCombatSnapshot(
+                owner.CombatHp, owner.CombatMaxHp, owner.CombatMana, owner.CombatSuperEnergy,
+                owner.CombatDead, matchEnded, normalReady, superReady,
+                session.LastAttackError,
+                session.Offer != null ? session.Offer.MatchId : null);
+            return true;
+        }
+
+        /// <summary>
+        /// 计算 UI 就绪位。**本地建议**：真正的裁决仍在 DS（core 会再判身份/资源/间隔）。
+        ///
+        /// 它刻意复用两个已有的同一口径判据（不另造第三份规则）：
+        ///   · <see cref="IsCombatFireReady"/>（身份已核对 + MaxHp 已复制 + 未死/未终局）；
+        ///   · <see cref="PMCombatWeaponPlanner.TryBuild"/>（这种形态是否可打：抛物线/无子弹型大招会被拒）。
+        /// 额外的是「本地开火间隔已过」与「本人**复制资源**是否够」（Mana/Energy 均为 OwnerOnly 复制值），
+        /// 它们只用于把按钮置灰，不阻止 UI 尝试。
+        /// </summary>
+        private static void ComputeUiReadyFlags(Session session, PMR3Player owner,
+                                               out bool normalReady, out bool superReady)
+        {
+            normalReady = false;
+            superReady = false;
+
+            string readyError;
+            if (!IsCombatFireReady(session, owner, out readyError)) { return; }
+            if (session.MovementFrozen || session.MatchEndedFrozen || session.TerminalResultObserved) { return; }
+
+            // 与 TryCombatAttack 同一个墙钟口径（realtimeSinceStartup 毫秒）。
+            double wallNowMs = (double)(Time.realtimeSinceStartup * 1000f);
+
+            normalReady = ComputeUiReadyForAttack(session, owner, false, wallNowMs);
+            superReady = ComputeUiReadyForAttack(session, owner, true, wallNowMs);
+        }
+
+        private static bool ComputeUiReadyForAttack(Session session, PMR3Player owner, bool isSuper,
+                                                   double wallNowMs)
+        {
+            // 方向任意单位向量即可：这里只问「这个形态能不能打」，与朝向无关。
+            PMCombatAttackPlan plan;
+            PMCombatRejectReason reason;
+            if (!PMCombatWeaponPlanner.TryBuild(owner.CombatHeroId, isSuper, 1f, 0f, out plan, out reason)
+                || plan == null)
+            {
+                return false;
+            }
+
+            if (wallNowMs - session.LastAttackWallMs < (double)plan.FireIntervalMs) { return false; }
+
+            if (isSuper)
+            {
+                // 大招：满能量才能放（契约 A1：SuperEnergyMax 满后清 0，Mana 不变）。
+                return owner.CombatSuperEnergy >= BattleNumericConfig.SuperEnergyMax;
+            }
+
+            // 普通攻击：planner 的 ManaCost 就是该英雄的普通攻击蓝耗（不另算一份）。
+            return owner.CombatMana >= plan.ManaCost;
+        }
+
+        /// <summary>
+        /// 清空本会话的**全部 UI 输入**（摇杆 + 已排队的攻击边沿与瞄准向量）。幂等。
+        ///
+        /// 契约：「Stop/结束/换局不带出上局 UI 输入」。因此凡「本局不再接受输入」的路径
+        /// （冻结、死亡、终局、显式 Stop、ReleaseSession）都必须调它。
+        /// </summary>
+        private static void ClearUiInput(Session session)
+        {
+            if (session == null) { return; }
+
+            if (session.Input != null) { session.Input.ClearUiMove(); }
+
+            session.UiAttackEdgeBuffered = false;
+            session.UiAttackIsSuper = false;
+            session.UiAimWorldX = 0f;
+            session.UiAimWorldZ = 0f;
+
+            // T-LIVE3：瞄准预览也属于“本局不再接受输入”的范畴（它虽有独立的 setAim 入口，
+            // 但停局/死亡/终局/换局时同样必须清干净，否则下一局会先闪一根旧方向的线）。
+            ClearUiAim(session);
+        }
+
+        /// <summary>
+        /// T-LIVE3：清空本会话的瞄准预览状态（并**立即隐藏**指示器）。幂等。
+        ///
+        /// 与 <see cref="ClearUiInput"/> 同一条“停局不带出上一局输入”的纪律：
+        /// 死亡 / 终局 / 冻结 / 显式 Stop / 换局 / 退局 都经它清干净。
+        /// </summary>
+        private static void ClearUiAim(Session session)
+        {
+            if (session == null) { return; }
+
+            if (session.AimPreviewActive) { session.AimPreviewClears++; }
+
+            session.AimPreviewActive = false;
+            session.AimPreviewIsSuper = false;
+            session.AimPreviewWorldX = 0f;
+            session.AimPreviewWorldZ = 0f;
+            session.AimPlan = null;
+            session.AimPlanDirX = 0f;
+            session.AimPlanDirZ = 0f;
+
+            PMUnityBattleAimIndicator indicator = session.AimIndicator;
+            if (indicator != null && !indicator.IsDisposed) { indicator.Hide(); }
+        }
+
+        /// <summary>本人是否已死或本局已按复制结论终局（UI 排攻击/推摇杆的前置）。</summary>
+        private static bool IsOwnerDeadOrEnded(Session session)
+        {
+            if (session == null) { return false; }
+
+            PMR3Player owner = session.OwnerPlayer;
+            if (owner == null) { return false; }
+
+            return owner.CombatDead || owner.CombatMatchEnded;
+        }
+
+        /// <summary>
+        /// UI 入口的主线程门。
+        ///
+        /// 为什么需要它：本入口是 static 的（UI 组只能看到这个面），任何线程都能调到，
+        /// 而消费点在每帧 Pump（主线程）里。若允许异线程入队，边沿位就会被两个线程竞写，
+        /// “这次攻击算不算”就变成调度顺序的函数。这里显式拒绝 + 警告（可对账），不静默接受。
+        /// </summary>
+        private static bool IsMainThreadForUi(Session session)
+        {
+            if (session == null) { return false; }
+            if (_mainThreadId == 0) { return true; }
+
+            int current = System.Threading.Thread.CurrentThread.ManagedThreadId;
+            if (current == _mainThreadId) { return true; }
+
+            HYLDDebug.LogWarning("[PMClientSessionHost] UI 输入来自非主线程（thread="
+                                 + current.ToString(CultureInfo.InvariantCulture)
+                                 + " 主线程=" + _mainThreadId.ToString(CultureInfo.InvariantCulture)
+                                 + "）：拒绝入队（UI 只能在主线程与 Pump 同线程交互）");
+            return false;
+        }
 
         // =================================================================================
         //  入口
@@ -620,13 +1371,48 @@ namespace PMNet.Unity
                 return;
             }
 
-            // 2) 重复 Enter 同一局：不重绑定（避免把已有世界/socket 拆掉重建）。
+            // T-LOOP6：**已结束的对局不得恢复**（冻结接口：终局不可逆，登录/重入只能只读展示结果）。
+            //
+            // 它必须在下面「清空上一局只读结果快照」**之前**判定：那份快照正是“该对局已结束”的唯一本地凭据
+            // （只由通过校验的可信结果写入，不从任何上行包自报采纳）。命中即明确拒绝，不回旧链、不建世界。
+            if (IsMatchAlreadyEnded(offer.MatchId))
+            {
+                HYLDDebug.LogError("[PMClientSessionHost] 拒绝为**已结束**的对局建会话：match=" + offer.MatchId
+                                   + " outcome=" + _lastCombatOutcomeId.ToString(CultureInfo.InvariantCulture)
+                                   + " winner=" + _lastCombatWinnerTeamId.ToString(CultureInfo.InvariantCulture)
+                                   + "（可信终局已落定，不恢复输入/战斗，不回旧链）");
+                return;
+            }
+
+            // 2) 同局重入（match+epoch 相同）：**只允许在旧会话已故障/端点失败时**释放旧状态并重建全新会话。
+            //    活跃健康会话不得被顶替（否则会拆掉一套活着的世界/预测/输入）；已结束对局在上面已被拒。
             if (_active != null && SameMatch(_active.Offer, offer))
             {
-                HYLDDebug.Log("[PMClientSessionHost] 已在同一局内（match=" + offer.MatchId
-                              + " epoch=" + offer.Epoch.ToString(CultureInfo.InvariantCulture)
-                              + "），忽略重复 Enter");
-                return;
+                PMClientSameMatchEntry decision = PMClientSameMatchEntryPolicy.Decide(
+                    _active.Faulted, IsEndpointUsable(_active), IsMatchAlreadyEnded(offer.MatchId));
+
+                if (decision == PMClientSameMatchEntry.RejectActiveHealthy)
+                {
+                    HYLDDebug.LogError("[PMClientSessionHost] 拒绝同局重入：当前会话仍活跃健康（match=" + offer.MatchId
+                                       + " epoch=" + offer.Epoch.ToString(CultureInfo.InvariantCulture)
+                                       + "），不顶替活跃会话、不重建世界（拒绝明示，不回旧链）");
+                    return;
+                }
+
+                if (decision == PMClientSameMatchEntry.RejectEndedMatch)
+                {
+                    HYLDDebug.LogError("[PMClientSessionHost] 拒绝同局重入：该对局已有可信终局（match=" + offer.MatchId
+                                       + "），已结束对局不得恢复（不回旧链）");
+                    return;
+                }
+
+                // ReplaceFaulted：断线续局唯一合法的入口。先**安全释放**旧局（旧 socket / static 事件 /
+                // 旧世界与表现），随后与“无会话”路径逐字相同地建一个**全新**会话
+                // （新 World / 新 Prediction / 新表现 / 新输入）—— 绝不把旧本地预测或旧假弹带过来。
+                HYLDDebug.Log("[PMClientSessionHost] 同局重入：旧会话已故障/端点已失败（reason="
+                              + (_active.FaultReason ?? "<none>")
+                              + "），先释放旧状态再重建全新会话（match=" + offer.MatchId + "）");
+                Stop();
             }
 
             if (_active != null)
@@ -642,8 +1428,17 @@ namespace PMNet.Unity
             ReleaseRetainedHud();
             ClearLastCombatResult();
 
+            // T-PLAY4：记下本会话的主线程（UI 输入必须与每帧 Pump 同线程，见 IsMainThreadForUi）。
+            _mainThreadId = System.Threading.Thread.CurrentThread.ManagedThreadId;
+
             Session session = new Session();
             session.Offer = offer;
+
+            // T-LOOP3：本次会话的身份令牌（结算弹窗的「返回大厅」按钮与它绑定）。
+            // 发号器与 HUD 的令牌比对是「跨局陈旧回调不关闭新会话」的唯一凭据。
+            session.IdentityToken = _nextSessionToken;
+            _nextSessionToken = _nextSessionToken >= long.MaxValue ? 1L : _nextSessionToken + 1L;
+
             session.ContentFormal = contentFormal;
             session.SelectedCollisionDigest = offer.CollisionDigest;
             session.SelectedWorldVersion = contentFormal ? 0 : MovementWorldVersion;
@@ -927,6 +1722,58 @@ namespace PMNet.Unity
                 return;
             }
 
+            // T-LOOP3：把「返回大厅」入口与**本次会话的身份令牌**一并绑到 HUD 上。
+            //   · 令牌保证陈旧绑定/跨局点击不可能关掉新会话（宿主入口逐次比对）；
+            //   · 宿主入口只在「可信终局已存 + 本帧终局 ACK 已发」时受理，受理后走
+            //     EndSessionNormally（**不是** Stop）—— 结论与只读终局 HUD 都会保留。
+            session.Hud.BindLobbyReturn(session.IdentityToken, TryRequestReturnToLobbyFromHud);
+
+            // T-PLAY4：新局内 Canvas 与旧 GameUI 只有只读 Sprite/布局关联，绝不激活旧 prefab。
+            // 缺资源/挂接失败和 HUD 一样明确拒绝入局，而不是静默回到只有 F/G 的诊断画面。
+            try
+            {
+                string controlsError;
+                session.Controls = PMUnityBattleControls.Create(offer.MatchId, out controlsError);
+                if (session.Controls == null)
+                {
+                    ReleaseSession(session);
+                    HYLDDebug.LogError("[PMClientSessionHost] 局内操控 UI 创建失败：" + controlsError + "（不回旧链）");
+                    return;
+                }
+
+                session.Controls.Bind(TrySetUiMove, TryQueueUiAttack, QueryBattleControlsStatus, TrySetUiAim);
+            }
+            catch (Exception ex)
+            {
+                ReleaseSession(session);
+                HYLDDebug.LogError("[PMClientSessionHost] 局内操控 UI 接线失败："
+                                   + ex.GetType().Name + " " + ex.Message + "（不回旧链）");
+                return;
+            }
+
+            // T-LIVE3：世界空间瞄准指示器（**纯表现**，只为本地 Owner 服务；DS/远端 SP 不创建）。
+            //
+            // 与 HUD/操控 UI 的差别：它失败**不**判整局失败。理由：它不承载任何输入/权威/数据语义，
+            // 一条线缺失不可能被误读成“没有数据”；而因一条线让玩家整局打不了反而更糟。
+            // 但失败绝不静默：原因记进会话并随心跳输出（AimIndicatorError），玩家仍能正常开火。
+            try
+            {
+                string aimError;
+                session.AimIndicator = PMUnityBattleAimIndicator.Create(offer.MatchId, out aimError);
+                if (session.AimIndicator == null)
+                {
+                    session.AimIndicatorError = aimError;
+                    HYLDDebug.LogWarning("[PMClientSessionHost] 世界瞄准指示器创建失败（降级为无瞄准线，"
+                                         + "不判整局失败）：" + aimError);
+                }
+            }
+            catch (Exception ex)
+            {
+                session.AimIndicatorError = ex.GetType().Name + " " + ex.Message;
+                HYLDDebug.LogWarning("[PMClientSessionHost] 世界瞄准指示器创建异常（降级为无瞄准线）："
+                                     + ex.GetType().Name + " " + ex.Message);
+            }
+
             _active = session;
 
             // static 事件是跨帧的：必须在这里订阅，并在 Stop 里退订（否则退出后再 Enter 会拿到旧宿主）。
@@ -1101,6 +1948,7 @@ namespace PMNet.Unity
                     // 端点已不可用：这里跳过 ACK（发给没人收的 socket 只会把正常退场变成 SendFailed fault）。
                     FlushCombatState(session, nowMs);
                     UpdateCombatHud(session);
+                    UpdateBattleControls(session);
 
                     EndSessionNormally(session, "DS 正常退场（端点已关闭）");
                     return;
@@ -1160,6 +2008,8 @@ namespace PMNet.Unity
 
                 UpdateCombatHud(session);
 
+                UpdateBattleControls(session);
+
                 if (session.Endpoint == null || session.Endpoint.IsDisposed || session.Endpoint.ClientFailed)
                 {
                     EndSessionNormally(session, "DS 正常退场（端点已关闭）");
@@ -1202,6 +2052,8 @@ namespace PMNet.Unity
             SendPendingProbes(session);
 
             UpdateCombatHud(session);
+
+            UpdateBattleControls(session);
 
             if (Time.unscaledTime >= session.NextHeartbeatLogTime)
             {
@@ -1343,13 +2195,197 @@ namespace PMNet.Unity
                     continue;
                 }
 
-                try { rig.Presentation.ApplyPredicted(rig.Driver.GetPredictedSync()); }
+                try
+                {
+                    // 相机与角色表现同源：都用**同一个** predicted 位姿，避免两者相差一帧。
+                    PMMoverSyncState predicted = rig.Driver.GetPredictedSync();
+
+                    rig.Presentation.ApplyPredicted(predicted);
+
+                    // 正式模式：本地 owner 的相机跟着刚写入的呈现位姿走（固定方位角 + 遮挡回退）。
+                    if (!UpdateOwnerBattleCamera(session, rig, predicted))
+                    {
+                        return;
+                    }
+                }
                 catch (Exception ex)
                 {
                     Fail(session, "AP 表现写入异常：" + ex.GetType().Name + " " + ex.Message);
                     return;
                 }
             }
+        }
+
+        /// <summary>
+        /// 把本地 owner 的正式相机跟到**刚写入的**呈现位姿上。
+        ///
+        /// 关键点（逐条对应 T-PLAY1 验收）：
+        ///   · 位置跟随角色**世界坐标**，但方位角/俯角/后距取旧预制体冻结常量
+        ///     （<see cref="PMBattleCameraGeometry.FixedCameraYawDegrees"/>，**没有** owner Yaw 入参）
+        ///     ⇒ 左右方向键不可能再让镜头 90/180 度瞬转，且取景回到旧俯视（yaw −90 / 俯角 68.191）；
+        ///   · 观察目标 = 角色世界位置 + 观察高度（固定目标，不是角色前方点），
+        ///     并用旧链的 SmoothTime（0.08s）临界阻尼跟随；首帧直接贴合、大跳变（出生/瞬移）直接贴合；
+        ///   · 相机位置 = 观察目标 + 固定后向 × （遮挡钳制后的）距离，另得到随距离收紧的近裁面；
+        ///   · 遮挡用**本局隔离物理场景**里的只读球体扫掠（地图白名单 layer mask），
+        ///     探测方向与相机后向同一口径（即按新的 yaw/俯角更新查询），只决定表现层后退距离：
+        ///     **不改**权威碰撞、不参与 Mover 仿真、不需要改 DS；
+        ///   · 只对“正式模式 + 本地 owner”生效：远端 SP 与诊断（胶囊）路径完全不变。
+        ///
+        /// 返回 false 表示已调用 Fail（整局失败）；true 包括“本 rig 不归本路径管”。
+        /// </summary>
+        private static bool UpdateOwnerBattleCamera(Session session, MovementRig rig, PMMoverSyncState state)
+        {
+            PMUnityBattlePresentation battle = rig.BattlePresentation;
+            if (battle == null || battle.Disposed || battle.TestCamera == null)
+            {
+                return true;
+            }
+
+            // 观察目标 = 角色世界位置 + 观察高度（固定目标；不含任何朝向信息）。
+            PMVector3 desiredLookTarget = PMBattleCameraGeometry.ComputeLookTarget(
+                state.Position, PMBattleCameraGeometry.DefaultLookHeightMeters);
+
+            // 旧镜头手感：位置按旧链 SmoothTime 临界阻尼跟随（rotation 是固定常量，不参与平滑）。
+            PMVector3 lookTarget;
+            if (!rig.CameraFollowInitialized)
+            {
+                // 首帧直接贴合：出生/进场/换局不得看到镜头从占位位姿滑过去。
+                lookTarget = desiredLookTarget;
+                rig.CameraLookVelocity = new PMVector3(0f, 0f, 0f);
+                rig.CameraFollowInitialized = true;
+            }
+            else
+            {
+                // 用与子步累加器同源的帧时长（非法/零帧时长时平滑退化为“保持不动”）。
+                float deltaSeconds = (float)(CurrentFrameElapsedMs() / 1000.0);
+
+                lookTarget = PMBattleCameraGeometry.SmoothFollowPosition(
+                    rig.CameraLookTarget, desiredLookTarget, ref rig.CameraLookVelocity,
+                    PMBattleCameraGeometry.FollowSmoothTimeSeconds, deltaSeconds,
+                    PMBattleCameraGeometry.FollowSnapDistanceMeters);
+            }
+
+            rig.CameraLookTarget = lookTarget;
+
+            float occlusion = ProbeBattleCameraOcclusion(session, lookTarget);
+
+            PMBattleCameraPose pose = PMBattleCameraGeometry.ComputeAtLookTarget(
+                lookTarget,
+                PMBattleCameraGeometry.DefaultDistanceMeters,
+                PMBattleCameraGeometry.DefaultYawDegrees,
+                PMBattleCameraGeometry.DefaultPitchDegrees,
+                PMBattleCameraGeometry.DefaultNearClipMeters,
+                occlusion,
+                PMBattleCameraGeometry.MinDistanceMeters,
+                PMBattleCameraGeometry.OcclusionMarginMeters);
+
+            try
+            {
+                battle.ApplyTestCameraPose(pose.CameraPosition, pose.YawDegrees, pose.PitchDegrees,
+                                          pose.NearClipMeters);
+            }
+            catch (Exception ex)
+            {
+                Fail(session, "相机位姿写入异常：" + ex.GetType().Name + " " + ex.Message);
+                return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// 可见障碍投射：从**观察目标**沿“后向”在**本局隔离物理场景**里做一次只读**球体扫掠**。
+        ///
+        /// 参数就是当前帧的观察目标（已包含观察高度与跟随平滑），因此探测起点/方向与
+        /// 相机实际求解口径完全一致（按新的 yaw −90 / 俯角 68.191 更新，最大距离 = 新的后距）。
+        ///
+        /// 为什么用球体扫掠而不是一条无体积射线：相机有体积（近裁面 + 视锥宽度），单条射线会从
+        /// 墙角/棱边擦过去，相机贴墙时仍然穿模。球体半径在纯几何模块里定义为
+        /// <see cref="PMBattleCameraGeometry.ProbeRadiusMeters"/>，再配合安全边距作保守近似。
+        ///
+        /// 边界（为什么这样是安全的）：
+        ///   · 只用 <c>session.Query</c> 绑定的那个 <see cref="PhysicsScene"/>（本地非默认物理世界）
+        ///     与地图白名单 layer mask —— 与运动查询同源，不会打到大厅/旧地图几何；
+        ///   · 只得到**表现层要用的距离**：不移动任何 Transform、不调用 Physics.Simulate、
+        ///     不改任何全局物理开关、更不写权威碰撞（DS 完全不需要参与）；
+        ///   · 忽略 trigger（与地图校验"trigger 不算硬障碍"同口径）；
+        ///   · 命中缓冲饱和、命中起点重叠的处理见下（T-VIS2b）。
+        ///
+        /// 为什么本探测**不可能**打到角色自己（否则会每帧自遮挡）：正式模式的角色表现
+        /// （<c>PMUnityBattlePresentation</c> / 投射物占位球）按契约**不带 Collider**，
+        /// 隔离场景里的 Collider 只有地图烘焙产物那一份；且运动查询也是同一白名单。
+        /// 该结论由代码事实（构造时拒 Collider + 白名单）支撑，不由实机截屏支撑。
+        ///
+        /// 诚实边界（登记为残留风险，不声明"完全防穿墙"）：
+        ///   · 起点（角色头部观察点）嵌在障碍体内时，PhysX 会把它报成 distance ≈ 0 的
+        ///     "起点接触/重叠"且法线不可信：已由
+        ///     <see cref="PMBattleCameraGeometry.ResolveProbeOcclusion"/> 归一为**贴脸距离**
+        ///     （而不是静默当无遮挡），但真实遮挡距离为 0 时无法做到"严格小于它"；
+        ///   · 比探测球（半径 <see cref="PMBattleCameraGeometry.ProbeRadiusMeters"/>）还薄的墙、
+        ///     低矮天花板下的盲区等情形，扫掠可能一次都不命中——那时只能返回无遮挡哨兵，
+        ///     无法强保证不穿墙（要鲁棒需要多次投射/体积裁剪，本轮不做）；
+        ///   · 命中缓冲饱和（count &gt;= 容量）时批量重载不保证有序，被丢弃的命中里理论上可能
+        ///     有更近的一面墙；本方法不静默当无遮挡且计数告警（
+        ///     <see cref="CameraOcclusionSaturationCount"/>），但不能强保证取到的就是最近命中。
+        /// </summary>
+        private static float ProbeBattleCameraOcclusion(Session session, PMVector3 lookTarget)
+        {
+            if (session == null || session.Query == null)
+            {
+                return PMBattleCameraGeometry.NoOcclusionDistance;
+            }
+
+            PhysicsScene scene = session.Query.Scene;
+            if (!scene.IsValid() || scene.Equals(Physics.defaultPhysicsScene))
+            {
+                return PMBattleCameraGeometry.NoOcclusionDistance;
+            }
+
+            PMVector3 back = PMBattleCameraGeometry.BackDirection(
+                PMBattleCameraGeometry.DefaultYawDegrees, PMBattleCameraGeometry.DefaultPitchDegrees);
+
+            Vector3 origin = new Vector3(lookTarget.X, lookTarget.Y, lookTarget.Z);
+            Vector3 direction = new Vector3(back.X, back.Y, back.Z);
+
+            int count = scene.SphereCast(origin, PMBattleCameraGeometry.ProbeRadiusMeters, direction,
+                                         CameraOcclusionHits, PMBattleCameraGeometry.DefaultDistanceMeters,
+                                         session.Query.LayerMask, QueryTriggerInteraction.Ignore);
+            if (count <= 0)
+            {
+                return PMBattleCameraGeometry.NoOcclusionDistance;
+            }
+
+            if (PMBattleCameraGeometry.IsProbeSaturated(count, CameraOcclusionHits.Length))
+            {
+                // 饱和不是"无遮挡"（下面仍取已返回的最近命中），但被丢弃的命中里理论上可能更近：
+                // 只度量 + 首次警告，不静默吞掉（正式防穿墙仍需实机验证）。
+                if (CameraOcclusionSaturationCount == 0)
+                {
+                    HYLDDebug.LogWarning("[PMClientSessionHost] 相机遮挡球扫命中缓冲饱和（count="
+                                         + count.ToString(CultureInfo.InvariantCulture) + "，容量="
+                                         + CameraOcclusionHits.Length.ToString(CultureInfo.InvariantCulture)
+                                         + "）：本次仍取已返回的最近命中，但被丢弃的命中理论上可能更近"
+                                         + "（登记为残留风险，见 Docs/plans/_visual_camera_fix.md）。");
+                }
+
+                CameraOcclusionSaturationCount++;
+            }
+
+            // 批量重载不保证顺序：自己取最近命中，避免取到远处的另一面墙。
+            float nearest = float.PositiveInfinity;
+            int limit = count < CameraOcclusionHits.Length ? count : CameraOcclusionHits.Length;
+
+            for (int i = 0; i < limit; i++)
+            {
+                float distance = CameraOcclusionHits[i].distance;
+                if (float.IsNaN(distance) || distance < 0f) { continue; }
+                if (distance < nearest) { nearest = distance; }
+            }
+
+            // 归一化（T-VIS2b）：只要有一次命中就绝不返回"无遮挡"。
+            // 否则 PhysX 的"起点重叠"（球心已在障碍内，命中 distance ≈ 0）会被 ResolveDistance
+            // 当成 0 = 无可用信息，静默退回想要距离（= 相机穿到墙后）。
+            return PMBattleCameraGeometry.ResolveProbeOcclusion(count, nearest);
         }
 
         /// <summary>
@@ -1439,18 +2475,33 @@ namespace PMNet.Unity
             string label = "uid" + player.Uid + "/net" + player.NetId.Value;
 
             IRigPresentation presentation;
+            PMUnityBattlePresentation battlePresentation = null;
             try
             {
                 if (session.ContentFormal)
                 {
                     // R4-C（C3）正式：C1 烘培的正式角色表现（C2 在构造时校验组件集并拒 DS/Authority）。
-                    // 只为本地 owner 建测试相机（契约 B2：可选、不强制）；相机的销毁由表现层自己负责。
+                    //
+                    // T-PLAY1：相机**不由构造函数隐式创建**（createTestCamera=false）——
+                    // 取景（后距/方位角/俯角/观察高度/FOV/近远裁面）必须从纯几何模块的
+                    // 旧预制体冻结常量**显式**传入宿主唯一一处调用点，避免出现第二份“默认取景”。
                     PMUnityBattlePresentation battle = new PMUnityBattlePresentation(
-                        label, player.Role, session.BattleMap.Manifest, isOwner);
+                        label, player.Role, session.BattleMap.Manifest, false);
                     presentation = new BattleRigPresentation(battle);
+                    battlePresentation = battle;
 
                     if (isOwner)
                     {
+                        // 只为本地 owner 建测试相机（远端 SP 绝不建相机：一局只能有一个本地相机）。
+                        battle.CreateTestCamera(
+                            PMBattleCameraGeometry.DefaultDistanceMeters,
+                            PMBattleCameraGeometry.DefaultYawDegrees,
+                            PMBattleCameraGeometry.DefaultPitchDegrees,
+                            PMBattleCameraGeometry.DefaultLookHeightMeters,
+                            PMBattleCameraGeometry.LegacyPrefabFieldOfViewDegrees,
+                            PMBattleCameraGeometry.LegacyPrefabNearClipMeters,
+                            PMBattleCameraGeometry.LegacyPrefabFarClipMeters);
+
                         // “确保可见”：临时关闭其它已启用相机（防旧主相机遮住新角色），退局时恢复。
                         SuppressOtherCameras(session, battle.TestCamera);
                     }
@@ -1475,7 +2526,16 @@ namespace PMNet.Unity
             rig.Driver = driver;
             rig.Presentation = presentation;
             rig.IsOwner = isOwner;
+            rig.BattlePresentation = battlePresentation;
             session.Movements.Add(rig);
+
+            // 正式 + 本地 owner：本帧的 PumpMovement 会按 predicted 位姿重写相机；
+            // 万一本帧不会再走 PumpMovement（例如刚建完就整局失败），这里先摆一次，
+            // 不让占位位姿被渲染出来。失败已由 Fail 幂等登记，不重复报错。
+            if (isOwner && battlePresentation != null)
+            {
+                UpdateOwnerBattleCamera(session, rig, driver.GetPredictedSync());
+            }
 
             HYLDDebug.Log("[PMClientSessionHost] 运动链已建立 " + label
                           + " role=" + player.Role
@@ -2048,10 +3108,20 @@ namespace PMNet.Unity
         ///   · `plan.FireIntervalMs`（planner 口径）替代原来的 200ms 诊断固定门。
         /// 本地 planner 拒绝（抛物线/无子弹型大招/未知英雄/非法方向）与 DS 裁决拒绝（蓝/能量/间隔…）
         /// **只显示不 fault**；只有 `driver.IsFaulted` 才是整局失败。
+        ///
+        /// T-PLAY4 输入来源（两个源共用同一条上行/预测链，但**瞄准向量不同**）：
+        ///   · **UI**（<see cref="TryQueueUiAttack"/> 入队）：瞄准取 UI 摇杆的世界向量，
+        ///     **独立于 Mover predictedYaw**（这就是“攻击摇杆独立决定弹道”）；
+        ///   · **键盘 F/G**（兑底）：仍按 predicted yaw 推世界前向（与表现层同一口径）。
+        /// 无论哪个源，本次的 planner 方向、枪口偏移与上行方向都是**同一个** <c>forward</c>。
         /// </summary>
         private static void TryCombatAttack(Session session, double wallNowMs)
         {
-            if (!session.NormalAttackEdgeBuffered && !session.SuperAttackEdgeBuffered) { return; }
+            if (!session.NormalAttackEdgeBuffered && !session.SuperAttackEdgeBuffered
+                && !session.UiAttackEdgeBuffered)
+            {
+                return;
+            }
 
             // 边沿纪律与 Mover 输入一致：**先确认本帧真的能尝试开火，再消费边沿**，
             // 否则冻结帧/失去 AP 帧会把按键静静地吃掉。
@@ -2078,10 +3148,19 @@ namespace PMNet.Unity
             MovementRig rig = FindMovementRig(session, owner);
             if (rig == null || rig.Driver == null || rig.Driver.IsDisposed) { return; }
 
-            // 到这里才消费这次按键边沿（后续所有分支都是「本次尝试」的结局）。
-            bool isSuper = session.SuperAttackEdgeBuffered;
+            // 到这里才消费这次输入边沿（后续所有分支都是「本次尝试」的结局）。
+            //
+            // T-PLAY4：三个边沿位（F / G / UI）在**同一个消费点**一起清 —— 主线程统一一次消费，
+            // 不分开“多次消费”，也不会因为某个源先被处理而把另一个源留在队列里发两份上行。
+            // 瞄准向量与 isSuper 必须在清位前取出（UI 的瞄准向量就存在边沿旁边）。
+            bool uiEdge = session.UiAttackEdgeBuffered;
+            bool isSuper = uiEdge ? session.UiAttackIsSuper : session.SuperAttackEdgeBuffered;
+            float uiAimX = session.UiAimWorldX;
+            float uiAimZ = session.UiAimWorldZ;
+
             session.NormalAttackEdgeBuffered = false;
             session.SuperAttackEdgeBuffered = false;
+            session.UiAttackEdgeBuffered = false;
 
             session.AttackAttempts++;
 
@@ -2103,14 +3182,24 @@ namespace PMNet.Unity
                 return;
             }
 
-            // 「Yaw 决定世界前向」：与表现层 Quaternion.Euler(0, yaw, 0) 同一口径。
-            // 世界瞄准方向**只能**来自 Mover 真实 predicted yaw（不接旧输入链的假方向）。
-            double yawRad = (double)predicted.YawDegrees * Math.PI / 180.0;
-            PMVector3 forward = new PMVector3((float)Math.Sin(yawRad), 0f, (float)Math.Cos(yawRad));
-            if (!forward.IsFinite)
+            // 世界瞄准方向：与表现层同一口径，且**同一次攻击只能用一个向量**。
+            //   · UI 源：取 UI 摇杆已校验的世界**单位**向量（独立于 predictedYaw）；
+            //   · 键盘 F/G 源：仍按 Mover 真实 predicted yaw 推世界前向（不接旧输入链的假方向）。
+            PMVector3 forward;
+            if (uiEdge)
+            {
+                forward = new PMVector3(uiAimX, 0f, uiAimZ);
+            }
+            else
+            {
+                double yawRad = (double)predicted.YawDegrees * Math.PI / 180.0;
+                forward = new PMVector3((float)Math.Sin(yawRad), 0f, (float)Math.Cos(yawRad));
+            }
+
+            if (!forward.IsFinite || (forward.X == 0f && forward.Z == 0f))
             {
                 session.AttackDriverRejected++;
-                session.LastAttackError = "瞄准方向非 finite，本次不开火";
+                session.LastAttackError = "瞄准方向非法（非 finite 或零长度），本次不开火";
                 return;
             }
 
@@ -2136,7 +3225,9 @@ namespace PMNet.Unity
                 return;
             }
 
-            // 同一次攻击的 N 颗弹**共用同一个枪口**：预测位置 + yaw 前向 × 0.6m。
+            // 同一次攻击的 N 颗弹**共用同一个枪口**：预测位置 + 瞄准向量 × 0.6m。
+            // 注意：这里的 forward 就是 planner 与上行用的**同一个**向量（UI 时为 UI 摇杆方向），
+            // 不存在“只改 UI 显示、枪口/上行还用 yaw”的分叉。
             PMVector3 origin = predicted.Position + forward * PMProjectileDiagnosticConfig.MuzzleOffsetM;
             if (!origin.IsFinite)
             {
@@ -2488,32 +3579,43 @@ namespace PMNet.Unity
         }
 
         /// <summary>
-        /// R6-C：客户端 `R6.FlushState(now)`（契约固定次序的末步）。
+        /// R6-C / T-LOOP3：客户端 `R6.FlushState(now)`（契约固定次序的末步）。
         ///
         /// AP 侧它在驱动里的唯一职责是**回 ServerCombatResultAckV1**（ACK 不在复制回调里发），
         /// 因此端点已经不可用时直接跳过：发给一个已经没人收的 socket 只会把「正常退场」变成
         /// `SendFailed` fault，而契约明确要求「已知合法 terminal 结果后 DS 正常退出不应当作 Fail」。
+        ///
+        /// 返回值 = **本帧是否真的发出了终局 ACK**（T-LOOP3 「返回大厅」按钮的闸门证据）：
+        ///   · 驱动在终局帧对客户端的唯一上行出口就是 `ServerCombatResultAckV1`（可靠域生成 RPC），
+        ///     因此「<c>PMNetSessionBridge.RpcSent</c> 在**本次** FlushState 调用期间增加」就是
+        ///     「ACK 已发出」的可观测证据（测量窗口只有这一次调用，不含本帧更早/更晚的其它上行）；
+        ///   · 它是**有界约束**：证明「至少一条生成 RPC 已由桥真实发出」，不宣称 socket 送达对端
+        ///     （送达属传输层语义，宿主无法也不应在此断言）。
+        /// 端点不可用/缺桥/驱动 fault/异常一律返回 false（由正常退场路径接管，绝不放行按钮）。
         /// </summary>
-        private static void FlushCombatState(Session session, double wallNowMs)
+        private static bool FlushCombatState(Session session, double wallNowMs)
         {
             PMR6CombatDriver combat = session.CombatDriver;
-            if (combat == null) { return; }
+            if (combat == null) { return false; }
 
             if (combat.IsFaulted || combat.IsDisposed)
             {
                 Fail(session, "R6 战斗驱动不可用（faulted=" + combat.IsFaulted.ToString(CultureInfo.InvariantCulture)
                      + " disposed=" + combat.IsDisposed.ToString(CultureInfo.InvariantCulture)
                      + " reason=" + combat.FaultReason + " " + combat.FaultError + "）");
-                return;
+                return false;
             }
 
-            if (!IsEndpointUsable(session)) { return; }
+            if (!IsEndpointUsable(session)) { return false; }
+
+            PMNetSessionBridge bridge = session.Bridge;
+            long rpcSentBefore = bridge != null ? bridge.RpcSent : 0L;
 
             try { combat.FlushState(wallNowMs); }
             catch (Exception ex)
             {
                 Fail(session, "R6 FlushState 异常：" + ex.GetType().Name + " " + ex.Message);
-                return;
+                return false;
             }
 
             session.CombatFlushes++;
@@ -2521,7 +3623,19 @@ namespace PMNet.Unity
             if (combat.IsFaulted)
             {
                 Fail(session, "R6 战斗驱动失败：" + combat.FaultReason + " " + combat.FaultError);
+                return false;
             }
+
+            if (bridge == null) { return false; }
+
+            bool resultAckSent = bridge.RpcSent > rpcSentBefore;
+            if (session.TerminalResultObserved && resultAckSent)
+            {
+                session.TerminalAckSent = true;
+                session.TerminalAckSends++;
+            }
+
+            return resultAckSent;
         }
 
         /// <summary>
@@ -2556,7 +3670,13 @@ namespace PMNet.Unity
                 if (rig == null || rig.Player == null) { continue; }
 
                 // ① 死亡：冻结**对应** Mover（客户端只吃复制结论，不做存活裁决）。
-                if (rig.Player.CombatDead) { FreezeRigOnce(rig); }
+                if (rig.Player.CombatDead)
+                {
+                    FreezeRigOnce(rig);
+
+                    // T-PLAY4：本人已死 ⇒ 摇杆与排队攻击立即失效（不是等下一帧的禁开火门）。
+                    if (rig.IsOwner) { ClearUiInput(session); }
+                }
 
                 // ② 终局：冻结**全部**运动，停输入/候选，但协议 Pump 继续（等结果退出）。
                 if (rig.Player.CombatMatchEnded) { FreezeOnMatchEnded(session); }
@@ -2712,7 +3832,8 @@ namespace PMNet.Unity
                 session.Hud.SetOutcome(true, hudOutcome, winnerTeamId, localTeamId);
             }
 
-            PublishLastCombatResult(session.Offer != null ? session.Offer.MatchId : null, outcomeId, winnerTeamId);
+            PublishLastCombatResult(session.Offer != null ? session.Offer.MatchId : null, outcomeId, winnerTeamId,
+                                    session.Offer != null ? session.Offer.Identity.TeamId : localTeamId);
 
             HYLDDebug.Log("[PMClientSessionHost] 已收到可信终局结果：match="
                           + (session.Offer != null ? session.Offer.MatchId : "<none>")
@@ -2729,11 +3850,12 @@ namespace PMNet.Unity
         /// <summary>
         /// 发布 static 只读结果快照 + 只读事件（逐订阅者隔离异常：大厅 UI 的问题不能让宿主崩）。
         /// </summary>
-        private static void PublishLastCombatResult(string matchId, uint outcomeId, int winnerTeamId)
+        private static void PublishLastCombatResult(string matchId, uint outcomeId, int winnerTeamId, int localTeamId)
         {
             _lastCombatResultValid = true;
             _lastCombatOutcomeId = outcomeId;
             _lastCombatWinnerTeamId = winnerTeamId;
+            _lastCombatLocalTeamId = localTeamId;
             _lastCombatMatchId = matchId == null ? string.Empty : matchId;
 
             Action<uint, int, string> handler = _combatResultObserved;
@@ -2760,6 +3882,7 @@ namespace PMNet.Unity
             _lastCombatResultValid = false;
             _lastCombatOutcomeId = 0u;
             _lastCombatWinnerTeamId = 0;
+            _lastCombatLocalTeamId = 0;
             _lastCombatMatchId = null;
         }
 
@@ -2810,6 +3933,13 @@ namespace PMNet.Unity
                     session.Hud = null;
                 }
 
+                // T-LOOP3：本会话已按**正常路径**退场 ⇒ 结算弹窗保留只读、按钮变「已返回大厅」（不可点）。
+                //
+                // 为什么只能在这里做：只有「可信终局已存」的会话才会走到 EndSessionNormally
+                // （四个调用点均带 TerminalResultObserved / 已保存结果），因此这里绝不会让
+                // 不可信断线弹出结算结论；HUD 自身还会再核一次「类内是否真有无可信结论」。
+                if (_retainedHud != null) { _retainedHud.SetReturnedToLobby(); }
+
                 // `_active` 已置 null，因此端点 Dispose / 断线事件不可能再重入会话失败（防重入）。
                 if (session.Endpoint != null)
                 {
@@ -2830,7 +3960,8 @@ namespace PMNet.Unity
                 HYLDDebug.Log("[PMClientSessionHost] 会话已正常结束并回到原大厅（" + reason + "，match="
                               + (session.Offer != null ? session.Offer.MatchId : "<none>")
                               + "）：隔离物理场景/表现/端点已释放，只读终局 HUD 保留"
-                              + "（帧驱动保留至下一 Enter / 显式 Stop）");
+                              + "（帧驱动保留至下一 Enter / 显式 Stop）；hud="
+                              + (_retainedHud != null ? _retainedHud.Describe() : "<none>"));
             }
             finally
             {
@@ -2841,6 +3972,196 @@ namespace PMNet.Unity
         /// <summary>
         /// 只读 HUD 每帧推值。**只走 setter**：HUD 自己不读旧链、不写资源、不做判定。
         /// </summary>
+        /// <summary>把本局复制快照转成纯 UI 数据；UI 不接触任何 PMR3Player 引用。</summary>
+        private static bool QueryBattleControlsStatus(out PMUnityBattleUiStatus status)
+        {
+            PMUiCombatSnapshot snapshot;
+            if (!TryGetUiCombatSnapshot(out snapshot))
+            {
+                status = PMUnityBattleUiStatus.Offline();
+                return false;
+            }
+
+            status = new PMUnityBattleUiStatus();
+            status.Hp = snapshot.Hp;
+            status.MaxHp = snapshot.MaxHp;
+            status.Mana = snapshot.Mana;
+            status.SuperEnergy = snapshot.SuperEnergy;
+            status.Dead = snapshot.Dead;
+            status.MatchEnded = snapshot.MatchEnded;
+            status.NormalReady = snapshot.NormalReady;
+            status.SuperReady = snapshot.SuperReady;
+            status.LastReject = snapshot.LastReject;
+            return true;
+        }
+
+        private static void UpdateBattleControls(Session session)
+        {
+            if (session == null) { return; }
+
+            if (session.Controls != null && !session.Controls.IsDisposed)
+            {
+                session.Controls.UpdateStatus();
+            }
+
+            // T-LIVE3：瞄准线在 UI 状态刷新**之后**更新 —— UI 可能刚在本帧（死亡/终局）Cancel 掉摇杆，
+            // 那时 setAim(false) 已经隐藏了线；这里再做一次幂等的状态对齐（只画本端 Owner）。
+            UpdateAimIndicator(session);
+        }
+
+        /// <summary>
+        /// T-LIVE3：按本端 Owner 的预测位姿与当前 UI 瞄准向量更新世界瞄准指示器（纯表现）。
+        ///
+        /// 四条纪律：
+        ///   · **只为本端 AP 画**（<c>session.OwnerPlayer</c> + 它自己的 MovementRig）：远端 SP 与 DS 零绘制；
+        ///   · 几何来自**同一份** <c>PMCombatWeaponPlanner.TryBuild</c> 计划（长度 = Spec.SpeedMps ×
+        ///     Spec.LifetimeMs / 1000，扇形 = Plan.Directions），并按方向缓存（不每帧重建、不每帧分配）；
+        ///   · 任何“本局不再接受输入”的状态（未按住/冻结/终局/死亡/已收结果/fault/身份未核对）一律隐藏；
+        ///   · 预测位姿或几何非法时不写线（指示器自身会拒绝并计数），绝不用 NaN 污染表现。
+        /// </summary>
+        private static void UpdateAimIndicator(Session session)
+        {
+            PMUnityBattleAimIndicator indicator = session.AimIndicator;
+            if (indicator == null || indicator.IsDisposed) { return; }
+
+            if (!session.AimPreviewActive
+                || session.Faulted
+                || session.MovementFrozen
+                || session.MatchEndedFrozen
+                || session.TerminalResultObserved
+                || IsOwnerDeadOrEnded(session))
+            {
+                indicator.Hide();
+                return;
+            }
+
+            PMR3Player owner = session.OwnerPlayer;
+            if (owner == null || !session.OwnerIdentityVerified)
+            {
+                indicator.Hide();
+                return;
+            }
+
+            MovementRig rig = FindMovementRig(session, owner);
+            if (rig == null || rig.Driver == null || rig.Driver.IsDisposed)
+            {
+                indicator.Hide();
+                return;
+            }
+
+            PMMoverSyncState predicted;
+            try
+            {
+                predicted = rig.Driver.GetPredictedSync();
+            }
+            catch (Exception)
+            {
+                indicator.Hide();
+                return;
+            }
+
+            if (!predicted.Position.IsFinite)
+            {
+                // 坏位姿不得进表现（且不能拿它当“画在原点”的借口）。
+                indicator.Hide();
+                return;
+            }
+
+            PMCombatAttackPlan plan = GetOrBuildAimPlan(session, owner);
+            if (plan == null || plan.Spec == null || plan.Directions == null || plan.Directions.Length == 0)
+            {
+                // UnsupportedAttack（抛物线 / 无子弹型大招）等：**不画**（也不 fault）——
+                // 这种形态本来就不会有本次攻击，画一根线反而是伪造。
+                indicator.Hide();
+                return;
+            }
+
+            float distanceMeters;
+            if (!PMUnityBattleAimMath.TryDistanceMeters(plan.Spec.SpeedMps, plan.Spec.LifetimeMs, out distanceMeters))
+            {
+                indicator.Hide();
+                return;
+            }
+
+            // T-AIM：覆盖带只按 DS 玩家几何验算的同一加法口径估计：
+            // 权威弹半径 + 标准玩家胶囊半径 + DS 验证容差。旧 ShootWidth 是美术尺寸，
+            // 不能拿它冒充命中范围。目标缩放/历史/墙遮挡等仍会改变实际结论。
+            float previewHitRadius;
+            if (!PMUnityBattleAimMath.TryPreviewHitRadius(
+                    plan.Spec.RadiusM, PMMoverDefaults.CapsuleRadiusMeters,
+                    PMProjectileValidator.HitToleranceM, out previewHitRadius))
+            {
+                indicator.Hide();
+                return;
+            }
+
+            int fanCount = plan.Directions.Length;
+            if (session.AimFanDirX == null || session.AimFanDirX.Length < fanCount)
+            {
+                session.AimFanDirX = new float[fanCount];
+                session.AimFanDirZ = new float[fanCount];
+            }
+
+            for (int i = 0; i < fanCount; i++)
+            {
+                session.AimFanDirX[i] = plan.Directions[i].X;
+                session.AimFanDirZ[i] = plan.Directions[i].Z;
+            }
+
+            if (indicator.Update(predicted.Position.X, predicted.Position.Y, predicted.Position.Z,
+                                 session.AimFanDirX, session.AimFanDirZ, fanCount,
+                                 distanceMeters, previewHitRadius))
+            {
+                session.AimIndicatorUpdates++;
+            }
+            else
+            {
+                session.AimIndicatorRejected++;
+            }
+        }
+
+        /// <summary>
+        /// T-LIVE3：取（或按当前瞄准向量/形态重建）本轮的**预览计划**。
+        ///
+        /// 缓存键 = 英雄 + 是否大招 + 世界方向（量化到 <see cref="AimPlanDirectionEpsilon"/>）。理由：
+        ///   · 拖动过程中方向连续变化，但同一方向的连续帧不该重复建计划（TryBuild 会分配 Directions 数组）；
+        ///   · 与 <see cref="TryCombatAttack"/> 用的是**同一个** planner 入口 ⇒ 预览与上行必然同源。
+        /// </summary>
+        private static PMCombatAttackPlan GetOrBuildAimPlan(Session session, PMR3Player owner)
+        {
+            if (session.AimPlan != null
+                && session.AimPlanHeroId == owner.CombatHeroId
+                && session.AimPlanIsSuper == session.AimPreviewIsSuper
+                && NearlySameDirection(session.AimPlanDirX, session.AimPlanDirZ,
+                                       session.AimPreviewWorldX, session.AimPreviewWorldZ))
+            {
+                return session.AimPlan;
+            }
+
+            PMCombatAttackPlan plan;
+            PMCombatRejectReason reason;
+            bool built = PMCombatWeaponPlanner.TryBuild(owner.CombatHeroId, session.AimPreviewIsSuper,
+                                                       session.AimPreviewWorldX, session.AimPreviewWorldZ,
+                                                       out plan, out reason);
+
+            // 失败也记缓存键：同一个不可打的方向不必每帧重试 planner（只会在方向/形态变化时再试）。
+            session.AimPlan = built ? plan : null;
+            session.AimPlanHeroId = owner.CombatHeroId;
+            session.AimPlanIsSuper = session.AimPreviewIsSuper;
+            session.AimPlanDirX = session.AimPreviewWorldX;
+            session.AimPlanDirZ = session.AimPreviewWorldZ;
+
+            if (built) { session.AimPlanBuilds++; }
+            return session.AimPlan;
+        }
+
+        /// <summary>T-LIVE3：两个世界方向是否“同向到不必重建计划”（缓存键的量化口径）。</summary>
+        private static bool NearlySameDirection(float ax, float az, float bx, float bz)
+        {
+            return Math.Abs(ax - bx) <= AimPlanDirectionEpsilon
+                   && Math.Abs(az - bz) <= AimPlanDirectionEpsilon;
+        }
+
         private static void UpdateCombatHud(Session session)
         {
             PMUnityCombatHud hud = session.Hud;
@@ -2871,6 +4192,14 @@ namespace PMNet.Unity
                 session.LastAttackError = "DS 拒绝攻击 #" + session.CombatDriver.LastRejectedActivationId
                     + "：" + session.CombatDriver.LastAttackRejectionReason;
             }
+            // T-LOOP3：居中结算弹窗的**唯一**驱动点（每帧一次）。
+            //
+            // 可见性要求「可信终局已存」**且**「本帧终局 ACK 已发」（后者由 FlushCombatState 给出）：
+            //   · 仅复制到 `CombatMatchEnded`（没有可信结果）不会为真；
+            //   · 不可信断线/失败不会为真（Fail 不改这两个位）。
+            // HUD 自身还会再 fail closed 一次（无结论或缺 ACK 证据时拒绘并计数）。
+            hud.SetResultPanel(session.TerminalResultObserved, session.TerminalAckSent);
+
             hud.SetNotice(session.LastAttackError);
         }
 
@@ -2899,6 +4228,7 @@ namespace PMNet.Unity
             return "combat identity=" + (session.OwnerIdentityVerified ? 1 : 0).ToString(CultureInfo.InvariantCulture)
                    + " ended=" + (session.MatchEndedFrozen ? 1 : 0).ToString(CultureInfo.InvariantCulture)
                    + " terminal=" + (session.TerminalResultObserved ? 1 : 0).ToString(CultureInfo.InvariantCulture)
+                   + " terminalAck=" + (session.TerminalAckSent ? 1 : 0).ToString(CultureInfo.InvariantCulture)
                    + " pumps=" + session.CombatPumps.ToString(CultureInfo.InvariantCulture)
                    + " flushes=" + session.CombatFlushes.ToString(CultureInfo.InvariantCulture)
                    + " attacks=" + session.AttackAttempts.ToString(CultureInfo.InvariantCulture)
@@ -2909,7 +4239,22 @@ namespace PMNet.Unity
                    + " skippedDead=" + session.TargetsSkippedDead.ToString(CultureInfo.InvariantCulture)
                    + " skippedTeam=" + session.TargetsSkippedTeam.ToString(CultureInfo.InvariantCulture)
                    + " lastError=" + (string.IsNullOrEmpty(session.LastAttackError) ? "<none>" : session.LastAttackError)
-                   + " driver{" + driverText + "}";
+                   + " ui{move=" + session.UiMoveAccepted.ToString(CultureInfo.InvariantCulture)
+                   + "/" + session.UiMoveRejected.ToString(CultureInfo.InvariantCulture)
+                   + " attack=" + session.UiAttackQueued.ToString(CultureInfo.InvariantCulture)
+                   + "/" + session.UiAttackRejected.ToString(CultureInfo.InvariantCulture)
+                   + " dup=" + session.UiAttackDuplicate.ToString(CultureInfo.InvariantCulture) + "}"
+                   + " aim{push=" + session.AimPreviewPushes.ToString(CultureInfo.InvariantCulture)
+                   + "/" + session.AimPreviewRejected.ToString(CultureInfo.InvariantCulture)
+                   + " clearr=" + session.AimPreviewClears.ToString(CultureInfo.InvariantCulture)
+                   + " plans=" + session.AimPlanBuilds.ToString(CultureInfo.InvariantCulture)
+                   + " updates=" + session.AimIndicatorUpdates.ToString(CultureInfo.InvariantCulture)
+                   + " rejected=" + session.AimIndicatorRejected.ToString(CultureInfo.InvariantCulture)
+                   + " indicator=" + (session.AimIndicator != null ? session.AimIndicator.Describe()
+                                                                  : (session.AimIndicatorError ?? "<none>"))
+                   + "}"
+                   + " driver{" + driverText + "}"
+                   + " hud{" + (session.Hud != null ? session.Hud.Describe() : "<none>") + "}";
         }
 
         /// <summary>
@@ -2979,6 +4324,10 @@ namespace PMNet.Unity
             if (session.MovementFrozen) { return; }
             session.MovementFrozen = true;
 
+            // T-PLAY4：冻结即“本局不再接受输入”——UI 推杆与已排队的攻击边沿一并清掉，
+            // 否则解冻/退场时会把冻结期间的手势补发出去（契约：结束/换局不带出 UI 输入）。
+            ClearUiInput(session);
+
             for (int i = 0; i < session.Movements.Count; i++)
             {
                 MovementRig rig = session.Movements[i];
@@ -3042,6 +4391,35 @@ namespace PMNet.Unity
         private static void ReleaseSession(Session session)
         {
             if (session == null) { return; }
+
+            // 先摘除本局 UI 的委托和指针监听，再拆端点/副本；新局与正常终局都不留旧控件。
+            PMUnityBattleControls controls = session.Controls;
+            session.Controls = null;
+            if (controls != null)
+            {
+                try { controls.Dispose(); }
+                catch (Exception ex)
+                {
+                    HYLDDebug.LogWarning("[PMClientSessionHost] 释放局内操控 UI 异常：" + ex.GetType().Name);
+                }
+            }
+
+            // T-LIVE3：世界瞄准指示器（纯表现）随会话释放（幂等）。
+            // 它自己的几何缓冲也挂在会话对象上，随引用一起消失，不跨局。
+            if (session.AimIndicator != null)
+            {
+                try { session.AimIndicator.Dispose(); }
+                catch (Exception ex)
+                {
+                    HYLDDebug.LogWarning("[PMClientSessionHost] 释放世界瞄准指示器异常：" + ex.GetType().Name);
+                }
+            }
+
+            session.AimIndicator = null;
+            session.AimIndicatorError = null;
+
+            // T-PLAY4：会话级清理里也清一次 UI 输入（显式 Stop / 换局 / 构造失败路径都要干净）。
+            ClearUiInput(session);
 
             // R6-C：端点也必须在这里兜底释放（幂等）。
             //
@@ -3132,6 +4510,8 @@ namespace PMNet.Unity
             session.MatchEndedFrozen = false;
             session.TerminalResultObserved = false;
             session.TerminalResultWallMs = 0.0;
+            session.TerminalAckSent = false;
+            session.IdentityToken = 0L;
             session.PendingDisconnectReason = null;
             session.NormalAttackEdgeBuffered = false;
             session.SuperAttackEdgeBuffered = false;
@@ -3205,6 +4585,20 @@ namespace PMNet.Unity
             return string.Equals(a.MatchId, b.MatchId, StringComparison.Ordinal) && a.Epoch == b.Epoch;
         }
 
+        /// <summary>
+        /// T-LOOP6：本机是否已为该对局落定**可信终局**（“已结束”的唯一本地判据）。
+        ///
+        /// 为什么不用“收到过结果 RPC”或“看起来像结束”当判据：那些都会把未校验/冲突的包
+        /// 当成结论，从而把一个**还在打的对局**误判成已结束（或相反，把已结束的对局恢复）。
+        /// 这里只认被幂等保存下来的那份结果快照（见 <see cref="PublishLastCombatResult"/>）。
+        /// </summary>
+        private static bool IsMatchAlreadyEnded(string matchId)
+        {
+            return _lastCombatResultValid
+                && !string.IsNullOrEmpty(matchId)
+                && string.Equals(_lastCombatMatchId, matchId, StringComparison.Ordinal);
+        }
+
         private static void LogHeartbeat(Session session)
         {
             HYLDDebug.Log("[PMClientSessionHost] heartbeat tick=" + session.TickCount.ToString(CultureInfo.InvariantCulture)
@@ -3216,6 +4610,7 @@ namespace PMNet.Unity
                           + " udpOut=" + session.Endpoint.DatagramsSent.ToString(CultureInfo.InvariantCulture)
                           + " handshakeRej=" + session.Endpoint.HandshakeRejections.ToString(CultureInfo.InvariantCulture)
                           + " | " + DescribeMovements(session)
+                          + " | " + DescribeRigChain(session)
                           + " | " + DescribeProjectiles(session)
                           + " | " + DescribeCombat(session));
         }
@@ -3254,6 +4649,79 @@ namespace PMNet.Unity
                    + " isolated=" + (session.Query != null && session.Query.Scene.IsValid()
                                       && !session.Query.Scene.Equals(Physics.defaultPhysicsScene) ? 1 : 0)
                    + " frozen=" + (session.MovementFrozen ? 1 : 0);
+        }
+
+        /// <summary>
+        /// T-MOVE2：仅在既有低频心跳打印逐副本位置链（不改仿真、不每帧读额外快照）。
+        /// raw=本副本最后收到的复制字节，accepted=Driver 确实采纳数，shown=最近一次
+        /// ApplyInterpolated/Predicted 的输入，root=Unity 最终可见根位置。四个值分开，
+        /// 才能辨别“包里本地预测在动，但 DS 根本没前进”和“DS 在动但 SP/表现卡住”。
+        /// </summary>
+        private static string DescribeRigChain(Session session)
+        {
+            if (session == null) { return "rigChain=<none>"; }
+
+            string summary = "rigChain=";
+            for (int i = 0; i < session.Movements.Count && i < 8; i++)
+            {
+                MovementRig rig = session.Movements[i];
+                if (i > 0) { summary += ";"; }
+                if (rig == null || rig.Player == null || rig.Driver == null)
+                {
+                    summary += "[missing]";
+                    continue;
+                }
+
+                PMR4MovementDriver driver = rig.Driver;
+                summary += "[net" + rig.Player.NetId.Value.ToString(CultureInfo.InvariantCulture)
+                    + (rig.IsOwner ? "/AP" : "/SP")
+                    + " stream=" + driver.StreamVersion.ToString(CultureInfo.InvariantCulture)
+                    + " queued=" + driver.SnapshotPayloadsQueued.ToString(CultureInfo.InvariantCulture)
+                    + " accepted=" + driver.SnapshotPayloadsApplied.ToString(CultureInfo.InvariantCulture)
+                    + " decodeBad=" + driver.SnapshotDecodeFailed.ToString(CultureInfo.InvariantCulture)
+                    + " idBad=" + driver.SnapshotRejectedIdentity.ToString(CultureInfo.InvariantCulture)
+                    + " worldBad=" + driver.SnapshotRejectedWorldVersion.ToString(CultureInfo.InvariantCulture)
+                    + " drops=" + driver.SnapshotQueueDrops.ToString(CultureInfo.InvariantCulture);
+
+                byte[] payload = rig.Player.MovementSnapshotPayload;
+                PMR4MovementSnapshotBlob raw;
+                string error;
+                if (payload != null && PMR4MovementCodec.TryDecodeSnapshot(payload, 0, payload.Length,
+                    PMR4PayloadKind.Snapshot, out raw, out error))
+                {
+                    summary += " rawFrame=" + raw.OutputFrame.ToString(CultureInfo.InvariantCulture)
+                        + " raw=" + FormatRigPosition(raw.Sync.Position);
+                }
+                else
+                {
+                    summary += " raw=<invalid>";
+                }
+
+                PMUnityBattlePresentation battle = rig.BattlePresentation;
+                if (battle != null && !battle.Disposed && battle.Root != null)
+                {
+                    Vector3 root = battle.Root.position;
+                    summary += " apply=" + battle.ApplyCount.ToString(CultureInfo.InvariantCulture)
+                        + " shown=" + FormatRigPosition(battle.LastApplied.Position)
+                        + " root=" + FormatRigPosition(new PMVector3(root.x, root.y, root.z));
+                }
+                else
+                {
+                    summary += " visual=<none>";
+                }
+
+                summary += " frozen=" + (rig.DeathFrozen || driver.IsFrozen ? 1 : 0) + "]";
+            }
+
+            if (session.Movements.Count > 8) { summary += ";more=" + (session.Movements.Count - 8); }
+            return summary;
+        }
+
+        private static string FormatRigPosition(PMVector3 pos)
+        {
+            return "(" + pos.X.ToString("0.00", CultureInfo.InvariantCulture)
+                + "," + pos.Y.ToString("0.00", CultureInfo.InvariantCulture)
+                + "," + pos.Z.ToString("0.00", CultureInfo.InvariantCulture) + ")";
         }
 
         /// <summary>单行诊断摘要（测试宿主/日志对账用）。</summary>

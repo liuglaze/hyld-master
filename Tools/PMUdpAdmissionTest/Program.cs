@@ -65,6 +65,7 @@ namespace PMUdpAdmissionTest
             Section("H. 最大报文与帧边界", TestBoundaries);
             Section("I. 主集成复核：墓碑淘汰 fail-closed / 摘要所有权 / 幂等 / 解析健壮性", TestReviewFindings);
             Section("J. 端点 IsDisposed 只读标志：生命周期前后 / 幂等 Dispose / 语义不变", TestEndpointDisposedFlag);
+            Section("K. 续局（PMDSR1）握手重试预算与准入保守性（真实 UDP）", TestResumeHandshakeBudget);
 
             Console.WriteLine();
             if (_failures.Count == 0)
@@ -1475,6 +1476,264 @@ namespace PMUdpAdmissionTest
 
             // 两边都 Dispose 后，服务端端点的连接数仍为 0（Dispose 清空会话的原有语义不变）。
             CheckEq(scenario.ServerEndpoint.ConnectionCount, 0, "全部 Dispose 后服务端端点连接数仍为 0");
+        }
+
+        // =================================================================================
+        //  K. 续局（PMDSR1）握手重试预算与准入保守性
+        // =================================================================================
+
+        /// <summary>
+        /// 不回复任何 ClientHello 的「黑洞」DS：只接收、不回包。
+        ///
+        /// 为什么需要它：客户端握手预算（次数/间隔）是一条**真实 socket 上的时间性质**，
+        /// 替身 socket 或纯常量断言都证明不了「它真的按 24×250ms / 80×250ms 才放弃」。
+        /// </summary>
+        private sealed class BlackholeDs : IDisposable
+        {
+            private readonly Socket _socket;
+
+            public BlackholeDs()
+            {
+                _socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                _socket.Blocking = false;
+                _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            }
+
+            public int Port
+            {
+                get { return ((IPEndPoint)_socket.LocalEndPoint).Port; }
+            }
+
+            /// <summary>读掉对端发来的握手帧（读而不回），避免接收缓冲被填满影响计数。</summary>
+            public void Drain()
+            {
+                byte[] buffer = new byte[2048];
+                while (true)
+                {
+                    try
+                    {
+                        if (_socket.Receive(buffer) <= 0) { return; }
+                    }
+                    catch (SocketException) { return; }        // WouldBlock：已读空
+                    catch (ObjectDisposedException) { return; }
+                }
+            }
+
+            public void Dispose()
+            {
+                try { _socket.Close(); } catch (Exception) { }
+            }
+        }
+
+        /// <summary>
+        /// 按冻结契约判断某个「握手上限 + 是否续局」组合是否合法。
+        /// 它的存在是为了**负例自证**：把修前行为套进来必须被判为不满足契约。
+        /// </summary>
+        private static bool BudgetMatchesContract(int helloLimit, bool isResume)
+        {
+            return isResume
+                ? helloLimit == PMUdpSessionEndpoint.MaxHandshakeHellosResume
+                : helloLimit == PMUdpSessionEndpoint.MaxHandshakeHellos;
+        }
+
+        /// <summary>驱动一个「对端永不回包」的客户端端点直到它放弃握手，返回用掉的虚拟毫秒。</summary>
+        private static long PumpUntilClientHandshakeFailure(PMUdpSessionEndpoint client, BlackholeDs blackhole,
+                                                            int maxRounds)
+        {
+            long startMs = _nowMs;
+            for (int round = 0; round < maxRounds && !client.ClientFailed; round++)
+            {
+                client.Pump(_nowMs, _nowUnix);
+                if (blackhole != null) { blackhole.Drain(); }
+                if (client.ClientFailed) { break; }
+
+                _nowMs += PMUdpSessionEndpoint.HandshakeRetryIntervalMs;
+            }
+
+            return _nowMs - startMs;
+        }
+
+        private static void CheckContains(string actual, string fragment, string label)
+        {
+            Check(actual != null && actual.IndexOf(fragment, StringComparison.Ordinal) >= 0,
+                  label + "（实际：" + (actual ?? "<null>") + "）");
+        }
+
+        private static bool BytesEqual(byte[] a, byte[] b)
+        {
+            if (ReferenceEquals(a, b)) { return true; }
+            if (a == null || b == null || a.Length != b.Length) { return false; }
+
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != b[i]) { return false; }
+            }
+
+            return true;
+        }
+
+        private static void TestResumeHandshakeBudget()
+        {
+            // ---- ① 两条预算的常量与窗口（先钉住口径，再验行为）----
+            CheckEq(PMUdpSessionEndpoint.HandshakeRetryIntervalMs, 250, "K1 握手重试间隔两种预算共用 250ms（本次不变）");
+            CheckEq(PMUdpSessionEndpoint.MaxHandshakeHellos, 24, "K2 常规入场预算保持 24 次（本次不改）");
+            CheckEq(PMUdpSessionEndpoint.MaxHandshakeHellosResume, 80, "K3 续局预算 = 80 次");
+            CheckEq(PMUdpSessionEndpoint.ResumeHandshakeWindowMs, 20000, "K4 续局窗口 = 80×250ms = 20s");
+            CheckEq(PMUdpSessionEndpoint.MaxHandshakeHellos * PMUdpSessionEndpoint.HandshakeRetryIntervalMs, 6000,
+                    "K5 常规窗口 = 24×250ms = 6s（既有预算不变）");
+
+            // 为什么续局必须更长：DS 侧旧 UDP 会话要按 Transport 空闲超时（10s）先腾出 uid。
+            const int TransportIdleTimeoutMs = 10000;
+            Check(PMUdpSessionEndpoint.ResumeHandshakeWindowMs >= TransportIdleTimeoutMs,
+                  "K6 续局窗口覆盖 DS 旧连接空闲释放（10s）所需时间");
+            Check(PMUdpSessionEndpoint.MaxHandshakeHellos * PMUdpSessionEndpoint.HandshakeRetryIntervalMs
+                  < TransportIdleTimeoutMs,
+                  "K7 常规 6s 窗口不足以等 DS 腾位（这正是续局需要更长预算的根因）");
+            Check(PMUdpSessionEndpoint.ResumeHandshakeWindowMs <= 30000,
+                  "K8 续局窗口仍落在冻结的 30s 断线宽限之内");
+
+            // ---- ①-b 检出力自证：同样的断言套在「修前行为」上必须失败 ----
+            Check(!BudgetMatchesContract(24, true),
+                  "K9 【负例】修前行为（续局也用 24 上限）必须被判为不满足契约");
+            Check(BudgetMatchesContract(80, true), "K10 续局用 80 上限满足契约");
+            Check(BudgetMatchesContract(24, false), "K11 常规用 24 上限满足契约（续局例外没有顺手放宽常规）");
+            Check(!BudgetMatchesContract(80, false),
+                  "K12 【负例】常规被放宽到 80 必须被判为违约");
+
+            // ---- ② 真实 localhost UDP：对端永不回包时的放弃时机 ----
+            {
+                TicketAuthority authority = CreateAuthority(TestMatchId, TestProtocolHash, _nowUnix);
+                PMDsRosterIdentity idA = Identity(UidA, 1);
+                byte[] ticket = IssueTicket(authority, idA, 120);
+
+                using (BlackholeDs blackhole = new BlackholeDs())
+                {
+                    WorldFixture world = CreateWorld(false);
+                    PMUdpSessionEndpoint normal = PMUdpSessionEndpoint.OpenClient(
+                        CreateOffer(ticket, idA, "127.0.0.1", blackhole.Port), world.Bridge, TestTransportConfig());
+
+                    List<string> failures = new List<string>();
+                    normal.Failed += delegate(string m) { failures.Add(m); };
+
+                    Check(!normal.IsResumeHandshake, "K13 常规 PMDS1 offer 不进入续局模式");
+                    CheckEq(normal.HandshakeHelloLimit, 24, "K14 常规 offer 的握手上限 = 24");
+
+                    long elapsed = PumpUntilClientHandshakeFailure(normal, blackhole, 400);
+
+                    Check(normal.ClientFailed, "K15 常规：最终明确失败（不无限重试）");
+                    CheckEq(normal.HandshakeClient.HellosSent, 24, "K16 常规：正好 24 次 ClientHello 后放弃");
+                    CheckEq(elapsed, 6000, "K17 常规：用时 = 24×250ms（每 250ms 一次，无爆发）");
+                    CheckEq(normal.DatagramsSent, 24, "K18 常规：除握手之外没有多发任何数据报");
+                    CheckContains(failures.Count > 0 ? failures[failures.Count - 1] : null, "入局握手超时",
+                                  "K19 常规失败文案 = 入局握手超时");
+
+                    normal.Dispose();
+                }
+
+                using (BlackholeDs blackhole = new BlackholeDs())
+                {
+                    WorldFixture world = CreateWorld(false);
+                    PMDsEntryOffer resume = CreateOffer(ticket, idA, "127.0.0.1", blackhole.Port);
+                    resume.IsResume = true;
+                    PMUdpSessionEndpoint resumed = PMUdpSessionEndpoint.OpenClient(resume, world.Bridge, TestTransportConfig());
+
+                    List<string> failures = new List<string>();
+                    resumed.Failed += delegate(string m) { failures.Add(m); };
+
+                    Check(resumed.IsResumeHandshake, "K20 续局 PMDSR1 offer 进入续局模式");
+                    CheckEq(resumed.HandshakeHelloLimit, 80, "K21 续局 offer 的握手上限 = 80");
+
+                    long elapsed = PumpUntilClientHandshakeFailure(resumed, blackhole, 400);
+
+                    Check(resumed.ClientFailed, "K22 续局：仍然**有界**失败（不是无限重试）");
+                    CheckEq(resumed.HandshakeClient.HellosSent, 80, "K23 续局：正好 80 次 ClientHello 后放弃");
+                    CheckEq(elapsed, 20000, "K24 续局：用时 = 80×250ms = 20s（有界等待，不爆发）");
+                    CheckEq(resumed.DatagramsSent, 80, "K25 续局：除握手之外没有多发任何数据报");
+                    CheckContains(failures.Count > 0 ? failures[failures.Count - 1] : null, "续局握手超时",
+                                  "K26 续局失败文案明确区分于常规入场");
+
+                    resumed.Dispose();
+                }
+            }
+
+            // ---- ③ 真实 DS：预算变长 ≠ 准入变松 ----
+            TicketAuthority authority3 = CreateAuthority(TestMatchId, TestProtocolHash, _nowUnix);
+            PMDsRosterIdentity idA3 = Identity(UidA, 1);
+            byte[] ticketA = IssueTicket(authority3, idA3, 120);
+            PMDsRosterIdentity idB3 = Identity(UidB, 2);
+            byte[] ticketB = IssueTicket(authority3, idB3, 120);
+
+            List<PMDsBootstrapPlayer> roster = new List<PMDsBootstrapPlayer>();
+            roster.Add(new PMDsBootstrapPlayer(idA3, ticketA));
+            roster.Add(new PMDsBootstrapPlayer(idB3, ticketB));
+            PMDsBootstrappedMatch boot = BuildBoot(authority3, roster.ToArray());
+
+            WorldFixture serverWorld = CreateWorld(true);
+
+            // 时序设计（全部用受控时钟，不真等）：
+            //   · 客户端 keepalive = 300ms（"旧会话"靠它维持存活），
+            //   · 服务端端点空闲超时 = 1200ms（> keepalive，所以只要旧客户端还在 Pump，旧会话就不会被清掉；
+            //     一旦停止 Pump，1800ms 的空转就能让它按端点空闲超时释放 uid）。
+            PMTransportConfig clientConfig = TestTransportConfig();
+            clientConfig.KeepAliveIntervalMs = 300L;
+
+            PMUdpSessionEndpoint server = PMUdpSessionEndpoint.OpenServer(boot, serverWorld.Bridge, "127.0.0.1", 0,
+                                                                        TestTransportConfig(), 1200);
+
+            WorldFixture oldWorld = CreateWorld(false);
+            PMUdpSessionEndpoint oldClient = PMUdpSessionEndpoint.OpenClient(
+                CreateOffer(ticketA, idA3, "127.0.0.1", server.BoundPort), oldWorld.Bridge, clientConfig);
+
+            bool activated = PumpUntil(
+                delegate { return server.ConnectionCount == 1 && oldClient.ClientConnection != null; },
+                200, server, oldClient);
+            Check(activated, "K27 前置：旧会话经真实 localhost UDP 正常激活（常规 PMDS1）");
+
+            // ③-a 旧会话仍活着：同 uid 的新票换端点必须被拒（长等不得换准入）。
+            authority3.Issuer.Revoke(UidA);
+            byte[] ticketANew = IssueTicket(authority3, idA3, 120);
+            Check(!BytesEqual(ticketA, ticketANew), "K28 重签确实换了新票字节（新 Nonce）");
+
+            WorldFixture resumeWorld = CreateWorld(false);
+            PMDsEntryOffer resumeOffer = CreateOffer(ticketANew, idA3, "127.0.0.1", server.BoundPort);
+            resumeOffer.IsResume = true;
+            PMUdpSessionEndpoint resumeClient = PMUdpSessionEndpoint.OpenClient(
+                resumeOffer, resumeWorld.Bridge, clientConfig);
+
+            PumpFor(60, server, oldClient, resumeClient); // 60×20ms = 1200ms，约 5 次 ClientHello
+
+            Check(!resumeClient.ClientFailed, "K29 被拒时续局端点不立即失败（按续局预算继续等旧连接腾位）");
+            CheckGt(resumeClient.HandshakeClient.HellosSent, 3, "K30 续局端点确实在持续重试 ClientHello");
+            CheckEq(server.ConnectionCount, 1, "K31 旧会话仍在时服务端连接数保持 1（续局不得顶掉活跃会话）");
+            Check(resumeClient.ClientConnection == null, "K32 续局端点在旧会话释放前未激活");
+            CheckGt(server.Ledger.Stats.RejectedUidBusy, 0, "K33 服务端按 uid 占用明确拒绝该消费（且无回包）");
+
+            // ③-b 旧会话断线：只推服务端（旧客户端不再 Pump ⇒ 无入站流量），等它按端点空闲超时释放 uid。
+            // 注意这里**不能**同时推续局客户端：否则旧会话一被清掉、续局就被接纳，
+            // 连接数会立刻回到 1，反而看不出“旧会话真的被释放了”。
+            PumpFor(90, server); // 90×20ms = 1800ms > 1200ms 空闲超时
+            CheckEq(server.ConnectionCount, 0, "K34 旧会话已按端点空闲超时释放（续局必须等这一步）");
+
+            bool resumeAccepted = PumpUntil(delegate { return resumeClient.ClientConnection != null; },
+                                     200, server, resumeClient);
+            Check(resumeAccepted, "K35 旧会话释放后，同 uid 的新票（PMDSR1）经真实 UDP 被接纳");
+            CheckEq(server.ConnectionCount, 1, "K36 续局后服务端连接数回到 1（没有并存的第二权威）");
+            Check(resumeClient.IsResumeHandshake, "K37 客户端端点按续局预算重试（IsResumeHandshake=true）");
+            CheckEq(resumeClient.HandshakeHelloLimit, 80, "K38 续局端点握手上限 = 80");
+            CheckGt(resumeClient.HandshakeClient.HellosSent, 0, "K39 续局端点确实发过 ClientHello");
+            CheckEq(server.Ledger.Stats.ActiveBindings, 1, "K40 服务端账本只剩 1 个存活绑定（旧绑定已释放）");
+
+            // ③-c 长等不放大 DS 资源：服务端预算/上限一个都不改。
+            CheckEq(PMUdpSessionEndpoint.MaxBatchDatagramsPerPump, 64, "K41 每 Pump 收包预算不变（80 次重试不会一次灌进 DS）");
+            CheckEq(PMUdpSessionEndpoint.DefaultSessionIdleTimeoutMs, 30000,
+                    "K42 DS 端点空闲超时默认值不变（靠客户端等，不靠 DS 加长占用）");
+            CheckEq(server.HandshakeHelloLimit, 0, "K43 服务端端点的握手上限不适用（0）：续局预算只在客户端生效");
+            Check(!server.IsResumeHandshake, "K44 服务端不因收到续局票而进入续局模式（资源不放大）");
+            CheckEq(server.ConnectionCount, 1, "K45 长等全程服务端连接数上限未被突破（仍 <= 名册人数）");
+
+            resumeClient.Dispose();
+            oldClient.Dispose();
+            server.Dispose();
         }
 
         // =================================================================================

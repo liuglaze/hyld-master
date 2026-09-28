@@ -298,6 +298,35 @@ namespace PMNet.Weaving.Editor
             return Path.GetFullPath(Path.Combine(unityProjectRoot, path));
         }
 
+        /// <summary>
+        /// 仅用 Unity 编译管线明确列出的预编译引用寻找 Cecil 搜索目录；不递归扫 Assets，
+        /// 不把不存在的 DLL 或相对于外部工具 cwd 的路径当成可用引用。
+        /// Unity 的相对引用路径以项目根为基准，目录去重但不复制/修改任何第三方 DLL。
+        /// </summary>
+        public static List<string> CollectCompiledReferenceDirectories(IList<string> references, string unityProjectRoot)
+        {
+            List<string> dirs = new List<string>();
+            HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (references == null || !IsFullyQualifiedPath(unityProjectRoot)) return dirs;
+            for (int i = 0; i < references.Count; i++)
+            {
+                string reference = references[i];
+                if (string.IsNullOrEmpty(reference)) continue;
+                try
+                {
+                    if (Path.IsPathRooted(reference) && !IsFullyQualifiedPath(reference)) continue;
+                    string full = Path.GetFullPath(Path.IsPathRooted(reference)
+                        ? reference : Path.Combine(unityProjectRoot, reference));
+                    if (!string.Equals(Path.GetExtension(full), ".dll", StringComparison.OrdinalIgnoreCase)
+                        || !File.Exists(full)) continue;
+                    string dir = Path.GetDirectoryName(full);
+                    if (!string.IsNullOrEmpty(dir) && seen.Add(dir)) dirs.Add(dir);
+                }
+                catch (Exception) { /* Unity 给的引用路径无效：不能猜目录，交给编织器明确失败。 */ }
+            }
+            return dirs;
+        }
+
         public static List<string> CollectPlayerScriptDllCandidates(IList<string> reportFilePaths)
         {
             List<string> candidates = new List<string>();

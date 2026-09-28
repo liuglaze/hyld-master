@@ -19,6 +19,10 @@ namespace PMDsHostCheck
     ///      OnDestroy / OnApplicationQuit 重复到达时 Dispose 幂等。
     ///   B) 结构：读真实源码做 token 断言 —— 旧路由/裸 socket/线程/诊断 MainPack 不得复活，
     ///      run_ds 生成器必须要求 bootstrap（不得再诱导裸 -port 启动），GlueCheck 不再 include 已删目录。
+    ///   C) T-LOOP5 结构：读真实 PMDsSessionHost.cs 做 token/次序断言 —— 断线宽限常量与
+    ///      PMR4DisconnectGraceWindow 同源、重绑入口存在、升流排在 _endpoint.Pump 之后、
+    ///      且 Unbind/core.Disconnect **排在宽限判定之后**（一断线就判负的旧口径不得回复）。
+    ///      本节仅静态断言，真实 UDP 断开与 30s 实机时长属 T-LOOP8。
     ///
     /// 边界：本门禁只证明 wrapper 自身的控制流与结构事实。真实 PMDsSessionHost 的装配与真实 Unity
     /// 运行期行为不在覆盖范围内（分别由 PMUnityGlueCheck / PMClientCheck 的编译面与用户实机验收承担）。
@@ -48,6 +52,7 @@ namespace PMDsHostCheck
             RunWrapperBehaviourChecks();
             RunExceptionChecks();
             RunStructuralChecks(repoRoot);
+            RunTLoop5StructuralChecks(repoRoot);
 
             Console.WriteLine();
             Console.WriteLine("===== 结果：通过 " + _passed + " / 失败 " + _failed + " =====");
@@ -256,6 +261,75 @@ namespace PMDsHostCheck
             string glueText = ReadText(repoRoot, "Tools/PMUnityGlueCheck/PMUnityGlueCheck.csproj");
             Check(glueText.IndexOf(@"Server\Net\**", StringComparison.Ordinal) < 0,
                 "PMUnityGlueCheck 不再 include Server/Net/**");
+        }
+
+        // =================================================================================
+        //  C. T-LOOP5 结构门（**只读真实源码做 token 断言**，不冒充实机）
+        // =================================================================================
+
+        /// <summary>
+        /// T-LOOP5（原局断线续玩）的 DS 侧形状门。
+        ///
+        /// **本节的边界必须说清楚**：它只读 <c>PMDsSessionHost.cs</c> 的**代码**做 token/次序断言
+        /// （先剥注释，因此文档里提到的名字不会造成假阳性），证明的是「宽限/重绑的接线还在、
+        /// 且清理排在宽限判定之后」。它**不**证明：真实 UDP 断开、30s 真实时长、真实 Unity 宿主时序
+        /// —— 那些属 T-LOOP8 实机验收（子任务不得把本节写成实机通过）。
+        ///
+        /// 为何必须卡「Unbind 在宽限判定之后」这条次序：把两者换位就是「一断线就判负」，
+         /// 而那正是 T-LOOP5 要修掉的旧口径；这是删/改代码时最容易静默倒退的一步。
+        /// </summary>
+        private static void RunTLoop5StructuralChecks(string repoRoot)
+        {
+            Console.WriteLine();
+            Console.WriteLine("---- C. T-LOOP5 断线宽限结构门（读真实 PMDsSessionHost.cs；仅静态断言，不冒充实机）----");
+
+            string text = ReadText(repoRoot, "Client/Assets/Scripts/Server/Boot/PMDsSessionHost.cs");
+            string code = StripComments(text);
+
+            Check(code.IndexOf("DisconnectGraceMs", StringComparison.Ordinal) >= 0,
+                "宿主有显式断线宽限常量（不再「一断线就清理」）");
+            Check(code.IndexOf("PMR4DisconnectGraceWindow.DefaultGraceMs", StringComparison.Ordinal) >= 0,
+                "宽限常量与 PMR4DisconnectGraceWindow 同源（不另造第二个数字）");
+            Check(code.IndexOf("HandleReconnect", StringComparison.Ordinal) >= 0,
+                "同 uid 新端点走重绑入口（不 Spawn 第二个 NetId）");
+            Check(code.IndexOf("SuspendAuthorityForDisconnect", StringComparison.Ordinal) >= 0,
+                "宽限内挂起权威运动（不采纳输入 / 不推进）");
+            Check(code.IndexOf("ResumeAuthorityAfterReconnect", StringComparison.Ordinal) >= 0,
+                "重绑后恢复（只有断线挂起可恢复）");
+            Check(code.IndexOf("ds-reconnect-rebind", StringComparison.Ordinal) >= 0,
+                "重绑后从当前权威边界升流");
+            // T-LOOP 二审：授权窗口必须接**当前墙钟**，不能把 graceSince 当 now 传入。
+            // 错参会令 now-since 恒为0，在到期同帧先处理握手时复活过期玩家。
+            Check(code.IndexOf("_disconnectGrace.TryAuthorizeRebind(uid, nowMs, matchEnded)",
+                StringComparison.Ordinal) >= 0,
+                "★ 重绑授权按本帧真实 nowMs 判30s，不能用断线起点假冒当前时刻");
+
+            int pumpCall = code.IndexOf("_endpoint.Pump(nowMs, nowUnixSeconds)", StringComparison.Ordinal);
+            int flushCall = code.IndexOf("FlushPendingRebindResyncs();", StringComparison.Ordinal);
+            Check(pumpCall >= 0, "找到帧内唯一 UDP 端点 Pump 调用点");
+            Check(pumpCall >= 0 && flushCall > pumpCall,
+                "★ 重绑升流排在 _endpoint.Pump **之后**（Create 先入可靠流，重同步 RPC 后到）");
+
+            int prune = code.IndexOf("private void PruneDisconnectedDrivers(long nowMs)", StringComparison.Ordinal);
+            Check(prune >= 0, "断线收尾入口带墙钟参数（旧的无参签名无法表达 30s）");
+            Check(code.IndexOf("private void PruneDisconnectedDrivers()", StringComparison.Ordinal) < 0,
+                "不存在无墙钟的旧断线收尾签名");
+
+            if (prune >= 0)
+            {
+                const int window = 7000;
+                int end = Math.Min(code.Length, prune + window);
+                string body = code.Substring(prune, end - prune);
+
+                int gate = body.IndexOf("ObserveDisconnected", StringComparison.Ordinal);
+                int suspend = body.IndexOf("AuthoritySuspended", StringComparison.Ordinal);
+                int unbind = body.IndexOf("UnbindPlayer", StringComparison.Ordinal);
+
+                Check(gate >= 0, "断线收尾里有宽限判定（ObserveDisconnected）");
+                Check(gate >= 0 && suspend > gate, "★ 宽限内先挂起权威运动（离线不采纳输入/不推进）");
+                Check(gate >= 0 && unbind > gate,
+                    "★ Unbind/core.Disconnect 排在宽限判定**之后**（宽限内不得立即判负；换位就是旧口径）");
+            }
         }
 
         // =================================================================================

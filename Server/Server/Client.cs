@@ -10,14 +10,22 @@ namespace Server
 {
     /// <summary>
     /// 拥有Send，Receive操作异步接受消息，同步发送消息
+    ///
+    /// 实现 <see cref="IPMActiveClientEntry"/>：活跃索引只需要「这条连接是谁」
+    /// （UID / UserName 两个只读事实），这两个属性本来就已公开，因此登记逻辑可以
+    /// 完全落在零依赖的 <see cref="PMActiveClientIndex{TEntry}"/> 里。
     /// </summary>
-    class Client
+    class Client : IPMActiveClientEntry
     {
         public Socket _socket { get; private set; }
         public long lastPingTime = 0;
         private Message _message;
         private UserData _userdata;
         private Server _server;
+
+        // 每条大厅TCP连接的稳定代次：同一连接Close幂等，新连接再次断线是新的续局episode。
+        private static long _nextConnectionGeneration;
+        public long ConnectionGeneration { get; private set; }
 
         public FriendRoom FriendRoom
         {
@@ -64,6 +72,7 @@ namespace Server
         }
         public Client(Socket socket, Server server)
         {
+            ConnectionGeneration = Interlocked.Increment(ref _nextConnectionGeneration);
             lastPingTime = Tool.PingPongTool.GetTimeStamp();
             _userdata = new UserData();
             _message = new Message();
@@ -231,7 +240,7 @@ namespace Server
                     PMNet.Control.PMDsLobbyHost lobbyHost = PMNet.Control.PMDsLobbyHost.Instance;
                     if (lobbyHost != null)
                     {
-                        lobbyHost.NotifyClientDisconnected(UID);
+                        lobbyHost.NotifyClientDisconnected(UID, ConnectionGeneration);
                     }
                 }
             }
